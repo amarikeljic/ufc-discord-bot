@@ -1,0 +1,20 @@
+.env
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm
+*.lock
+*.db
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.idea/
+.vscode/
+.ruff_cache/
+*.log
+
+# Downloaded dataset and trained model; both are rebuilt by the bot or train.py
+data/
+models/

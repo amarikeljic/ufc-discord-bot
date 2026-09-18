@@ -1,0 +1,14 @@
+# What the bot itself needs.
+discord.py>=2.4,<3.0
+aiohttp>=3.9
+aiosqlite>=0.20
+python-dotenv>=1.0
+pillow>=10.1
+
+# What the refresh job needs, in the separate process it runs in: parsing the
+# ufcstats.com dataset and training the model. The bot never imports these, so a
+# machine that only runs the bot can leave them out, as long as the data and
+# models directories are filled in by `python train.py` somewhere else.
+pandas>=2.2
+numpy>=1.26
+scikit-learn>=1.5
