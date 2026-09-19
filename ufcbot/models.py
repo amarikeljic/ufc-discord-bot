@@ -155,17 +155,6 @@ class Event:
         """Bouts with both fighters named, main event first."""
         return [bout for bout in self.ordered_bouts() if bout.has_opponents]
 
-    @property
-    def odds_provider(self) -> str | None:
-        """The first odds source loaded onto this card, if any."""
-        return next((bout.odds_provider for bout in self.bouts if bout.odds_provider), None)
-
-    @property
-    def odds_sources(self) -> str | None:
-        """Every odds source on this card, for example "DraftKings" or "DraftKings · Polymarket"."""
-        seen = list(dict.fromkeys(bout.odds_provider for bout in self.bouts if bout.odds_provider))
-        return " · ".join(seen) if seen else None
-
     def start_for(self, anchor: str) -> datetime:
         """Resolve the configured start anchor to a concrete UTC timestamp."""
         if anchor == "main_card" and self.main_card_start:

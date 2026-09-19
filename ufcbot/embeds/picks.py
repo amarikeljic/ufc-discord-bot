@@ -30,6 +30,7 @@ from .common import (
     num,
     outcome_label,
     pct,
+    plural,
     stamp,
     streak,
     surname,
@@ -53,18 +54,29 @@ def pick_value(
     odds_b: int | None,
     extra_lines: list[str],
     compact: bool,
+    odds_source: str | None = None,
 ) -> str:
-    """One fight on a picks board, a handful of short lines."""
-    lines = [f"Pick: **{keep(favourite)}** {confidence:.0%}"]
+    """One fight on a picks board, a handful of short lines.
+
+    ``odds_source`` is only passed when a card's lines come from more than one
+    place, so the usual card says where its odds came from once, at the top.
+    """
+    lines = [f"🎯 **{keep(favourite)}** {confidence:.0%}  {bar(confidence, 8)}"]
     if prediction is not None and prediction.has_methods:
         routes = prediction.outcomes(prediction.favourite_side)
         if routes:
             _, method, technique, prob = routes[0]
-            lines.append(f"Likeliest: {keep(outcome_label(method, technique))} {prob:.0%}")
+            likeliest = f"{keep(outcome_label(method, technique))} {prob:.0%}"
             if not compact and len(routes) > 1:
-                lines.append("Also: " + join(f"{METHOD_SHORT[m]} {p:.0%}" for _, m, _t, p in routes[1:]))
+                # The runners-up ride along on the same line rather than taking
+                # a line of their own; on a phone every line costs two.
+                likeliest += " · also " + join(f"{METHOD_SHORT[m]} {p:.0%}" for _, m, _t, p in routes[1:])
+            lines.append(likeliest)
     if odds_a is not None and odds_b is not None:
-        lines.append("Odds: " + join([f"{surname(name_a)} {fmt_odds(odds_a)}", f"{surname(name_b)} {fmt_odds(odds_b)}"]))
+        odds = [f"{surname(name_a)} {fmt_odds(odds_a)}", f"{surname(name_b)} {fmt_odds(odds_b)}"]
+        if odds_source:
+            odds.append(odds_source)
+        lines.append("💰 " + join(odds))
     lines.extend(extra_lines)
     return truncate("\n".join(lines), FIELD_LIMIT)
 
@@ -94,9 +106,15 @@ def picks_board_embed(
     *,
     locked: bool,
     espn_url: str | None = None,
-    odds_source: str | None = None,
 ) -> discord.Embed:
     """The on-record picks for one card, as posted in the picks channel."""
+
+    # Cards usually take every line from one book, and say so once at the top.
+    # A card drawing on more than one says so fight by fight instead, because
+    # one line naming both leaves you unable to tell which fight is which.
+    sources = {r.odds_source for r in records if r.odds_source}
+    mixed = len(sources) > 1
+    shared = next(iter(sources)) if len(sources) == 1 else None
 
     def build(compact: bool) -> discord.Embed:
         embed = discord.Embed(title=truncate(event_name, 256), url=espn_url, colour=PICKS_PURPLE)
@@ -112,9 +130,11 @@ def picks_board_embed(
         elif locked:
             header.append("🔒 Picks locked at first bell")
         else:
-            header.append(f"⏱️ {discord.utils.format_dt(start, 'R')} · {len(records)} picks")
-        if odds_source:
-            header.append(f"Odds from {keep(odds_source)}")
+            header.append(f"⏱️ {discord.utils.format_dt(start, 'R')} · {plural(len(records), 'pick')}")
+        if mixed:
+            header.append(f"Odds from {keep(' · '.join(sorted(sources)))}, marked per fight")
+        elif shared:
+            header.append(f"Odds from {keep(shared)}")
         embed.description = "\n".join(header)
 
         for record in records[:25]:
@@ -131,6 +151,7 @@ def picks_board_embed(
                     odds_b=record.odds_b,
                     extra_lines=result_lines(record),
                     compact=compact,
+                    odds_source=record.odds_source if mixed else None,
                 ),
                 inline=False,
             )
@@ -145,10 +166,20 @@ def picks_board_embed(
 
 def predictions_embed(event: Event, picks: dict[str, Prediction]) -> discord.Embed:
     """Every pick for a card, with how each fight is likely to end and the current odds."""
+    sources = {bout.odds_provider for bout in event.bouts if bout.odds_provider}
+    mixed = len(sources) > 1
 
     def build(compact: bool) -> discord.Embed:
         embed = discord.Embed(title=truncate(f"Picks: {event.name}", 256), url=event.espn_url, colour=PICKS_PURPLE)
-        embed.description = f"🗓️ {discord.utils.format_dt(event.start, 'D')}\n{len(picks)} of {len(event.bouts)} bouts predicted"
+        header = [
+            f"🗓️ {discord.utils.format_dt(event.start, 'D')}",
+            f"{len(picks)} of {len(event.bouts)} bouts predicted",
+        ]
+        if mixed:
+            header.append(f"Odds from {keep(' · '.join(sorted(sources)))}, marked per fight")
+        elif sources:
+            header.append(f"Odds from {keep(next(iter(sources)))}")
+        embed.description = "\n".join(header)
         for bout in event.ordered_bouts()[:25]:
             if not bout.has_opponents:
                 continue
@@ -167,6 +198,7 @@ def predictions_embed(event: Event, picks: dict[str, Prediction]) -> discord.Emb
                     odds_b=bout.odds.get(b.id),
                     extra_lines=[],
                     compact=compact,
+                    odds_source=bout.odds_provider if mixed else None,
                 )
             embed.add_field(name=truncate(f"{a.display_name} vs. {b.display_name}", 256), value=value, inline=False)
         return stamp(embed)
@@ -285,8 +317,6 @@ def _scorecard_summary(card: Scorecard) -> str:
     lines.append(f"Avg confidence: {card.avg_confidence:.0%}")
     if card.method_total:
         lines.append(f"Winner + method: **{card.method_hits}/{card.method_total}** ({card.method_hits / card.method_total:.0%})")
-    if card.technique_total:
-        lines.append(f"Exact technique: **{card.technique_hits}/{card.technique_total}**")
     if card.market_total:
         lines.append(f"Betting favourites: **{card.market_hits}/{card.market_total}** ({card.market_hits / card.market_total:.0%})")
     if card.disagree_total:
@@ -317,6 +347,18 @@ def scorecard_embed(card: Scorecard, *, evaluation: Evaluation | None) -> discor
             value="\n".join(f"{e.start:%b %d} · **{e.correct}/{e.total}** · {truncate(e.name, 30)}" for e in card.events[:10]),
             inline=False,
         )
+
+    # Kept well away from the record above. Naming the technique is a flourish on
+    # a call that was already right, and it barely beats guessing the commonest
+    # one, so it is never counted towards how the model is doing.
+    if card.technique_total:
+        note = f"**{card.technique_hits}/{card.technique_total}** named exactly, out of the finishes it called correctly"
+        if evaluation and evaluation.technique_accuracy is not None and evaluation.technique_baseline is not None:
+            note += (
+                f"\nBacktest {evaluation.technique_accuracy:.0%} against {evaluation.technique_baseline:.0%} "
+                "for always guessing the commonest one. Not counted towards the record above."
+            )
+        embed.add_field(name="Finishing technique", value=note, inline=False)
 
     if evaluation:
         text = f"Winner {evaluation.accuracy:.0%} on {evaluation.fights} past fights"

@@ -74,6 +74,7 @@ class UFCBot(commands.Bot):
             self.pickem,
             pick_provider=self.picks_for,
             evaluation_provider=lambda: self.evaluation,
+            ledger_provider=self.ledgers,
         )
         self.images = MatchupImages(self.http_client)
         self.live = LiveCoverage(
@@ -88,6 +89,10 @@ class UFCBot(commands.Bot):
     def evaluation(self) -> Evaluation | None:
         """The model's held-out accuracy, when a model is loaded."""
         return self.stats.model.evaluation if self.stats.model else None
+
+    def ledgers(self) -> dict:
+        """Career totals for the ratings boards, empty until the stats are loaded."""
+        return self.stats.careers.ledgers if self.stats.careers else {}
 
     def picks_for(self, event: Event) -> dict[str, Prediction]:
         """Model picks for a card, or nothing when predictions are off or not ready."""

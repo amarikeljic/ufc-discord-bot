@@ -262,6 +262,7 @@ class StatsService:
         title_fight: bool = False,
         scheduled_rounds: int = 3,
         on: date | None = None,
+        weight_class: str | None = None,
     ) -> Prediction | None:
         """Win probability for A over B, or None if either fighter is unknown."""
         if not self.can_predict:
@@ -280,6 +281,7 @@ class StatsService:
             name_b=b.name,
             ledger_a=a.ledger,
             ledger_b=b.ledger,
+            weight_class=weight_class,
         )
 
     def predict_event(self, event: Event) -> dict[str, Prediction]:
@@ -327,6 +329,7 @@ class StatsService:
                 title_fight=title or bout.rounds == 5,
                 scheduled_rounds=bout.rounds or 3,
                 on=on,
+                weight_class=bout.weight_class,
             )
             if prediction is not None:
                 picks[bout.id] = prediction

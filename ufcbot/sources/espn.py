@@ -426,19 +426,18 @@ class UFCData:
             payload = await self.http.get_json(f"{bout.plays_ref}{separator}limit=300", ttl=ttl)
         except HttpError:
             return []
-        plays = []
-        for item in payload.get("items") or []:
-            plays.append(
-                {
-                    "id": str(item.get("id")),
-                    "sequence": int(item.get("sequenceNumber") or 0),
-                    "type": (item.get("type") or {}).get("text") or "",
-                    "period": (item.get("period") or {}).get("number") or 0,
-                    "clock": (item.get("clock") or {}).get("displayValue"),
-                    "wallclock": parse_api_datetime(item.get("wallclock")),
-                }
-            )
-        plays.sort(key=lambda p: p["sequence"])
+        plays = [
+            {
+                "id": str(item.get("id")),
+                "sequence": int(item.get("sequenceNumber") or 0),
+                "type": (item.get("type") or {}).get("text") or "",
+                "period": (item.get("period") or {}).get("number") or 0,
+                "clock": (item.get("clock") or {}).get("displayValue"),
+                "wallclock": parse_api_datetime(item.get("wallclock")),
+            }
+            for item in payload.get("items") or []
+        ]
+        plays.sort(key=lambda play: play["sequence"])
         return plays
 
     async def load_fight_stats(self, bout: Bout, *, ttl: int = 20) -> dict[str, dict[str, float]]:

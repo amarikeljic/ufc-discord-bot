@@ -18,3 +18,6 @@ env/
 # Downloaded dataset and trained model; both are rebuilt by the bot or train.py
 data/
 models/
+
+# pytest
+.pytest_cache/

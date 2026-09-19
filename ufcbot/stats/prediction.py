@@ -29,11 +29,9 @@ class Evaluation:
     fights: int
     accuracy: float
     log_loss: float
-    brier: float
     baseline_accuracy: float
     """Always picking the fighter with the better win rate going in."""
 
-    method_fights: int = 0
     method_accuracy: float | None = None
     """Right method, when told who won."""
     method_baseline: float | None = None

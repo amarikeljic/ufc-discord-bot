@@ -26,7 +26,7 @@ from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, brier_score_loss, log_loss
+from sklearn.metrics import accuracy_score, log_loss
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
@@ -52,6 +52,10 @@ PRIOR_START = date(2015, 1, 1)
 PARITY_TOLERANCE = 1e-9
 # How many held-out rows the parity check scores through both paths.
 PARITY_ROWS = 400
+# Isotonic and Platt calibration were both tried against the blend and both made
+# log loss worse on cross-validation. The blend is already close, and the gap
+# between what it says and what happens moves from period to period by more than
+# the bias itself, so a map fitted on past fights misleads on future ones.
 
 
 def _boost(seed: int, *, iterations: int = 500, min_leaf: int = 100) -> HistGradientBoostingClassifier:
@@ -227,7 +231,11 @@ def _design_matrix(
         fa = fighter_features(snap.before_a, info_a, snap.on)
         fb = fighter_features(snap.before_b, info_b, snap.on)
         y = 1 if snap.winner == "a" else 0
-        ctx = {"title_fight": snap.title_fight, "scheduled_rounds": snap.scheduled_rounds}
+        ctx = {
+            "title_fight": snap.title_fight,
+            "scheduled_rounds": snap.scheduled_rounds,
+            "weight_class": snap.weight_class,
+        }
 
         rows.append(matchup_row(fa, fb, **ctx))
         labels.append(y)
@@ -271,7 +279,11 @@ def _method_rows(history: History, fighters: dict[str, FighterInfo]) -> _MethodR
             continue
         fa = fighter_features(snap.before_a, fighters.get(normalise(snap.fighter_a)), snap.on)
         fb = fighter_features(snap.before_b, fighters.get(normalise(snap.fighter_b)), snap.on)
-        ctx = {"title_fight": snap.title_fight, "scheduled_rounds": snap.scheduled_rounds}
+        ctx = {
+            "title_fight": snap.title_fight,
+            "scheduled_rounds": snap.scheduled_rounds,
+            "weight_class": snap.weight_class,
+        }
         row_ab = matchup_row(fa, fb, **ctx)
         row_ba = matchup_row(fb, fa, **ctx)
         winner_first.append(row_ab if snap.winner == "a" else row_ba)
@@ -353,7 +365,6 @@ def train(
                 fights=int(test.sum() // 2),
                 accuracy=float(accuracy_score(y[test], probs >= 0.5)),
                 log_loss=float(log_loss(y[test], probs)),
-                brier=float(brier_score_loss(y[test], probs)),
                 baseline_accuracy=float(np.mean((baseline[test] >= 0.5) == (y[test] == 1))),
             )
             log.info("Holdout: %s", evaluation.summary())
@@ -402,7 +413,6 @@ def _evaluate_methods(
 
     # Method, told who won.
     given_winner = method_model.predict_proba(rows.winner_first[test_mask])
-    evaluation.method_fights = int(test_mask.sum())
     evaluation.method_accuracy = float(np.mean(given_winner.argmax(axis=1) == labels))
     most_common = Counter(rows.labels[train_mask]).most_common(1)[0][0]
     evaluation.method_baseline = float(np.mean(labels == most_common))

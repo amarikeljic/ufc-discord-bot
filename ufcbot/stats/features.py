@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 from datetime import date
 
-from .career import FighterInfo, Ledger
+from .career import FighterInfo, Ledger, division_weight
 
 NAN = float("nan")
 
@@ -83,6 +83,16 @@ def fighter_features(ledger: Ledger, info: FighterInfo | None, on: date) -> dict
         "distance_share": _share(ledger.distance_landed, sig),
         "sig_per_total": _share(ledger.sig_landed, ledger.total_landed),
         "striking_differential": _diff_or_nan(ledger.slpm, ledger.sapm),
+        # Who they have been in there with. A 10-0 record against nobody and a
+        # 10-0 record through contenders read the same in every feature above.
+        "elo": ledger.elo,
+        "opponent_elo": ledger.avg_opponent_elo,
+        "beaten_elo": ledger.avg_beaten_elo,
+        "lost_to_elo": ledger.avg_lost_to_elo,
+        "best_win_elo": ledger.best_win,
+        "elo_over_opponents": _diff_or_nan(ledger.elo, ledger.avg_opponent_elo),
+        # Finishing power against the durability it has met, rated the same way.
+        "finish_elo": ledger.finish_elo,
     }
 
 
@@ -94,12 +104,45 @@ def _diff_or_nan(a: float, b: float) -> float:
 
 PER_FIGHTER = list(fighter_features(Ledger(name="_"), None, date(2000, 1, 1)).keys())
 
-CONTEXT = ["title_fight", "scheduled_rounds"]
+# How one fighter's offence meets the other's defence. Everything above is each
+# fighter measured on their own, and the differences between them, which says
+# who is the better wrestler but never whether this wrestler can take this
+# opponent down. A rate against the rate that opposes it is the quantity a
+# matchup actually turns on, and neither model can build it from a difference.
+MATCHUPS = (
+    # Strikes a minute, against how many the opponent usually avoids.
+    ("strikes_expected", "slpm", "str_def", "scaled"),
+    # Takedowns per 15, against takedown defence.
+    ("takedowns_expected", "td_avg", "td_def", "scaled"),
+    # Control time, against how much the opponent usually spends underneath.
+    ("control_expected", "control_share", "controlled_share", "product"),
+    # Power against chin, and submission threat against a suspect neck.
+    ("ko_threat", "kd_avg", "ko_loss_rate", "product"),
+    ("sub_threat", "sub_avg", "sub_loss_rate", "product"),
+    # Accuracy and defence are both plain rates, so their difference means something.
+    ("striking_edge", "str_acc", "str_def", "difference"),
+    ("wrestling_edge", "td_acc", "td_def", "difference"),
+)
+
+
+def _matchup_value(kind: str, attack: float, defence: float) -> float:
+    if attack != attack or defence != defence:  # NaN either side
+        return NAN
+    if kind == "scaled":
+        return attack * (1.0 - defence)
+    if kind == "product":
+        return attack * defence
+    return attack - defence
+
+
+CONTEXT = ["title_fight", "scheduled_rounds", "division"]
 
 FEATURE_NAMES = (
     [f"a_{name}" for name in PER_FIGHTER]
     + [f"b_{name}" for name in PER_FIGHTER]
     + [f"d_{name}" for name in PER_FIGHTER]
+    + [f"m_a_{name}" for name, _a, _d, _k in MATCHUPS]
+    + [f"m_b_{name}" for name, _a, _d, _k in MATCHUPS]
     + CONTEXT
 )
 
@@ -110,12 +153,16 @@ def matchup_row(
     *,
     title_fight: bool,
     scheduled_rounds: int,
+    weight_class: str | None = None,
 ) -> list[float]:
     """Both sides plus their differences, in FEATURE_NAMES order."""
     row: list[float] = []
     row.extend(a[name] for name in PER_FIGHTER)
     row.extend(b[name] for name in PER_FIGHTER)
     row.extend(_diff_or_nan(a[name], b[name]) for name in PER_FIGHTER)
+    row.extend(_matchup_value(kind, a[attack], b[defence]) for _n, attack, defence, kind in MATCHUPS)
+    row.extend(_matchup_value(kind, b[attack], a[defence]) for _n, attack, defence, kind in MATCHUPS)
     row.append(1.0 if title_fight else 0.0)
     row.append(float(scheduled_rounds))
+    row.append(division_weight(weight_class))
     return row

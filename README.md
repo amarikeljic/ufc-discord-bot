@@ -29,6 +29,9 @@ have done.
   underdogs pay more; a wrong pick costs 100 points. The channel holds just the current
   card and a server leaderboard, and members can check their win rate and card-by-card
   history.
+- **Ratings.** A board per division and a pound-for-pound board, ranked by the rating the
+  model itself trains on: everyone starts level and a win moves it by how good the fighter
+  beaten was.
 - **Discord scheduled events.** Every upcoming card mirrored into your server's events.
 
 ## Commands
@@ -42,7 +45,7 @@ have done.
 | `/ufc scorecard` | The model's record since tracking began |
 | `/ufc pickem stats [member]` | Points, rank, win rate and card history |
 | `/ufc pickem card <event> [member]` | Pick-by-pick results for one card |
-| `/ufc channels set` | Choose channels for picks, accuracy, schedule and live coverage |
+| `/ufc channels set` | Choose channels for picks, accuracy, schedule, live coverage, pick'em and ratings |
 | `/ufc channels status` / `refresh` / `clear` | Manage those channels |
 | `/ufc sync enable` / `disable` / `now` / `status` / `settings` | Discord scheduled events |
 | `/ufc model status` | Dataset freshness and model accuracy |
@@ -193,18 +196,65 @@ KO/TKO, submission, unanimous decision and split decision. The likeliest finishi
 technique comes from the winner's finishing history, how the opponent has been finished
 before, and the league-wide rate.
 
+Ratings carry strength of schedule. Every fighter starts at 1500 and each result moves
+both fighters by how surprising it was, so beating a contender is worth more than beating
+a debutant, and a record built against nobody reads differently from the same record built
+against contenders. The model sees each fighter's rating, the average rating of everyone
+they have faced, the average of those they beat and those they lost to, and their best
+win. It also sees which division the fight is at: heavyweights finish each other far more
+often than flyweights and their fights turn on one punch.
+
+A second rating is fitted only on how fights ended, scoring a stoppage as a win, being
+stopped as a loss and a decision as half each, so the method model can see finishing power
+against the durability it met.
+
+It is given the matchup as well as the two fighters. Every other input measures a fighter
+alone, or the gap between them, which says who is the better wrestler but never whether
+this wrestler can take this opponent down. So striking volume is set against the
+opponent's striking defence, takedowns against takedown defence, knockdown rate against
+how often the opponent has been stopped, and so on, in both directions.
+
+The boosting and regularisation settings were searched over 108 combinations by
+time-series cross-validation inside the training period, never touching the holdout.
+Nothing beat what is here by more than rounding, so nothing was changed.
+
 Accuracy on the most recent 18 months of fights, held out from training:
 
 | Prediction | Model | Simple baseline |
 | --- | --- | --- |
-| Winner | 64.7% | 59.2% (better record wins) |
-| Method, when the winner is known | 50.8% | 39.8% (always unanimous decision) |
-| Winner and method together | 34.5% | |
-| Technique, when the finish type is known | 73.9% | 73.4% (most common technique) |
+| Winner | 66.0% | 59.0% (better record wins) |
+| Method, when the winner is known | 51.9% | 39.9% (always unanimous decision) |
+| Winner and method together | 34.8% | |
+| Technique, when the finish type is known | 74.1% | 73.6% (most common technique) |
 
-Win probabilities are calibrated: fights scored at 65% are won about 65% of the time.
-Technique predictions barely beat the base rate, because most knockouts are punches and
-most submissions are rear-naked chokes. Neither data source separates KO from TKO.
+Every fight is trained on twice, once from each corner, so which corner a fighter is in
+carries no information. This matters when comparing with other UFC models: ufcstats lists
+the winner's corner first and the UFC books favourites in red, so **64% of fights in the
+raw data are won by the first-listed corner**. A model trained on those rows as they come
+scores in the high sixties before it has looked at a single statistic, and cannot be used
+to predict a fight, because you would have to know which fighter to call red.
+
+Win probabilities are close to calibrated as they come out of the blend, and are used as
+they come. Isotonic and Platt calibration were both tried and both made log loss worse on
+cross-validation: the model is mildly under-confident, but by an amount that moves from
+one period to the next, so a correction fitted on past fights misleads on future ones.
+
+The finishing technique barely beats the base rate, because most knockouts are punches and
+most submissions are rear-naked chokes. It is never counted towards the model's record: the
+scorecard keeps it in its own block, marked as decoration. Neither data source separates KO
+from TKO.
+
+### Ratings boards
+
+The ratings board ranks whoever has fought in the last two years and has at least three UFC
+fights, by the same rating. `/ufc channels set womens_divisions:False` leaves the women's
+divisions out entirely, boards and pound-for-pound alike. A fighter's division is the one their most recent fight was made
+at, so a move up shows the week it happens, and a catchweight leaves it alone. The women's
+divisions are kept separate from the men's.
+
+It is not the UFC's ranking and will not agree with it. Nobody votes, holding a belt counts
+for nothing by itself, and a fighter arriving from another promotion starts level with
+everyone else however good they already are.
 
 ### Keeping data current
 
@@ -332,12 +382,40 @@ ufcbot/
     features.py         Model inputs
     model.py            Training the winner and method models
     scorer.py           The trained model, compiled to run without scikit-learn
+    rankings.py         Division and pound-for-pound ratings boards
     prediction.py       A prediction and how it is put together
 ```
 
 `dataset.py` and `model.py` are the only modules that use pandas and
 scikit-learn, and only `worker.py` imports them. See
 [Memory](#memory) for why that matters.
+
+## Tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+78 tests, a few seconds, no network and no Discord: they run against a real SQLite
+database in a temporary directory and fight cards built by hand. Most of them are about
+what happens when a card changes underneath the bot, because that is where the awkward
+cases live -- a fighter replaced, a fight cancelled, a card that only half-loaded -- and
+where a mistake either shows a pick for a fight nobody is having or throws away a card's
+picks over one bad response.
+
+| File | What it covers |
+| --- | --- |
+| `test_tracking.py` | When a stored pick still describes a real fight, and when it does not |
+| `test_pickem.py` | Scoring, and voiding picks on fights that come off the card |
+| `test_cardwatch.py` | Telling a real card change from a card that did not load |
+| `test_stats.py` | Divisions, ratings, rankings, the compiled scorer's arithmetic, name matching |
+| `test_live_and_storage.py` | Which fights live coverage polls; database upgrades and pruning |
+| `test_embeds.py` | Every board builds, stays inside Discord's limits and says the right thing |
+
+The model is not retrained here -- that takes a minute and needs the dataset. Training
+checks itself instead: it scores real fights through both the fitted model and the
+compiled one and refuses to save a model whose compiled form disagrees.
 
 ## Troubleshooting
 

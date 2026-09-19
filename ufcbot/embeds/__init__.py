@@ -16,6 +16,7 @@ from .cards import (
     card_changes_embed,
     event_embed,
     fighter_embed,
+    rankings_embed,
     schedule_embed,
     scheduled_event_description,
     scheduled_event_location,
@@ -24,8 +25,8 @@ from .cards import (
 from .common import UFC_RED, stamp
 from .live import (
     live_knockdown_text,
-    live_pause_text,
     live_open_embed,
+    live_pause_text,
     live_result_embed,
     live_round_embed,
 )
@@ -50,8 +51,8 @@ __all__ = [
     "event_embed",
     "fighter_embed",
     "live_knockdown_text",
-    "live_pause_text",
     "live_open_embed",
+    "live_pause_text",
     "live_result_embed",
     "live_round_embed",
     "pickem_board_embed",
@@ -62,6 +63,7 @@ __all__ = [
     "picks_board_embed",
     "prediction_embed",
     "predictions_embed",
+    "rankings_embed",
     "recap_embed",
     "schedule_embed",
     "scheduled_event_description",

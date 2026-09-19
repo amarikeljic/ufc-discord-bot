@@ -22,7 +22,12 @@ from pathlib import Path
 
 from .career import Ledger
 from .features import FEATURE_NAMES, matchup_row
-from .prediction import DEFAULT_DRAW_RATES, Evaluation, Prediction, technique_distribution
+from .prediction import (
+    DEFAULT_DRAW_RATES,
+    Evaluation,
+    Prediction,
+    technique_distribution,
+)
 from .techniques import FINISHES, METHODS
 
 MODEL_VERSION = 4
@@ -202,13 +207,18 @@ class CompiledModel:
         name_b: str = "B",
         ledger_a: Ledger | None = None,
         ledger_b: Ledger | None = None,
+        weight_class: str | None = None,
     ) -> Prediction:
         """Probability that A beats B, and how.
 
         The winner model is scored from both corners and averaged, so swapping
         the fighters always gives exactly complementary probabilities.
         """
-        context = {"title_fight": title_fight, "scheduled_rounds": scheduled_rounds}
+        context = {
+            "title_fight": title_fight,
+            "scheduled_rounds": scheduled_rounds,
+            "weight_class": weight_class,
+        }
         row_ab = matchup_row(a, b, **context)
         row_ba = matchup_row(b, a, **context)
         forward = self.winner.probabilities(row_ab)[1]

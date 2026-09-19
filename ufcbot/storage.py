@@ -152,6 +152,8 @@ MIGRATIONS = {
         ("tracking_since", "TEXT"),
         ("live_channel_id", "INTEGER"),
         ("pickem_channel_id", "INTEGER"),
+        ("rankings_channel_id", "INTEGER"),
+        ("rankings_include_women", "INTEGER NOT NULL DEFAULT 1"),
     ),
     "predictions": (
         ("odds_a", "INTEGER"),
@@ -166,6 +168,7 @@ MIGRATIONS = {
         ("result_time", "TEXT"),
         ("method_correct", "INTEGER"),
         ("technique_correct", "INTEGER"),
+        ("odds_source", "TEXT"),
     ),
 }
 
@@ -185,6 +188,8 @@ class GuildSettings:
     tracking_since: date | None = None
     live_channel_id: int | None = None
     pickem_channel_id: int | None = None
+    rankings_channel_id: int | None = None
+    rankings_include_women: bool = True
 
     @property
     def has_channels(self) -> bool:
@@ -195,6 +200,7 @@ class GuildSettings:
                 self.schedule_channel_id,
                 self.live_channel_id,
                 self.pickem_channel_id,
+                self.rankings_channel_id,
             )
         )
 
@@ -312,6 +318,8 @@ class PredictionRecord:
     position: int = 0
     odds_a: int | None = None
     odds_b: int | None = None
+    odds_source: str | None = None
+    """The book or market these lines came from; cards can draw on more than one."""
     method: str | None = None
     """The favourite's likeliest winning method at lock."""
     technique: str | None = None
@@ -439,8 +447,9 @@ class Storage:
                 guild_id, sync_enabled, days_ahead, duration_minutes,
                 start_anchor, include_contender_series, announce_channel_id,
                 predictions_channel_id, accuracy_channel_id, schedule_channel_id,
-                tracking_since, live_channel_id, pickem_channel_id, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                tracking_since, live_channel_id, pickem_channel_id, rankings_channel_id,
+                rankings_include_women, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(guild_id) DO UPDATE SET
                 sync_enabled             = excluded.sync_enabled,
                 days_ahead               = excluded.days_ahead,
@@ -454,6 +463,8 @@ class Storage:
                 tracking_since           = excluded.tracking_since,
                 live_channel_id          = excluded.live_channel_id,
                 pickem_channel_id        = excluded.pickem_channel_id,
+                rankings_channel_id      = excluded.rankings_channel_id,
+                rankings_include_women   = excluded.rankings_include_women,
                 updated_at               = excluded.updated_at
             """,
             (
@@ -470,6 +481,8 @@ class Storage:
                 settings.tracking_since.isoformat() if settings.tracking_since else None,
                 settings.live_channel_id,
                 settings.pickem_channel_id,
+                settings.rankings_channel_id,
+                int(settings.rankings_include_women),
                 datetime.now(UTC).isoformat(),
             ),
         )
@@ -486,7 +499,8 @@ class Storage:
     async def guilds_with_channels(self) -> list[GuildSettings]:
         return await self._guilds_where(
             "predictions_channel_id IS NOT NULL OR accuracy_channel_id IS NOT NULL "
-            "OR schedule_channel_id IS NOT NULL OR pickem_channel_id IS NOT NULL"
+            "OR schedule_channel_id IS NOT NULL OR pickem_channel_id IS NOT NULL "
+            "OR rankings_channel_id IS NOT NULL"
         )
 
     async def guilds_with_live(self) -> list[GuildSettings]:
@@ -535,15 +549,23 @@ class Storage:
 
     # -- prediction ledger ----------------------------------------------------
 
-    async def upsert_prediction(self, record: PredictionRecord) -> None:
-        """Write a pick. Never touches a row that has already been graded."""
-        await self.db.execute(
+    async def upsert_predictions(self, records: list[PredictionRecord]) -> None:
+        """Write a card's picks in one go. Never touches a row already graded.
+
+        A card is a dozen fights and this runs for every upcoming card on every
+        pass, so they go in one transaction rather than a dozen: committing each
+        row separately means a dozen flushes to disk for one board refresh.
+        """
+        if not records:
+            return
+        now = datetime.now(UTC).isoformat()
+        await self.db.executemany(
             """
             INSERT INTO predictions (
                 espn_event_id, bout_id, event_name, event_start,
                 athlete_a, name_a, athlete_b, name_b, prob_a, weight_class, position,
-                odds_a, odds_b, method, technique, method_prob, detail_json, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                odds_a, odds_b, odds_source, method, technique, method_prob, detail_json, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(espn_event_id, bout_id) DO UPDATE SET
                 event_name   = excluded.event_name,
                 event_start  = excluded.event_start,
@@ -557,6 +579,7 @@ class Storage:
                 -- A line that disappears for a moment keeps its last known value.
                 odds_a       = COALESCE(excluded.odds_a, predictions.odds_a),
                 odds_b       = COALESCE(excluded.odds_b, predictions.odds_b),
+                odds_source  = COALESCE(excluded.odds_source, predictions.odds_source),
                 method       = excluded.method,
                 technique    = excluded.technique,
                 method_prob  = excluded.method_prob,
@@ -564,33 +587,40 @@ class Storage:
                 updated_at   = excluded.updated_at
             WHERE predictions.graded_at IS NULL
             """,
-            (
-                record.espn_event_id,
-                record.bout_id,
-                record.event_name,
-                record.event_start.isoformat(),
-                record.athlete_a,
-                record.name_a,
-                record.athlete_b,
-                record.name_b,
-                record.prob_a,
-                record.weight_class,
-                record.position,
-                record.odds_a,
-                record.odds_b,
-                record.method,
-                record.technique,
-                record.method_prob,
-                record.detail_json,
-                datetime.now(UTC).isoformat(),
-            ),
+            [
+                (
+                    record.espn_event_id,
+                    record.bout_id,
+                    record.event_name,
+                    record.event_start.isoformat(),
+                    record.athlete_a,
+                    record.name_a,
+                    record.athlete_b,
+                    record.name_b,
+                    record.prob_a,
+                    record.weight_class,
+                    record.position,
+                    record.odds_a,
+                    record.odds_b,
+                    record.odds_source,
+                    record.method,
+                    record.technique,
+                    record.method_prob,
+                    record.detail_json,
+                    now,
+                )
+                for record in records
+            ],
         )
         await self.db.commit()
 
-    async def delete_prediction(self, espn_event_id: str, bout_id: str) -> None:
-        await self.db.execute(
+    async def delete_predictions(self, espn_event_id: str, bout_ids: list[str]) -> None:
+        """Drop picks for bouts that are no longer the fight they described."""
+        if not bout_ids:
+            return
+        await self.db.executemany(
             "DELETE FROM predictions WHERE espn_event_id = ? AND bout_id = ? AND graded_at IS NULL",
-            (espn_event_id, bout_id),
+            [(espn_event_id, bout_id) for bout_id in bout_ids],
         )
         await self.db.commit()
 
@@ -1183,6 +1213,8 @@ def _settings_from_row(row: aiosqlite.Row) -> GuildSettings:
         tracking_since=_parse_date(row["tracking_since"]),
         live_channel_id=row["live_channel_id"],
         pickem_channel_id=row["pickem_channel_id"],
+        rankings_channel_id=row["rankings_channel_id"],
+        rankings_include_women=bool(row["rankings_include_women"]),
     )
 
 
@@ -1223,6 +1255,7 @@ def _prediction_from_row(row: aiosqlite.Row) -> PredictionRecord:
         position=row["position"],
         odds_a=row["odds_a"],
         odds_b=row["odds_b"],
+        odds_source=row["odds_source"],
         method=row["method"],
         technique=row["technique"],
         method_prob=row["method_prob"],

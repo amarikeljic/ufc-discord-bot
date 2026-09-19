@@ -37,6 +37,7 @@ SCHEDULED_EVENT_NAME_LIMIT = 100
 SCHEDULED_EVENT_DESCRIPTION_LIMIT = 1000
 SCHEDULED_EVENT_LOCATION_LIMIT = 100
 MAX_FIELDS = 25
+MEDALS = {1: "🥇", 2: "🥈", 3: "🥉"}
 
 
 def bout_line(bout: Bout, *, show_records: bool = True, pick: Prediction | None = None) -> str:
@@ -268,6 +269,35 @@ def card_changes_embed(event: Event, changes: list) -> discord.Embed:
     return stamp(embed)
 
 
+def rankings_embed(division: str, entries: list, *, pound_for_pound: bool = False) -> discord.Embed:
+    """One division's ratings board. ``entries`` are ``Ranked`` records."""
+    embed = discord.Embed(
+        title=truncate(f"📈 {division}" if not pound_for_pound else "👑 Pound for pound", 256),
+        colour=UFC_RED,
+    )
+    if not entries:
+        embed.description = "Nobody ranked here yet."
+        return stamp(embed)
+
+    lines = []
+    for entry in entries:
+        badge = MEDALS.get(entry.rank, f"`{entry.rank:>2}`")
+        facts = [f"**{entry.rating}**", entry.record]
+        if pound_for_pound and entry.division:
+            facts.append(entry.division)
+        lines.append(f"{badge} {keep(entry.name)} · {join(facts)}")
+
+    embed.description = "\n".join(
+        [
+            "The bot's own rating, not the UFC's ranking: every fighter starts",
+            "level and a win moves it by how good the fighter beaten was.",
+            "",
+        ]
+    )
+    add_chunked_fields(embed, "Ratings", lines)
+    return stamp(embed)
+
+
 def schedule_embed(events: list[Event], *, title: str = "Upcoming UFC events") -> discord.Embed:
     embed = discord.Embed(title=title, colour=UFC_RED)
 
@@ -391,13 +421,6 @@ def scheduled_event_location(event: Event) -> str:
 def scheduled_event_description(event: Event, picks: dict[str, Prediction] | None = None) -> str:
     """Main card summary, trimmed to Discord's 1000 character limit."""
     lines: list[str] = []
-
-    if event.broadcast:
-        lines.append(f"Live on {event.broadcast}")
-    if event.main_card_start and event.main_card_start != event.start:
-        lines.append("Prelims first, main card later in the night.")
-    if lines:
-        lines.append("")
 
     main_card = next((bouts for _segment, bouts in event.bouts_by_segment() if bouts), [])
     if main_card:

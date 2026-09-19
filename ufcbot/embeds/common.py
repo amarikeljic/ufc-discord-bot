@@ -108,6 +108,11 @@ def surname(name: str) -> str:
     return parts[-1] if parts else name
 
 
+def plural(count: int, singular: str, many: str | None = None) -> str:
+    """``3, "pick"`` -> "3 picks"; ``1, "pick"`` -> "1 pick"."""
+    return f"{count} {singular if count == 1 else (many or singular + 's')}"
+
+
 def keep(text: str) -> str:
     """Stop a narrow screen from breaking this phrase across lines."""
     return text.replace(" ", NBSP)

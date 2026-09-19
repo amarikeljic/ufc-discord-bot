@@ -119,14 +119,14 @@ class PredictionTracker:
             # reading an empty card as every fight on it having been cancelled.
             return 0
 
-        written = 0
+        writing: list[PredictionRecord] = []
         for position, bout in enumerate(event.ordered_bouts()):
             pick = picks.get(bout.id)
             if pick is None or not bout.has_opponents:
                 continue
             a, b = bout.fighters[0], bout.fighters[1]
             outcome = pick.pick_outcome
-            await self.storage.upsert_prediction(
+            writing.append(
                 PredictionRecord(
                     espn_event_id=event.id,
                     bout_id=bout.id,
@@ -141,13 +141,15 @@ class PredictionTracker:
                     position=position,
                     odds_a=bout.odds.get(a.id),
                     odds_b=bout.odds.get(b.id),
+                    odds_source=bout.odds_provider,
                     method=outcome[0] if outcome else None,
                     technique=outcome[1] if outcome else None,
                     method_prob=outcome[2] if outcome else None,
                     detail_json=json.dumps(pick.to_dict()) if pick.has_methods else None,
                 )
             )
-            written += 1
+
+        await self.storage.upsert_predictions(writing)
 
         # Drop a pick that no longer describes a fight on the card: the bout is
         # gone, or one of the two fighters has been replaced. A pick kept in
@@ -155,13 +157,15 @@ class PredictionTracker:
         # Note that a bout whose fighters are unchanged keeps its pick even when
         # the model has nothing to say about it this time round, so a card does
         # not empty out while the model is still loading.
+        stale = []
         for stored in await self.storage.predictions_for_event(event.id):
             if stored.graded_at is not None:
                 continue
             if event.still_carded(stored.bout_id, {stored.athlete_a, stored.athlete_b}) is False:
                 log.info("Dropping the pick for %s: it is no longer on %s", stored.matchup, event.name)
-                await self.storage.delete_prediction(event.id, stored.bout_id)
-        return written
+                stale.append(stored.bout_id)
+        await self.storage.delete_predictions(event.id, stale)
+        return len(writing)
 
     async def records_for(self, espn_event_id: str) -> list[PredictionRecord]:
         return await self.storage.predictions_for_event(espn_event_id)

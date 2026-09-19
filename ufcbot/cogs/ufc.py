@@ -302,6 +302,8 @@ class UFCCog(commands.Cog):
         schedule="Channel for the upcoming-cards board",
         live="Channel for live coverage: fight previews, knockdowns, round stats and results",
         pickem="Channel for the pick'em game: the next card's board and the leaderboard",
+        rankings="Channel for the ratings boards: one per division, plus pound for pound",
+        womens_divisions="Include the women's divisions on the ratings boards (default yes)",
         since="Only count cards from this date (YYYY-MM-DD) in the scorecard",
     )
     async def channels_set(
@@ -312,11 +314,14 @@ class UFCCog(commands.Cog):
         schedule: discord.TextChannel | None = None,
         live: discord.TextChannel | None = None,
         pickem: discord.TextChannel | None = None,
+        rankings: discord.TextChannel | None = None,
+        womens_divisions: bool | None = None,
         since: str | None = None,
     ) -> None:
-        if not any((predictions, accuracy, schedule, live, pickem, since)):
+        if not any((predictions, accuracy, schedule, live, pickem, rankings, since)) and womens_divisions is None:
             await interaction.response.send_message(
-                "Pass at least one of predictions, accuracy, schedule, live, pickem or since.", ephemeral=True
+                "Pass at least one of predictions, accuracy, schedule, live, pickem, rankings or since.",
+                ephemeral=True,
             )
             return
 
@@ -341,6 +346,10 @@ class UFCCog(commands.Cog):
             settings.live_channel_id = live.id
         if pickem is not None:
             settings.pickem_channel_id = pickem.id
+        if rankings is not None:
+            settings.rankings_channel_id = rankings.id
+        if womens_divisions is not None:
+            settings.rankings_include_women = womens_divisions
         if tracking_since is not None:
             settings.tracking_since = tracking_since
         elif accuracy is not None and settings.tracking_since is None:
@@ -362,6 +371,7 @@ class UFCCog(commands.Cog):
         settings.schedule_channel_id = None
         settings.live_channel_id = None
         settings.pickem_channel_id = None
+        settings.rankings_channel_id = None
         await self.bot.storage.save_settings(settings)
         await interaction.response.send_message(
             "Boards cleared. Existing messages were left in place.", ephemeral=True
@@ -395,6 +405,8 @@ class UFCCog(commands.Cog):
             f"Schedule: {chan(settings.schedule_channel_id)}",
             f"Live fights: {chan(settings.live_channel_id)}",
             f"Pick'em: {chan(settings.pickem_channel_id)}",
+            f"Ratings: {chan(settings.rankings_channel_id)}"
+            + ("" if settings.rankings_include_women else " · men's divisions only"),
         ]
         if settings.tracking_since:
             lines.append(f"Scorecard counts cards from {settings.tracking_since:%b %d, %Y}")
@@ -603,8 +615,7 @@ class UFCCog(commands.Cog):
 
         lines = [header] if header else []
         lines.append(f"Scheduled events: {result.summary()}.")
-        for error in result.errors[:3]:
-            lines.append(f"• {truncate(error, 200)}")
+        lines.extend(f"• {truncate(error, 200)}" for error in result.errors[:3])
         await interaction.followup.send("\n".join(lines))
 
     async def _announce(

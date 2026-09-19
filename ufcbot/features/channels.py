@@ -22,6 +22,7 @@ from ..embeds import (
     pickem_board_embed,
     pickem_leaderboard_embed,
     picks_board_embed,
+    rankings_embed,
     recap_embed,
     schedule_embed,
     scorecard_embed,
@@ -29,6 +30,7 @@ from ..embeds import (
 from ..models import Event
 from ..sources.espn import UFCData
 from ..stats.prediction import Evaluation, Prediction
+from ..stats.rankings import POUND_FOR_POUND, divisions_with_fighters, rank_division
 from ..storage import GuildSettings, Storage
 from ..ui.pickem import board_view
 from ..util import normalise
@@ -42,6 +44,7 @@ KIND_SCHEDULE = "schedule"
 KIND_SCORECARD = "scorecard"
 KIND_PICKEM = "pickem"
 KIND_PICKEM_LEADERBOARD = "pickem_leaderboard"
+KIND_RANKINGS = "rankings"
 BOARD_KEY = "board"
 
 # Bot messages in the pick'em channel with these titles are pick'em posts; any
@@ -72,6 +75,7 @@ def _signature(embed: discord.Embed, extra: str = "") -> str:
 class PublishResult:
     picks_boards: int = 0
     pickem_boards: int = 0
+    rankings: int = 0
     recaps: int = 0
     schedule: bool = False
     updated: int = 0
@@ -86,6 +90,8 @@ class PublishResult:
             parts.append(f"{self.picks_boards} picks boards")
         if self.pickem_boards:
             parts.append(f"{self.pickem_boards} pick'em boards")
+        if self.rankings:
+            parts.append(f"{self.rankings} ratings boards")
         if self.schedule:
             parts.append("schedule board")
         if self.recaps:
@@ -106,6 +112,7 @@ class ChannelPublisher:
         *,
         pick_provider: Callable[[Event], dict[str, Prediction]],
         evaluation_provider: Callable[[], Evaluation | None],
+        ledger_provider: Callable[[], dict] | None = None,
     ) -> None:
         self.data = data
         self.storage = storage
@@ -113,6 +120,8 @@ class ChannelPublisher:
         self.pickem = pickem
         self.pick_provider = pick_provider
         self.evaluation_provider = evaluation_provider
+        # Optional: the career ledgers the ratings boards rank.
+        self.ledger_provider = ledger_provider
 
     async def publish(self, guild: discord.Guild, settings: GuildSettings, *, force: bool = False) -> PublishResult:
         """Bring every configured board in this guild up to date.
@@ -126,6 +135,7 @@ class ChannelPublisher:
             ("picks", settings.predictions_channel_id, self._publish_picks),
             ("accuracy", settings.accuracy_channel_id, self._publish_accuracy),
             ("pickem", settings.pickem_channel_id, self._publish_pickem),
+            ("rankings", settings.rankings_channel_id, self._publish_rankings),
         )
         for name, channel_id, job in jobs:
             channel = self._channel(guild, channel_id)
@@ -191,7 +201,6 @@ class ChannelPublisher:
                 records,
                 locked=event.start <= now,
                 espn_url=event.espn_url,
-                odds_source=event.odds_sources,
             )
             await self._upsert(guild, channel, KIND_PICKS, event.id, embed, result, force=force)
             result.picks_boards += 1
@@ -218,6 +227,46 @@ class ChannelPublisher:
             )
             await self._upsert(guild, channel, KIND_PICKS, event_id, embed, result, force=force)
             result.picks_boards += 1
+
+    async def _publish_rankings(
+        self,
+        guild: discord.Guild,
+        channel: discord.TextChannel,
+        settings: GuildSettings,
+        result: PublishResult,
+        force: bool,
+    ) -> None:
+        """One ratings board per division, then pound for pound below them."""
+        ledgers = self.ledger_provider() if self.ledger_provider else None
+        if not ledgers:
+            return
+
+        today = datetime.now(UTC).date()
+        women = settings.rankings_include_women
+        divisions = divisions_with_fighters(ledgers, on=today, include_women=women)
+        wanted: list[tuple[str, str, bool]] = [(name, name, False) for name in divisions]
+        wanted.append((POUND_FOR_POUND, POUND_FOR_POUND, True))
+
+        for key, title, p4p in wanted:
+            entries = rank_division(ledgers, None if p4p else key, on=today, include_women=women)
+            if not entries:
+                continue
+            await self._upsert(
+                guild,
+                channel,
+                KIND_RANKINGS,
+                key,
+                rankings_embed(title, entries, pound_for_pound=p4p),
+                result,
+                force=force,
+            )
+            result.rankings += 1
+
+        # A division that has emptied out, or was renamed, leaves a board behind.
+        keep = {name for name, _t, _p in wanted}
+        for key in await self.storage.posts_of_kind(guild.id, KIND_RANKINGS):
+            if key not in keep:
+                await self._remove_post(guild, channel, KIND_RANKINGS, key, result)
 
     async def _publish_accuracy(
         self,
