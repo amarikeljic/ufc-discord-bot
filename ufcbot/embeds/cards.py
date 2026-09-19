@@ -40,6 +40,13 @@ MAX_FIELDS = 25
 MEDALS = {1: "🥇", 2: "🥈", 3: "🥉"}
 
 
+def _ordinal(number: int) -> str:
+    """1 -> 1st, 2 -> 2nd, 13 -> 13th."""
+    if 10 <= number % 100 <= 20:
+        return f"{number}th"
+    return f"{number}{ {1: 'st', 2: 'nd', 3: 'rd'}.get(number % 10, 'th') }"
+
+
 def bout_line(bout: Bout, *, show_records: bool = True, pick: Prediction | None = None) -> str:
     names = []
     for fighter in bout.fighters[:2]:
@@ -125,13 +132,9 @@ def _bout_value(
             extra = [f"Winner: **{keep(winner.display_name)}**", "Pick ✅" if right else "Pick ❌"]
         lines.append(
             pick_value(
-                record.name_a,
-                record.name_b,
                 favourite=record.favourite,
                 confidence=record.confidence,
                 prediction=Prediction.from_dict(record.name_a, record.name_b, record.detail) if record.detail else None,
-                odds_a=record.odds_a,
-                odds_b=record.odds_b,
                 extra_lines=extra,
                 compact=compact,
             )
@@ -142,13 +145,9 @@ def _bout_value(
         favourite = a if pick.prob_a >= 0.5 else b
         lines.append(
             pick_value(
-                a.display_name,
-                b.display_name,
                 favourite=favourite.display_name,
                 confidence=pick.confidence,
                 prediction=pick,
-                odds_a=bout.odds.get(a.id),
-                odds_b=bout.odds.get(b.id),
                 extra_lines=[],
                 compact=compact,
             )
@@ -358,6 +357,8 @@ def schedule_embed(events: list[Event], *, title: str = "Upcoming UFC events") -
 def fighter_embed(
     profile: Fighter | None,
     career: FighterCareer | None,
+    *,
+    standing: tuple[int, str] | None = None,
 ) -> discord.Embed:
     """Profile card: ESPN bio plus the exact ufcstats.com career numbers."""
     name = (career.name if career else None) or (profile.display_name if profile else "Unknown")
@@ -389,6 +390,13 @@ def fighter_embed(
 
     if ledger and ledger.fights:
         embed.add_field(name="Streak", value=streak(ledger), inline=True)
+
+    if ledger and ledger.fights:
+        rating = [f"**{round(ledger.elo)}**"]
+        if standing:
+            place, division = standing
+            rating.append(f"{_ordinal(place)} at {division}")
+        embed.add_field(name="Rating", value=join(rating), inline=True)
 
     tape = []
     height = inches(info.height_in) if info else (profile.height if profile else None)
@@ -453,7 +461,9 @@ def scheduled_event_name(event: Event) -> str:
 
 
 def scheduled_event_location(event: Event) -> str:
-    return truncate(event.location, SCHEDULED_EVENT_LOCATION_LIMIT)
+    """Where the card is, as a city rather than a building: the arena name tells
+    nobody anything they cannot get from the city."""
+    return truncate(event.short_location, SCHEDULED_EVENT_LOCATION_LIMIT)
 
 
 def scheduled_event_description(event: Event, picks: dict[str, Prediction] | None = None) -> str:

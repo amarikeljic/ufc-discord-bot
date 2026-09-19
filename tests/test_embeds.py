@@ -24,6 +24,7 @@ from ufcbot.embeds import (
     predictions_embed,
     rankings_embed,
     scheduled_event_description,
+    scheduled_event_location,
 )
 from ufcbot.embeds.common import EMBED_BUDGET
 from ufcbot.features.cardwatch import CardChange
@@ -37,12 +38,13 @@ EVLOEV = fighter("4", "Movsar Evloev")
 START = datetime.now(UTC) + timedelta(days=5)
 
 
-def record(bout_id: str, a, b, source: str | None) -> PredictionRecord:
+def record(bout_id: str, a, b) -> PredictionRecord:
+    """A pick with a line attached, which the board is expected not to show."""
     return PredictionRecord(
         espn_event_id="EV", bout_id=bout_id, event_name="UFC 333", event_start=START,
         athlete_a=a.id, name_a=a.display_name, athlete_b=b.id, name_b=b.display_name,
         prob_a=0.62, weight_class="Featherweight", position=0, odds_a=-160, odds_b=135,
-        odds_source=source, method="dec_u", method_prob=0.34,
+        method="dec_u", method_prob=0.34,
         detail_json=json.dumps(prediction().to_dict()),
     )
 
@@ -51,43 +53,47 @@ def within_limits(embed) -> bool:
     return len(embed) <= EMBED_BUDGET and len(embed.fields) <= 25
 
 
-def test_one_odds_source_is_named_once_at_the_top():
-    embed = picks_board_embed("UFC 333", START, [record("B1", ALLEN, PICO, "DraftKings")], locked=False)
-    assert "Odds from DraftKings" in embed.description
-    assert "DraftKings" not in embed.fields[0].value, "not repeated per fight"
+def test_the_picks_board_carries_no_betting_line():
+    """The picks channel is the model's opinion. Odds belong in pick'em, where
+    they are what you are playing for."""
+    embed = picks_board_embed("UFC 333", START, [record("B1", ALLEN, PICO)], locked=False)
 
-
-def test_mixed_odds_sources_are_named_per_fight():
-    """A card drawing on two places cannot say so once: you could not tell which
-    fight came from where."""
-    records = [record("B1", ALLEN, PICO, "DraftKings"), record("B2", VOLK, EVLOEV, "Polymarket")]
-    embed = picks_board_embed("UFC 333", START, records, locked=False)
-
-    assert "marked per fight" in embed.description
-    assert "DraftKings" in embed.fields[0].value
-    assert "Polymarket" in embed.fields[1].value
+    value = embed.fields[0].value.replace(" ", " ")
+    assert "Odds" not in embed.description
+    assert "-160" not in value and "DraftKings" not in value
+    assert "Arnold Allen" in value, "the pick itself is still there"
 
 
 def test_a_single_pick_is_not_called_picks():
-    embed = picks_board_embed("UFC 333", START, [record("B1", ALLEN, PICO, None)], locked=False)
+    embed = picks_board_embed("UFC 333", START, [record("B1", ALLEN, PICO)], locked=False)
     assert "1 pick" in embed.description and "1 picks" not in embed.description
 
 
 def test_a_full_card_of_picks_fits_in_an_embed():
-    records = [record(f"B{i}", ALLEN, PICO, "DraftKings") for i in range(13)]
+    records = [record(f"B{i}", ALLEN, PICO) for i in range(13)]
     assert within_limits(picks_board_embed("UFC 333", START, records, locked=False))
 
 
-def test_the_pickem_board_marks_each_fights_source_when_they_differ():
-    first, second = bout("B1", ALLEN, PICO), bout("B2", VOLK, EVLOEV, match=2)
-    first.odds, first.odds_provider = {"1": -160, "2": 135}, "DraftKings"
-    second.odds, second.odds_provider = {"3": -120, "4": 100}, "Polymarket"
-    event = card(first, second, start=START)
+def test_the_predictions_command_carries_no_betting_line():
+    fight = bout("B1", ALLEN, PICO)
+    fight.odds, fight.odds_provider = {"1": -160, "2": 135}, "DraftKings"
+    embed = predictions_embed(card(fight, start=START), {"B1": prediction()})
 
-    embed = pickem_board_embed(event, {}, 4, now=datetime.now(UTC))
+    assert "Odds" not in embed.description
+    assert "-160" not in embed.fields[0].value
 
-    assert "marked per fight" in embed.description
-    assert "DraftKings" in embed.fields[0].value
+
+def test_the_pickem_board_shows_the_lines_without_naming_the_book():
+    """Pick'em takes the sportsbook's price only, so there is nothing to say
+    about where it came from."""
+    fight = bout("B1", ALLEN, PICO)
+    fight.odds, fight.odds_provider = {"1": -160, "2": 135}, "DraftKings"
+
+    embed = pickem_board_embed(card(fight, start=START), {}, 4, now=datetime.now(UTC))
+
+    assert "DraftKings" not in embed.description
+    assert "Odds from" not in embed.description
+    assert "-160" in embed.fields[0].value, "the price itself is still shown"
     assert within_limits(embed)
 
 
@@ -169,3 +175,24 @@ def test_every_live_post_names_the_card():
     # The two plain messages have no footer to put it in, so it goes on the end.
     assert "UFC 331" in live_knockdown_text(fight, 2, "3:41", ALLEN, "UFC 331")
     assert "UFC 331" in live_pause_text(fight, 2, "2:12", "UFC 331")
+
+
+def test_a_scheduled_event_is_located_by_city_not_arena():
+    event = card(bout("B1", ALLEN, PICO), start=START)
+    event.venue_name, event.venue_city, event.venue_country = "T-Mobile Arena", "Las Vegas", "USA"
+
+    assert scheduled_event_location(event) == "Las Vegas, USA"
+
+
+def test_the_fighter_card_shows_the_rating_and_where_it_places():
+    from ufcbot.embeds import fighter_embed
+    from ufcbot.stats.career import Ledger
+    from ufcbot.stats.service import FighterCareer
+
+    ledger = Ledger(name="Islam Makhachev")
+    ledger.fights, ledger.wins, ledger.elo = 18, 17, 1273.4
+
+    fields = {f.name: f.value for f in fighter_embed(None, FighterCareer(ledger, None), standing=(1, "Welterweight")).fields}
+
+    assert "1273" in fields["Rating"]
+    assert "1st at Welterweight" in fields["Rating"].replace("\xa0", " ")

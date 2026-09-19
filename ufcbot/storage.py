@@ -179,7 +179,6 @@ MIGRATIONS = {
         ("result_time", "TEXT"),
         ("method_correct", "INTEGER"),
         ("technique_correct", "INTEGER"),
-        ("odds_source", "TEXT"),
     ),
 }
 
@@ -338,8 +337,6 @@ class PredictionRecord:
     position: int = 0
     odds_a: int | None = None
     odds_b: int | None = None
-    odds_source: str | None = None
-    """The book or market these lines came from; cards can draw on more than one."""
     method: str | None = None
     """The favourite's likeliest winning method at lock."""
     technique: str | None = None
@@ -584,8 +581,8 @@ class Storage:
             INSERT INTO predictions (
                 espn_event_id, bout_id, event_name, event_start,
                 athlete_a, name_a, athlete_b, name_b, prob_a, weight_class, position,
-                odds_a, odds_b, odds_source, method, technique, method_prob, detail_json, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                odds_a, odds_b, method, technique, method_prob, detail_json, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(espn_event_id, bout_id) DO UPDATE SET
                 event_name   = excluded.event_name,
                 event_start  = excluded.event_start,
@@ -599,7 +596,6 @@ class Storage:
                 -- A line that disappears for a moment keeps its last known value.
                 odds_a       = COALESCE(excluded.odds_a, predictions.odds_a),
                 odds_b       = COALESCE(excluded.odds_b, predictions.odds_b),
-                odds_source  = COALESCE(excluded.odds_source, predictions.odds_source),
                 method       = excluded.method,
                 technique    = excluded.technique,
                 method_prob  = excluded.method_prob,
@@ -622,7 +618,6 @@ class Storage:
                     record.position,
                     record.odds_a,
                     record.odds_b,
-                    record.odds_source,
                     record.method,
                     record.technique,
                     record.method_prob,
@@ -1305,7 +1300,6 @@ def _prediction_from_row(row: aiosqlite.Row) -> PredictionRecord:
         position=row["position"],
         odds_a=row["odds_a"],
         odds_b=row["odds_b"],
-        odds_source=row["odds_source"],
         method=row["method"],
         technique=row["technique"],
         method_prob=row["method_prob"],

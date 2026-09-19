@@ -89,7 +89,7 @@ async def test_an_older_database_is_upgraded_in_place(tmp_path):
     try:
         records = await store.predictions_for_event("E")
         assert len(records) == 1 and records[0].name_a == "A", "the row survived"
-        assert records[0].odds_source is None, "and reads through the new columns"
+        assert records[0].odds_a is None, "and reads through the columns added since"
 
         async with store.db.execute("SELECT name FROM sqlite_master WHERE type='table'") as cursor:
             tables = {row[0] for row in await cursor.fetchall()}

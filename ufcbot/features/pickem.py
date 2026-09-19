@@ -96,7 +96,7 @@ class PickemService:
         """A card with fighters and current odds, fresh enough to take picks against."""
         event = await self.data.get_event(event_id, ttl=60)
         if event is not None:
-            await self.data.load_odds(event, ttl=300)
+            await self.data.load_odds(event, ttl=300, fallback=False)
         return event
 
     async def current_event(self) -> Event | None:

@@ -26,6 +26,7 @@ from ..embeds import (
 )
 from ..features.sync import MissingPermissions, SyncResult
 from ..models import Event
+from ..stats.rankings import standing
 from ..storage import GuildSettings
 from ..util import truncate
 
@@ -127,7 +128,18 @@ class UFCCog(commands.Cog):
             await interaction.followup.send(self._not_found("fighter", name))
             return
 
-        await interaction.followup.send(embed=fighter_embed(profile, career))
+        await interaction.followup.send(
+            embed=fighter_embed(profile, career, standing=self._standing(career))
+        )
+
+    def _standing(self, career) -> tuple[int, str] | None:
+        """Where this fighter sits on their division's ratings board, if anywhere."""
+        if career is None:
+            return None
+        key = self.bot.stats.resolve(career.name)
+        if key is None:
+            return None
+        return standing(self.bot.ledgers(), key, on=date.today())
 
     @fighter.autocomplete("name")
     async def fighter_autocomplete(

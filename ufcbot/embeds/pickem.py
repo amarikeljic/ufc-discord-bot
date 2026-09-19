@@ -54,9 +54,7 @@ def _standing_line(rank: int, standing: PickemStanding) -> str:
 # -- the card board in the pick'em channel -------------------------------------------
 
 
-def _board_bout_value(
-    event: Event, bout: Bout, counts: dict[str, int], now: datetime, *, show_source: bool = False
-) -> str:
+def _board_bout_value(event: Event, bout: Bout, counts: dict[str, int], now: datetime) -> str:
     a, b = bout.fighters[0], bout.fighters[1]
     lines = []
 
@@ -72,10 +70,6 @@ def _board_bout_value(
         lines.append(join([f"{surname(fighter.display_name)} {fmt_odds(odds)}", f"+{points_for(odds)} pts"]))
     if not any(f.id in bout.odds for f in (a, b)):
         lines.append("Odds not posted yet")
-    elif show_source and bout.odds_provider:
-        # Only when the card's lines come from more than one place; otherwise the
-        # board says so once, in its heading.
-        lines.append(f"*{keep(bout.odds_provider)}*")
 
     total = sum(counts.values())
     if total:
@@ -92,18 +86,12 @@ def pickem_board_embed(event: Event, counts: dict[str, dict[str, int]], players:
     lines = [f"🗓️ {discord.utils.format_dt(event.start, 'F')}", *_lock_lines(event, now)]
     lines.append(f"👥 {players} playing" if players else "👥 Be the first to pick")
     lines += ["", "Right pick: points from the odds", "Underdogs pay more · wrong pick: -100"]
-    sources = {bout.odds_provider for bout in event.bouts if bout.odds_provider}
-    mixed = len(sources) > 1
-    if mixed:
-        lines.append(f"Odds from {keep(' · '.join(sorted(sources)))}, marked per fight")
-    elif sources:
-        lines.append(f"Odds from {keep(next(iter(sources)))}")
     embed.description = "\n".join(lines)
 
     for bout in event.fights[:25]:
         embed.add_field(
             name=truncate(bout.matchup, 256),
-            value=_board_bout_value(event, bout, counts.get(bout.id, {}), now, show_source=mixed),
+            value=_board_bout_value(event, bout, counts.get(bout.id, {}), now),
             inline=False,
         )
     return stamp(embed)

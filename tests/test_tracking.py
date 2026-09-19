@@ -127,15 +127,15 @@ async def test_nothing_is_recorded_once_the_card_has_started(storage):
     assert await bout_ids(track) == set()
 
 
-async def test_the_odds_source_is_kept_with_the_line(storage, soon):
-    """A card can draw its lines from more than one place, and the board says
-    which is which."""
+async def test_the_line_is_kept_with_the_pick(storage, soon):
+    """Not to show on the board, which carries no odds, but so the scorecard can
+    measure the model against the fighters the market favoured."""
     track = tracker(storage)
     fight = bout("B1", ALLEN, PICO)
     fight.odds = {ALLEN.id: -160, PICO.id: 135}
-    fight.odds_provider = "DraftKings"
 
     await track.record(card(fight, start=soon), {"B1": prediction()})
 
     stored = (await track.records_for("EV1"))[0]
-    assert (stored.odds_a, stored.odds_b, stored.odds_source) == (-160, 135, "DraftKings")
+    assert (stored.odds_a, stored.odds_b) == (-160, 135)
+    assert stored.market_favourite_athlete == ALLEN.id

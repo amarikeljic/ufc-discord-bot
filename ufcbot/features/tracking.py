@@ -141,7 +141,6 @@ class PredictionTracker:
                     position=position,
                     odds_a=bout.odds.get(a.id),
                     odds_b=bout.odds.get(b.id),
-                    odds_source=bout.odds_provider,
                     method=outcome[0] if outcome else None,
                     technique=outcome[1] if outcome else None,
                     method_prob=outcome[2] if outcome else None,

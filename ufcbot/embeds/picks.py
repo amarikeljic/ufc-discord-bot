@@ -23,7 +23,6 @@ from .common import (
     age,
     bar,
     code_table,
-    fmt_odds,
     inches,
     join,
     keep,
@@ -44,22 +43,17 @@ if TYPE_CHECKING:
 
 
 def pick_value(
-    name_a: str,
-    name_b: str,
     *,
     favourite: str,
     confidence: float,
     prediction: Prediction | None,
-    odds_a: int | None,
-    odds_b: int | None,
     extra_lines: list[str],
     compact: bool,
-    odds_source: str | None = None,
 ) -> str:
     """One fight on a picks board, a handful of short lines.
 
-    ``odds_source`` is only passed when a card's lines come from more than one
-    place, so the usual card says where its odds came from once, at the top.
+    No betting line: the picks channel is the model's opinion, and the odds live
+    in pick'em, where they are what you are playing for.
     """
     lines = [f"🎯 **{keep(favourite)}** {confidence:.0%}  {bar(confidence, 8)}"]
     if prediction is not None and prediction.has_methods:
@@ -72,11 +66,6 @@ def pick_value(
                 # a line of their own; on a phone every line costs two.
                 likeliest += " · " + join(f"{METHOD_SHORT[m]} {p:.0%}" for _, m, _t, p in routes[1:])
             lines.append(likeliest)
-    if odds_a is not None and odds_b is not None:
-        odds = [f"{surname(name_a)} {fmt_odds(odds_a)}", f"{surname(name_b)} {fmt_odds(odds_b)}"]
-        if odds_source:
-            odds.append(odds_source)
-        lines.append("💰 " + join(odds))
     lines.extend(extra_lines)
     return truncate("\n".join(lines), FIELD_LIMIT)
 
@@ -109,13 +98,6 @@ def picks_board_embed(
 ) -> discord.Embed:
     """The on-record picks for one card, as posted in the picks channel."""
 
-    # Cards usually take every line from one book, and say so once at the top.
-    # A card drawing on more than one says so fight by fight instead, because
-    # one line naming both leaves you unable to tell which fight is which.
-    sources = {r.odds_source for r in records if r.odds_source}
-    mixed = len(sources) > 1
-    shared = next(iter(sources)) if len(sources) == 1 else None
-
     def build(compact: bool) -> discord.Embed:
         embed = discord.Embed(title=truncate(event_name, 256), url=espn_url, colour=PICKS_PURPLE)
 
@@ -131,10 +113,6 @@ def picks_board_embed(
             header.append("🔒 Picks locked at first bell")
         else:
             header.append(f"⏱️ {discord.utils.format_dt(start, 'R')} · {plural(len(records), 'pick')}")
-        if mixed:
-            header.append(f"Odds from {keep(' · '.join(sorted(sources)))}, marked per fight")
-        elif shared:
-            header.append(f"Odds from {keep(shared)}")
         embed.description = "\n".join(header)
 
         for record in records[:25]:
@@ -142,16 +120,11 @@ def picks_board_embed(
             embed.add_field(
                 name=truncate(f"{record.name_a} vs. {record.name_b}", 256),
                 value=pick_value(
-                    record.name_a,
-                    record.name_b,
                     favourite=record.favourite,
                     confidence=record.confidence,
                     prediction=prediction,
-                    odds_a=record.odds_a,
-                    odds_b=record.odds_b,
                     extra_lines=result_lines(record),
                     compact=compact,
-                    odds_source=record.odds_source if mixed else None,
                 ),
                 inline=False,
             )
@@ -165,9 +138,7 @@ def picks_board_embed(
 
 
 def predictions_embed(event: Event, picks: dict[str, Prediction]) -> discord.Embed:
-    """Every pick for a card, with how each fight is likely to end and the current odds."""
-    sources = {bout.odds_provider for bout in event.bouts if bout.odds_provider}
-    mixed = len(sources) > 1
+    """Every pick for a card, with how each fight is likely to end."""
 
     def build(compact: bool) -> discord.Embed:
         embed = discord.Embed(title=truncate(f"Picks: {event.name}", 256), url=event.espn_url, colour=PICKS_PURPLE)
@@ -175,10 +146,6 @@ def predictions_embed(event: Event, picks: dict[str, Prediction]) -> discord.Emb
             f"🗓️ {discord.utils.format_dt(event.start, 'D')}",
             f"{len(picks)} of {len(event.bouts)} bouts predicted",
         ]
-        if mixed:
-            header.append(f"Odds from {keep(' · '.join(sorted(sources)))}, marked per fight")
-        elif sources:
-            header.append(f"Odds from {keep(next(iter(sources)))}")
         embed.description = "\n".join(header)
         for bout in event.ordered_bouts()[:25]:
             if not bout.has_opponents:
@@ -189,16 +156,11 @@ def predictions_embed(event: Event, picks: dict[str, Prediction]) -> discord.Emb
                 value = "No pick: not enough UFC history"
             else:
                 value = pick_value(
-                    a.display_name,
-                    b.display_name,
                     favourite=a.display_name if pick.prob_a >= 0.5 else b.display_name,
                     confidence=pick.confidence,
                     prediction=pick,
-                    odds_a=bout.odds.get(a.id),
-                    odds_b=bout.odds.get(b.id),
                     extra_lines=[],
                     compact=compact,
-                    odds_source=bout.odds_provider if mixed else None,
                 )
             embed.add_field(name=truncate(f"{a.display_name} vs. {b.display_name}", 256), value=value, inline=False)
         return stamp(embed)

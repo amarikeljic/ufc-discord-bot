@@ -10,11 +10,13 @@ have done.
 - **Fight cards and schedule.** Upcoming cards, full fight cards, results and venues.
 - **Fighter stats.** The same career numbers ufcstats.com publishes, such as strikes
   landed per minute, striking and takedown accuracy and defence, and submission average.
-  Also shows record, reach, stance and headshot.
+  Also shows record, reach, stance, headshot, and the fighter's rating and where it
+  places them in their division.
 - **Predictions.** Win probability for any matchup, plus how the fight is likely to end:
   KO/TKO, submission, unanimous or split decision, with the likeliest finishing technique.
-- **Picks board.** One auto-updating message per upcoming card with every pick, method
-  and DraftKings moneyline. Picks lock when the card starts and are graded afterwards.
+- **Picks board.** One auto-updating message per upcoming card with every pick and the
+  method it is likely to come by. Picks lock when the card starts and are graded
+  afterwards. No betting lines: those belong in pick'em.
 - **Scorecard.** A running record of the model's accuracy, split by confidence, with the
   betting favourites' record over the same fights as a benchmark.
 - **Live coverage.** During a card: a preview as fighters walk out, with both fighters'
@@ -176,14 +178,18 @@ scored, its board is deleted and the next card's board replaces it once odds are
 
 ### Where the odds come from
 
-ESPN carries DraftKings moneylines for numbered UFC cards, but nothing for Dana White's
-Contender Series. Any fight ESPN leaves unpriced falls back to Polymarket, a prediction
-market whose price is a probability: 0.545 means a 54.5% favourite, which reads as -120.
-Because the two sides sum to 1, that price carries no bookmaker margin.
+Odds appear in pick'em, where they are what you are playing for, and on live coverage,
+where they are the closing line on a fight about to happen. The picks board carries none:
+it is the model's opinion, and a moneyline next to it only invites the two to be confused.
 
-Wherever odds appear the source is named, so "Odds (Polymarket)" on a walkout preview and
-"Odds from DraftKings" on the picks and pick'em boards. A card drawing on both sources
-lists both.
+Pick'em takes DraftKings' price through ESPN and nothing else, because points are staked
+on it. Everywhere else, a fight ESPN leaves unpriced falls back to Polymarket, a prediction
+market whose price is a probability: 0.545 means a 54.5% favourite, which reads as -120.
+Because the two sides sum to 1, that price carries no bookmaker margin, and live coverage
+names it when it is the source.
+
+Every pick is still stored with the line that stood when it was made, which is what lets
+the scorecard measure the model against the fighters the market favoured.
 
 ### The prediction model
 

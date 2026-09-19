@@ -111,6 +111,20 @@ def rank_division(
     ]
 
 
+def standing(ledgers: dict[str, Ledger], key: str, *, on: date) -> tuple[int, str] | None:
+    """(rank, division) for one fighter, or None when they are not ranked.
+
+    Unbounded depth: a fighter 30th in their division is still worth telling,
+    where the boards only print the top of each.
+    """
+    ledger = ledgers.get(key)
+    if ledger is None or ledger.division is None or not _eligible(ledger, on):
+        return None
+    ranked = rank_division(ledgers, ledger.division, on=on, depth=len(ledgers))
+    place = next((entry.rank for entry in ranked if entry.key == key), None)
+    return (place, ledger.division) if place else None
+
+
 def divisions_with_fighters(
     ledgers: dict[str, Ledger], *, on: date, include_women: bool = True
 ) -> list[str]:

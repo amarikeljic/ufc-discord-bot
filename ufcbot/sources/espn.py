@@ -354,13 +354,18 @@ class UFCData:
 
     # -- per-fight detail --------------------------------------------------
 
-    async def load_odds(self, event: Event, *, ttl: int = 600) -> None:
-        """Attach current moneylines to every bout that has them."""
+    async def load_odds(self, event: Event, *, ttl: int = 600, fallback: bool = True) -> None:
+        """Attach current moneylines to every bout that has them.
+
+        ``fallback`` allows the prediction market to fill in for fights no
+        sportsbook prices. Pick'em turns it off: points are staked at a real
+        book's line or not at all.
+        """
         await asyncio.gather(
             *(self.load_bout_odds(bout, ttl=ttl) for bout in event.bouts if bout.odds_ref),
             return_exceptions=True,
         )
-        if self.odds_fallback is not None:
+        if fallback and self.odds_fallback is not None:
             await asyncio.gather(
                 *(self._fallback_odds(bout, event) for bout in event.bouts if len(bout.odds) < 2),
                 return_exceptions=True,
