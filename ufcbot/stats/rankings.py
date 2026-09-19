@@ -56,6 +56,15 @@ class Ranked:
     rating: int
     record: str
     division: str | None
+    key: str = ""
+    """The dataset key, which is what a board is remembered by between passes."""
+    last_fight: date | None = None
+    last_result: str | None = None
+
+
+def is_eligible(ledger: Ledger, on: date) -> bool:
+    """Ranked at all: enough UFC fights, and seen recently enough to still be active."""
+    return _eligible(ledger, on)
 
 
 def _eligible(ledger: Ledger, on: date) -> bool:
@@ -86,6 +95,7 @@ def rank_division(
         and (include_women or not is_womens(ledger.division))
     ]
     entries.sort(key=lambda ledger: ledger.elo, reverse=True)
+    by_key = {id(ledger): key for key, ledger in ledgers.items()}
     return [
         Ranked(
             rank=index,
@@ -93,6 +103,9 @@ def rank_division(
             rating=round(ledger.elo),
             record=ledger.record,
             division=ledger.division,
+            key=by_key.get(id(ledger), ledger.name),
+            last_fight=ledger.last_fight,
+            last_result=ledger.last_result,
         )
         for index, ledger in enumerate(entries[:depth], 1)
     ]

@@ -31,7 +31,7 @@ if TYPE_CHECKING:  # pandas is a training dependency; the bot never imports it
 # Every fighter's rating starts here and moves with results, so a rating says
 # how a fighter has done against the fighters they were in there with rather
 # than how many times they won. K is how far one fight can move it.
-ELO_START = 1500.0
+ELO_START = 1000.0
 ELO_K = 32.0
 # A finish says more than a decision, so it moves the rating a little further.
 ELO_FINISH_BONUS = 1.15

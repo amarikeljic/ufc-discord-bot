@@ -713,6 +713,11 @@ class UFCCog(commands.Cog):
         except Exception:  # announcements are never worth a failed tick
             log.exception("Checking cards for changes failed")
             changes = []
+        try:
+            moves = await self.bot.ratingswatch.poll(self.bot.ledgers())
+        except Exception:
+            log.exception("Checking the ratings boards for changes failed")
+            moves = []
 
         for settings in await self.bot.storage.guilds_with_channels():
             guild = self.bot.get_guild(settings.guild_id)
@@ -720,8 +725,9 @@ class UFCCog(commands.Cog):
                 continue
             try:
                 await self.bot.cardwatch.announce(guild, settings, changes)
+                await self.bot.ratingswatch.announce(guild, settings, moves)
             except Exception:
-                log.exception("Announcing card changes failed in guild %s", guild.id)
+                log.exception("Announcing changes failed in guild %s", guild.id)
             result = await self.bot.publisher.publish(guild, settings)
             if result.errors:
                 log.warning("Boards in guild %s: %s", guild.id, "; ".join(result.errors))

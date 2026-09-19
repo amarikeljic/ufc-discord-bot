@@ -256,7 +256,8 @@ class ChannelPublisher:
                 channel,
                 KIND_RANKINGS,
                 key,
-                rankings_embed(title, entries, pound_for_pound=p4p),
+                # The last board carries the explanation, so the channel says it once.
+                rankings_embed(title, entries, pound_for_pound=p4p, note=p4p),
                 result,
                 force=force,
             )

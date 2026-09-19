@@ -70,7 +70,7 @@ def pick_value(
             if not compact and len(routes) > 1:
                 # The runners-up ride along on the same line rather than taking
                 # a line of their own; on a phone every line costs two.
-                likeliest += " · also " + join(f"{METHOD_SHORT[m]} {p:.0%}" for _, m, _t, p in routes[1:])
+                likeliest += " · " + join(f"{METHOD_SHORT[m]} {p:.0%}" for _, m, _t, p in routes[1:])
             lines.append(likeliest)
     if odds_a is not None and odds_b is not None:
         odds = [f"{surname(name_a)} {fmt_odds(odds_a)}", f"{surname(name_b)} {fmt_odds(odds_b)}"]

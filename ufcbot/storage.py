@@ -76,6 +76,17 @@ CREATE TABLE IF NOT EXISTS card_bouts (
     PRIMARY KEY (espn_event_id, bout_id)
 );
 
+-- Each division's ratings board as last published, so a change to it can be
+-- described rather than just redrawn.
+CREATE TABLE IF NOT EXISTS ranking_state (
+    division   TEXT    NOT NULL,
+    fighter    TEXT    NOT NULL,
+    rank       INTEGER NOT NULL,
+    rating     INTEGER NOT NULL,
+    last_fight TEXT,
+    PRIMARY KEY (division, fighter)
+);
+
 -- Messages the bot maintains in configured channels, so they can be edited.
 CREATE TABLE IF NOT EXISTS channel_posts (
     guild_id   INTEGER NOT NULL,
@@ -211,6 +222,15 @@ class Post(NamedTuple):
     channel_id: int
     message_id: int
     signature: str | None = None
+
+
+class RankedState(NamedTuple):
+    """Where a fighter stood on a board, and what they had done by then."""
+
+    fighter: str
+    rank: int
+    rating: int
+    last_fight: date | None
 
 
 class CardBout(NamedTuple):
@@ -708,6 +728,36 @@ class Storage:
             "SELECT DISTINCT espn_event_id FROM predictions WHERE graded_at IS NULL"
         ) as cursor:
             return {row["espn_event_id"] for row in await cursor.fetchall()}
+
+    # -- the ratings boards as last published --------------------------------------
+
+    async def ranking_state(self, division: str) -> dict[str, RankedState]:
+        """Who was on this board last time, by fighter key."""
+        async with self.db.execute(
+            "SELECT fighter, rank, rating, last_fight FROM ranking_state WHERE division = ?",
+            (division,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return {
+            row["fighter"]: RankedState(
+                row["fighter"], row["rank"], row["rating"], _parse_date(row["last_fight"])
+            )
+            for row in rows
+        }
+
+    async def save_ranking_state(self, division: str, entries: list[RankedState]) -> None:
+        await self.db.execute("DELETE FROM ranking_state WHERE division = ?", (division,))
+        await self.db.executemany(
+            """
+            INSERT INTO ranking_state (division, fighter, rank, rating, last_fight)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            [
+                (division, e.fighter, e.rank, e.rating, e.last_fight.isoformat() if e.last_fight else None)
+                for e in entries
+            ],
+        )
+        await self.db.commit()
 
     # -- the card as last seen ----------------------------------------------------
 

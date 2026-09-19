@@ -34,6 +34,20 @@ REPLACED = "replaced"
 STATE_LIFETIME = timedelta(days=21)
 
 
+def news_channel(guild: discord.Guild, settings: GuildSettings) -> discord.TextChannel | None:
+    """Where this server hears about changes: the live channel, else the schedule one.
+
+    Shared with the ratings watcher, which announces the same kind of thing.
+    """
+    channel = guild.get_channel(settings.live_channel_id or 0) or guild.get_channel(
+        settings.schedule_channel_id or 0
+    )
+    if not isinstance(channel, discord.TextChannel):
+        return None
+    permissions = channel.permissions_for(guild.me)
+    return channel if permissions.send_messages and permissions.embed_links else None
+
+
 @dataclass(slots=True)
 class CardChange:
     """One difference between the card as it was and the card as it is."""
@@ -163,13 +177,8 @@ class CardWatch:
         """Post card changes to this guild's live channel, or its schedule channel."""
         if not changes:
             return 0
-        channel = guild.get_channel(settings.live_channel_id or 0) or guild.get_channel(
-            settings.schedule_channel_id or 0
-        )
-        if not isinstance(channel, discord.TextChannel):
-            return 0
-        permissions = channel.permissions_for(guild.me)
-        if not (permissions.send_messages and permissions.embed_links):
+        channel = news_channel(guild, settings)
+        if channel is None:
             return 0
 
         posted = 0

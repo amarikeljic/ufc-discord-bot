@@ -154,7 +154,7 @@ def test_a_ratings_board_builds():
 
 def test_every_live_post_names_the_card():
     fight = bout("B1", ALLEN, PICO)
-    stats = {i: {k: 10.0 for k in ("sig_l", "sig_a", "tot_l", "tot_a", "kd", "td_l", "td_a", "sub", "ctrl", "head", "body", "leg")} for i in ("1", "2")}
+    stats = {i: dict.fromkeys(("sig_l", "sig_a", "tot_l", "tot_a", "kd", "td_l", "td_a", "sub", "ctrl", "head", "body", "leg"), 10.0) for i in ("1", "2")}
     name = "UFC 331: Van vs. Pantoja 2"
 
     for embed in (

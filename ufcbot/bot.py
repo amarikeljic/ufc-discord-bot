@@ -14,6 +14,7 @@ from .features.cardwatch import CardWatch
 from .features.channels import ChannelPublisher
 from .features.live import LiveCoverage
 from .features.pickem import PickemService
+from .features.ratings import RatingsWatch
 from .features.sync import EventSyncer
 from .features.tracking import PredictionTracker
 from .models import Event
@@ -67,6 +68,7 @@ class UFCBot(commands.Bot):
         self.tracker = PredictionTracker(self.storage, self.data)
         self.pickem = PickemService(self.data, self.storage)
         self.cardwatch = CardWatch(self.data, self.storage, days_ahead=config.default_days_ahead)
+        self.ratingswatch = RatingsWatch(self.storage)
         self.publisher = ChannelPublisher(
             self.data,
             self.storage,

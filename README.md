@@ -24,6 +24,8 @@ have done.
 - **Card changes.** A fight coming off the card, a short-notice replacement or a bout
   added late is announced as soon as it shows up, days before the card if that is when
   it happens.
+- **Ratings moves.** When a division's board changes, the move is announced with the
+  reason: in, out, up or down, after a win, a loss, inactivity, or results around them.
 - **Pick'em.** Members pick winners for the next UFC card from a private menu once odds
   are posted. A right pick scores what a 100-point bet would win at those odds, so
   underdogs pay more; a wrong pick costs 100 points. The channel holds just the current
@@ -134,6 +136,7 @@ All settings live in `.env`; see `.env.example` for descriptions.
 | Live channel | Every 15 seconds during a card |
 | Picks, schedule and scorecard boards | Every 20 minutes |
 | Changes to upcoming cards | Every 20 minutes |
+| Moves on the ratings boards | Every 20 minutes |
 | Odds and fight card data | Cached for 10 and 15 minutes |
 | Discord scheduled events | Every 3 hours |
 | Fight dataset and model | Checked daily; every 6 hours after a card until new data arrives |
@@ -254,7 +257,17 @@ divisions are kept separate from the men's.
 
 It is not the UFC's ranking and will not agree with it. Nobody votes, holding a belt counts
 for nothing by itself, and a fighter arriving from another promotion starts level with
-everyone else however good they already are.
+everyone else however good they already are. Everyone starts at 1000; the number only ever
+means something next to another fighter's, so where it starts is a matter of taste.
+
+Only the last board posted carries the explanation, so the channel says it once rather than
+a dozen times.
+
+When a board moves, the move is posted to the live channel with its reason: a fighter's own
+win or loss, two years without a fight, or somebody else's result pushing them along. Only
+the divisional boards are watched -- a server that leaves the women's divisions out has a
+different pound-for-pound list from one that does not, so there is no single set of changes
+to announce for that one.
 
 ### Keeping data current
 
@@ -362,6 +375,7 @@ ufcbot/
     channels.py         Picks, schedule and scorecard boards
     live.py             Live fight coverage
     cardwatch.py        Spots and announces changes to upcoming cards
+    ratings.py          Spots and announces moves on the ratings boards
     pickem.py           Pick'em rules: scoring, locks, saving and grading picks
   ui/
     pickem.py           Pick'em buttons and the private picker
