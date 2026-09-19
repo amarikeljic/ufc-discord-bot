@@ -43,7 +43,9 @@ class InstanceLock:
         ) from last_error
 
     def _try_lock(self) -> IO:
-        handle = open(self.path, "a+")  # stays open for the life of the process to hold the lock
+        # noqa below: the handle must NOT be closed. It is the lock; a context
+        # manager would release it and let a second copy of the bot start.
+        handle = open(self.path, "a+")  # noqa: SIM115
         try:
             handle.seek(0)
             if os.name == "nt":

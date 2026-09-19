@@ -125,6 +125,15 @@ def standing(ledgers: dict[str, Ledger], key: str, *, on: date) -> tuple[int, st
     return (place, ledger.division) if place else None
 
 
+def pound_for_pound_rank(ledgers: dict[str, Ledger], key: str, *, on: date) -> int | None:
+    """Where a fighter sits across every division, or None when they are not ranked."""
+    ledger = ledgers.get(key)
+    if ledger is None or not _eligible(ledger, on):
+        return None
+    ranked = rank_division(ledgers, None, on=on, depth=len(ledgers))
+    return next((entry.rank for entry in ranked if entry.key == key), None)
+
+
 def divisions_with_fighters(
     ledgers: dict[str, Ledger], *, on: date, include_women: bool = True
 ) -> list[str]:

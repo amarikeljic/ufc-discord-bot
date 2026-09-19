@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import discord
 
-from ..models import Bout, Event, Fighter
+from ..models import Bout, Event
 from ..stats.prediction import Prediction
 from ..util import truncate
 from .common import (
@@ -15,37 +15,18 @@ from .common import (
     FIELD_LIMIT,
     UFC_RED,
     add_chunked_fields,
-    age,
-    inches,
-    is_nan,
     join,
     keep,
-    num,
-    pct,
     short_record,
     stamp,
-    streak,
     surname,
 )
 from .picks import pick_value, result_lines
 
 if TYPE_CHECKING:
-    from ..stats.service import FighterCareer
     from ..storage import PredictionRecord
 
-SCHEDULED_EVENT_NAME_LIMIT = 100
-SCHEDULED_EVENT_DESCRIPTION_LIMIT = 1000
-SCHEDULED_EVENT_LOCATION_LIMIT = 100
 MAX_FIELDS = 25
-MEDALS = {1: "🥇", 2: "🥈", 3: "🥉"}
-
-
-def _ordinal(number: int) -> str:
-    """1 -> 1st, 2 -> 2nd, 13 -> 13th."""
-    if 10 <= number % 100 <= 20:
-        return f"{number}th"
-    return f"{number}{ {1: 'st', 2: 'nd', 3: 'rd'}.get(number % 10, 'th') }"
-
 
 def bout_line(bout: Bout, *, show_records: bool = True, pick: Prediction | None = None) -> str:
     names = []
@@ -73,7 +54,6 @@ def bout_line(bout: Bout, *, show_records: bool = True, pick: Prediction | None 
         line += f"\n Pick: {keep(surname(favourite.display_name))} {pick.confidence:.0%}"
     return line
 
-
 def _header_lines(event: Event) -> list[str]:
     lines = [f"🗓️ {discord.utils.format_dt(event.start, 'F')}", f"⏱️ {discord.utils.format_dt(event.start, 'R')}"]
     if event.main_card_start and event.main_card_start != event.start:
@@ -82,7 +62,6 @@ def _header_lines(event: Event) -> list[str]:
     if event.broadcast:
         lines.append(f"📺 {event.broadcast}")
     return lines
-
 
 def _segment_value(bouts: list[Bout], *, show_records: bool) -> str:
     lines: list[str] = []
@@ -93,7 +72,6 @@ def _segment_value(bouts: list[Bout], *, show_records: bool) -> str:
             break
         lines.append(candidate)
     return "\n".join(lines) or "To be announced"
-
 
 def _bout_value(
     bout: Bout,
@@ -156,7 +134,6 @@ def _bout_value(
         lines.append("No pick: not enough UFC history")
     return truncate("\n".join(lines), FIELD_LIMIT)
 
-
 def _card_with_picks(
     event: Event,
     *,
@@ -197,7 +174,6 @@ def _card_with_picks(
 
     return stamp(embed)
 
-
 def _card_by_segment(event: Event, *, show_records: bool) -> discord.Embed:
     embed = discord.Embed(title=truncate(event.name, 256), url=event.espn_url, colour=UFC_RED)
     embed.description = "\n".join(_header_lines(event))
@@ -210,7 +186,6 @@ def _card_by_segment(event: Event, *, show_records: bool) -> discord.Embed:
     if event.poster_url:
         embed.set_image(url=event.poster_url)
     return stamp(embed)
-
 
 def event_embed(
     event: Event,
@@ -240,7 +215,6 @@ def event_embed(
                 return embed
     return _card_by_segment(event, show_records=show_records)
 
-
 def card_changes_embed(event: Event, changes: list) -> discord.Embed:
     """What has changed on a card since the bot last looked.
 
@@ -267,74 +241,6 @@ def card_changes_embed(event: Event, changes: list) -> discord.Embed:
     add_chunked_fields(embed, "Changes", lines or [DASH])
     return stamp(embed)
 
-
-def rankings_embed(
-    division: str, entries: list, *, pound_for_pound: bool = False, note: bool = False
-) -> discord.Embed:
-    """One division's ratings board. ``entries`` are ``Ranked`` records.
-
-    ``note`` explains what the rating is. Only the last board posted carries it,
-    so the channel says it once rather than a dozen times.
-    """
-    embed = discord.Embed(
-        title=truncate(f"📈 {division}" if not pound_for_pound else "👑 Pound for pound", 256),
-        colour=UFC_RED,
-    )
-    if not entries:
-        embed.description = "Nobody ranked here yet."
-        return stamp(embed)
-
-    lines = []
-    for entry in entries:
-        badge = MEDALS.get(entry.rank, f"`{entry.rank:>2}`")
-        facts = [f"**{entry.rating}**", entry.record]
-        if pound_for_pound and entry.division:
-            facts.append(entry.division)
-        lines.append(f"{badge} {keep(entry.name)} · {join(facts)}")
-
-    add_chunked_fields(embed, "Ratings", lines)
-    if note:
-        embed.add_field(
-            name="About these ratings",
-            value=(
-                "The bot's own rating, not the UFC's ranking. Everyone starts level and a win "
-                "moves it by how good the fighter beaten was, so beating a contender is worth "
-                "more than beating a debutant. Nobody votes, a belt counts for nothing by "
-                "itself, and a fighter arriving from another promotion starts level however "
-                "good they already are.\n\nRanked here: three or more UFC fights and a fight "
-                "in the last two years. A fighter's division is wherever they last fought, so "
-                "a move up shows the week it happens."
-            ),
-            inline=False,
-        )
-    return stamp(embed)
-
-
-ARROWS = {"entered": "🆕", "left": "🚪", "up": "🔼", "down": "🔽"}
-
-
-def ratings_changes_embed(division: str, changes: list) -> discord.Embed:
-    """How one division's board moved. ``changes`` are ``RatingChange`` records."""
-    embed = discord.Embed(title=truncate(f"📊 {division} ratings", 256), colour=UFC_RED)
-
-    lines = []
-    for change in changes:
-        mark = ARROWS.get(change.kind, "•")
-        if change.kind == "entered":
-            what = f"in at **{change.now}**"
-        elif change.kind == "left":
-            what = f"out, was **{change.was}**"
-        else:
-            what = f"**{change.was} → {change.now}**"
-        facts = [what, f"after {change.reason}"]
-        if change.rating is not None:
-            facts.append(str(change.rating))
-        lines.append(f"{mark} {keep(change.name)} · {join(facts)}")
-
-    add_chunked_fields(embed, "Moves", lines or [DASH])
-    return stamp(embed)
-
-
 def schedule_embed(events: list[Event], *, title: str = "Upcoming UFC events") -> discord.Embed:
     embed = discord.Embed(title=title, colour=UFC_RED)
 
@@ -352,142 +258,3 @@ def schedule_embed(events: list[Event], *, title: str = "Upcoming UFC events") -
         )
 
     return stamp(embed)
-
-
-def fighter_embed(
-    profile: Fighter | None,
-    career: FighterCareer | None,
-    *,
-    standing: tuple[int, str] | None = None,
-) -> discord.Embed:
-    """Profile card: ESPN bio plus the exact ufcstats.com career numbers."""
-    name = (career.name if career else None) or (profile.display_name if profile else "Unknown")
-    if profile and profile.nickname:
-        name = f'{name} "{profile.nickname}"'
-
-    embed = discord.Embed(
-        title=truncate(name, 256),
-        url=(profile.profile_url if profile else None) or (career.info.ufcstats_url if career and career.info else None),
-        colour=UFC_RED,
-    )
-
-    info = career.info if career else None
-    ledger = career.ledger if career else None
-
-    record_lines = []
-    if profile and profile.record:
-        record_lines.append(f"Pro **{profile.record}**")
-    if ledger:
-        record_lines.append(f"UFC **{ledger.record}**")
-    if record_lines:
-        embed.add_field(name="Record", value="\n".join(record_lines), inline=True)
-
-    division = (profile.weight_class if profile else None) or (
-        f"{info.weight_lb:.0f} lbs" if info and not is_nan(info.weight_lb) else None
-    )
-    if division:
-        embed.add_field(name="Division", value=division, inline=True)
-
-    if ledger and ledger.fights:
-        embed.add_field(name="Streak", value=streak(ledger), inline=True)
-
-    if ledger and ledger.fights:
-        rating = [f"**{round(ledger.elo)}**"]
-        if standing:
-            place, division = standing
-            rating.append(f"{_ordinal(place)} at {division}")
-        embed.add_field(name="Rating", value=join(rating), inline=True)
-
-    tape = []
-    height = inches(info.height_in) if info else (profile.height if profile else None)
-    reach = inches(info.reach_in) if info else (profile.reach if profile else None)
-    stance = (info.stance if info else None) or (profile.stance if profile else None)
-    years = age(info.dob) if info and info.dob else (str(profile.age) if profile and profile.age else None)
-    if height and height != DASH:
-        tape.append(f"Height {height}")
-    if reach and reach != DASH:
-        tape.append(f"Reach {reach}")
-    if stance:
-        tape.append(f"Stance {stance}")
-    if years and years != DASH:
-        tape.append(f"Age {years}")
-    if profile and profile.citizenship:
-        tape.append(f"From {profile.citizenship}")
-    if tape:
-        embed.add_field(name="Tale of the tape", value=join(tape), inline=False)
-
-    if ledger and ledger.stat_fights:
-        embed.add_field(
-            name="Striking",
-            value=(
-                f"SLpM **{num(ledger.slpm)}** · Acc. **{pct(ledger.str_acc)}**\n"
-                f"SApM **{num(ledger.sapm)}** · Def. **{pct(ledger.str_def)}**"
-            ),
-            inline=True,
-        )
-        embed.add_field(
-            name="Grappling",
-            value=(
-                f"TD Avg. **{num(ledger.td_avg)}** · Acc. **{pct(ledger.td_acc)}**\n"
-                f"TD Def. **{pct(ledger.td_def)}** · Sub. Avg. **{num(ledger.sub_avg, 1)}**"
-            ),
-            inline=True,
-        )
-        finishes = join([f"KO/TKO {ledger.wins_ko}", f"Sub {ledger.wins_sub}", f"Dec {ledger.wins_dec}"])
-        if ledger.losses:
-            finishes += "\nLosses: " + join([f"KO {ledger.losses_ko}", f"Sub {ledger.losses_sub}", f"Dec {ledger.losses_dec}"])
-        embed.add_field(name="Wins by", value=finishes, inline=False)
-        if ledger.last_fight:
-            embed.add_field(name="Last fight", value=f"{ledger.last_fight:%b %d, %Y} · {ledger.last_result or DASH}", inline=True)
-        embed.add_field(name="Fight time", value=f"{ledger.seconds / 60:.0f} min · {ledger.stat_fights} fights", inline=True)
-    elif career is None:
-        embed.add_field(
-            name="UFC stats",
-            value="No ufcstats.com record found. Debutants appear after their first fight.",
-            inline=False,
-        )
-
-    if profile and profile.headshot_url:
-        embed.set_thumbnail(url=profile.headshot_url)
-
-    return stamp(embed)
-
-
-# -- Discord scheduled events --------------------------------------------------------
-
-
-def scheduled_event_name(event: Event) -> str:
-    return truncate(event.name, SCHEDULED_EVENT_NAME_LIMIT)
-
-
-def scheduled_event_location(event: Event) -> str:
-    """Where the card is, as a city rather than a building: the arena name tells
-    nobody anything they cannot get from the city."""
-    return truncate(event.short_location, SCHEDULED_EVENT_LOCATION_LIMIT)
-
-
-def scheduled_event_description(event: Event, picks: dict[str, Prediction] | None = None) -> str:
-    """Main card summary, trimmed to Discord's 1000 character limit."""
-    lines: list[str] = []
-
-    main_card = next((bouts for _segment, bouts in event.bouts_by_segment() if bouts), [])
-    if main_card:
-        lines.append("Main card:")
-        for bout in main_card:
-            entry = f"• {bout.matchup}"
-            if bout.weight_class:
-                entry += f" ({bout.weight_class})"
-            pick = (picks or {}).get(bout.id)
-            if pick is not None and bout.has_opponents:
-                favourite = bout.fighters[0] if pick.prob_a >= 0.5 else bout.fighters[1]
-                entry += f" · pick {surname(favourite.display_name)} {pick.confidence:.0%}"
-            if len("\n".join(lines)) + len(entry) + 1 > SCHEDULED_EVENT_DESCRIPTION_LIMIT - 80:
-                lines.append("• …")
-                break
-            lines.append(entry)
-
-    if event.espn_url:
-        lines.append("")
-        lines.append(event.espn_url)
-
-    return truncate("\n".join(lines).strip(), SCHEDULED_EVENT_DESCRIPTION_LIMIT)

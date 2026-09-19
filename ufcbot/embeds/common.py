@@ -25,6 +25,9 @@ TABLE_LABEL_WIDTH = 8
 TABLE_VALUE_WIDTH = 7
 ZERO_WIDTH = "​"  # a field title that renders as nothing
 
+# Shared by every ranked list: the ratings boards and the pick'em leaderboard.
+MEDALS = {1: "🥇", 2: "🥈", 3: "🥉"}
+
 # Short names for finishing techniques where space is tight.
 SHORT_TECHNIQUE = {
     "rear-naked choke": "RNC",

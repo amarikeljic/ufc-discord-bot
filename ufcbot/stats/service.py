@@ -334,28 +334,3 @@ class StatsService:
             if prediction is not None:
                 picks[bout.id] = prediction
         return picks
-
-    # -- status ------------------------------------------------------------
-
-    def status_lines(self) -> list[str]:
-        lines = []
-        if self.careers is None:
-            lines.append("Dataset: not loaded")
-        else:
-            lines.append(f"Dataset: {self.careers.fight_count:,} fights through {self.careers.newest_event:%b %d, %Y}")
-            if self.is_behind:
-                lines.append(f"⚠️ Behind: a card on {self.expected_newest:%b %d} is not in the data yet")
-        if self.model is None:
-            lines.append("Model: not trained")
-        else:
-            lines.append(f"Model: trained {self.model.trained_at:%b %d, %Y %H:%M} on {self.model.training_fights:,} fights")
-            if self.model.evaluation:
-                lines.append(f"Accuracy: {self.model.evaluation.summary()}")
-                method = self.model.evaluation.method_summary()
-                if method:
-                    lines.append(f"Method: {method}")
-        if self.last_check:
-            lines.append(f"Last upstream check: {self.last_check:%b %d, %Y %H:%M}")
-        if self.last_error:
-            lines.append(f"Last error: {self.last_error}")
-        return lines

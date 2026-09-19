@@ -10,7 +10,12 @@ import pytest
 from ufcbot.stats.career import Ledger, division_name, division_weight
 from ufcbot.stats.features import FEATURE_NAMES, _matchup_value, matchup_row
 from ufcbot.stats.names import NameIndex
-from ufcbot.stats.rankings import divisions_with_fighters, rank_division
+from ufcbot.stats.rankings import (
+    divisions_with_fighters,
+    pound_for_pound_rank,
+    rank_division,
+    standing,
+)
 from ufcbot.stats.scorer import Blend, Boost, Linear, Tree
 
 TODAY = date(2026, 9, 18)
@@ -84,10 +89,10 @@ def test_a_no_contest_does_not_move_the_rating():
 
 def test_the_division_follows_the_most_recent_fight_at_a_limit():
     ledger = Ledger(name="x")
-    common = dict(
-        on=TODAY, result="win", method_class="dec", title_fight=False,
-        scheduled_rounds=3, total_seconds=900.0, own=None, opp=None,
-    )
+    common = {
+        "on": TODAY, "result": "win", "method_class": "dec", "title_fight": False,
+        "scheduled_rounds": 3, "total_seconds": 900.0, "own": None, "opp": None,
+    }
     ledger.record_fight(weight_class="Lightweight Bout", **common)
     ledger.record_fight(weight_class="Welterweight Bout", **common)
     assert ledger.division == "Welterweight"
@@ -202,3 +207,45 @@ def test_a_misspelling_still_finds_the_fighter():
 
 def test_nothing_is_suggested_for_nonsense():
     assert NameIndex(["Jon Jones"]).suggest("xyzq") == []
+
+
+# -- where a fighter stands ----------------------------------------------------
+
+
+def test_a_fighters_place_in_their_division_and_overall():
+    ledgers = {
+        "champ": rated("Champ", 1300),
+        "second": rated("Second", 1250),
+        "small": rated("Small", 1280, division="Flyweight"),
+    }
+
+    assert standing(ledgers, "second", on=TODAY) == (2, "Lightweight")
+    # Across every division, the flyweight sits between the two lightweights.
+    assert pound_for_pound_rank(ledgers, "second", on=TODAY) == 3
+    assert pound_for_pound_rank(ledgers, "small", on=TODAY) == 2
+
+
+def test_someone_ranked_deeper_than_a_board_prints_still_gets_a_number():
+    """The boards stop at fifteen; a profile should not say nothing about the
+    sixteenth-best fighter in a division."""
+    ledgers = {f"f{i}": rated(f"Fighter {i}", 1400 - i) for i in range(40)}
+
+    assert standing(ledgers, "f30", on=TODAY) == (31, "Lightweight")
+    assert pound_for_pound_rank(ledgers, "f30", on=TODAY) == 31
+
+
+def test_an_unranked_fighter_has_no_place():
+    ledgers = {
+        "retired": rated("Retired", 1400, ago=1200),
+        "rookie": rated("Rookie", 1300, fights=1),
+        "nodivision": rated("Catchweight Only", 1350, division=None),
+    }
+    for key in ledgers:
+        assert standing(ledgers, key, on=TODAY) is None, key
+    assert pound_for_pound_rank(ledgers, "retired", on=TODAY) is None
+    assert pound_for_pound_rank(ledgers, "rookie", on=TODAY) is None
+
+
+def test_a_fighter_nobody_has_heard_of_has_no_place():
+    assert standing({}, "who", on=TODAY) is None
+    assert pound_for_pound_rank({}, "who", on=TODAY) is None

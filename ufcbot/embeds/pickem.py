@@ -18,6 +18,7 @@ from ..models import Bout, Event
 from ..util import truncate
 from .common import (
     FIELD_LIMIT,
+    MEDALS,
     add_chunked_fields,
     fmt_odds,
     join,
@@ -31,7 +32,6 @@ if TYPE_CHECKING:
     from ..storage import PickemCard, PickemRecord, PickemStanding, PickemSummary
 
 PICKEM_TEAL = discord.Colour.from_str("#1ABC9C")
-MEDALS = {1: "🥇", 2: "🥈", 3: "🥉"}
 RESULT_ICON = {"win": "✅", "loss": "❌", "void": "➖", None: "⏳"}
 
 

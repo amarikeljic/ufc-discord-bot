@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import sys
 from pathlib import Path
@@ -50,7 +51,6 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    try:
+    # Ctrl+C is how this is meant to be stopped, so it exits quietly.
+    with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(main())
-    except KeyboardInterrupt:
-        pass

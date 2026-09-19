@@ -12,18 +12,14 @@ Graphics live in ``embeds.images`` and are imported from there directly, so
 Pillow only loads where it is used.
 """
 
-from .cards import (
-    card_changes_embed,
-    event_embed,
-    fighter_embed,
-    rankings_embed,
-    ratings_changes_embed,
-    schedule_embed,
+from .cards import card_changes_embed, event_embed, schedule_embed
+from .common import UFC_RED, stamp
+from .events import (
     scheduled_event_description,
     scheduled_event_location,
     scheduled_event_name,
 )
-from .common import UFC_RED, stamp
+from .fighters import fighter_embed
 from .live import (
     live_knockdown_text,
     live_open_embed,
@@ -39,12 +35,14 @@ from .pickem import (
     pickem_stats_embed,
 )
 from .picks import (
+    model_status_embed,
     picks_board_embed,
     prediction_embed,
     predictions_embed,
     recap_embed,
     scorecard_embed,
 )
+from .ratings import rankings_embed, ratings_changes_embed
 
 __all__ = [
     "UFC_RED",
@@ -56,6 +54,7 @@ __all__ = [
     "live_pause_text",
     "live_result_embed",
     "live_round_embed",
+    "model_status_embed",
     "pickem_board_embed",
     "pickem_card_embed",
     "pickem_leaderboard_embed",

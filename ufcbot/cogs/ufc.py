@@ -17,6 +17,7 @@ from ..embeds import (
     UFC_RED,
     event_embed,
     fighter_embed,
+    model_status_embed,
     pickem_card_embed,
     pickem_stats_embed,
     prediction_embed,
@@ -26,7 +27,7 @@ from ..embeds import (
 )
 from ..features.sync import MissingPermissions, SyncResult
 from ..models import Event
-from ..stats.rankings import standing
+from ..stats.rankings import pound_for_pound_rank, standing
 from ..storage import GuildSettings
 from ..util import truncate
 
@@ -128,18 +129,19 @@ class UFCCog(commands.Cog):
             await interaction.followup.send(self._not_found("fighter", name))
             return
 
+        place, p4p = self._standing(career)
         await interaction.followup.send(
-            embed=fighter_embed(profile, career, standing=self._standing(career))
+            embed=fighter_embed(profile, career, standing=place, pound_for_pound=p4p)
         )
 
-    def _standing(self, career) -> tuple[int, str] | None:
-        """Where this fighter sits on their division's ratings board, if anywhere."""
-        if career is None:
-            return None
-        key = self.bot.stats.resolve(career.name)
+    def _standing(self, career) -> tuple[tuple[int, str] | None, int | None]:
+        """Where this fighter sits in their division and pound for pound."""
+        key = self.bot.stats.resolve(career.name) if career else None
         if key is None:
-            return None
-        return standing(self.bot.ledgers(), key, on=date.today())
+            return None, None
+        ledgers = self.bot.ledgers()
+        today = date.today()
+        return standing(ledgers, key, on=today), pound_for_pound_rank(ledgers, key, on=today)
 
     @fighter.autocomplete("name")
     async def fighter_autocomplete(
@@ -431,16 +433,15 @@ class UFCCog(commands.Cog):
         if not self.bot.config.enable_predictions:
             await interaction.response.send_message("Predictions are disabled in this bot's config.", ephemeral=True)
             return
-        embed = discord.Embed(title="Prediction model", colour=UFC_RED)
-        embed.description = "\n".join(self.bot.stats.status_lines())
-        if self.bot.stats.model and self.bot.stats.model.importances:
-            top = self.bot.stats.model.importances[:6]
-            embed.add_field(
-                name="What matters most",
-                value="\n".join(f"• {name[2:].replace('_', ' ')}" for name, _ in top),
-                inline=False,
-            )
-        stamp(embed)
+        stats = self.bot.stats
+        embed = model_status_embed(
+            fight_count=stats.careers.fight_count if stats.careers else 0,
+            newest_event=stats.careers.newest_event if stats.careers else None,
+            behind=stats.expected_newest if stats.is_behind else None,
+            model=stats.model,
+            last_check=stats.last_check,
+            last_error=stats.last_error,
+        )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @model.command(name="refresh", description="Pull the latest fight data and retrain (bot owner only)")

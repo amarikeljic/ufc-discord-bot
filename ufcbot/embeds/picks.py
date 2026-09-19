@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import TYPE_CHECKING
 
 import discord
 
 from ..models import Event
+from ..stats.features import describe_feature
 from ..stats.prediction import Prediction
 from ..stats.techniques import FINISHES, METHOD_LABELS, METHOD_SHORT
 from ..util import truncate
@@ -38,6 +39,7 @@ from .common import (
 if TYPE_CHECKING:
     from ..features.tracking import GradedEvent, Scorecard
     from ..stats.prediction import Evaluation
+    from ..stats.scorer import CompiledModel
     from ..stats.service import FighterCareer
     from ..storage import PredictionRecord
 
@@ -290,6 +292,89 @@ def _scorecard_summary(card: Scorecard) -> str:
     if card.void:
         lines.append(f"{card.void} void (draw, NC or cancelled)")
     return "\n".join(lines)
+
+
+def model_status_embed(
+    *,
+    fight_count: int,
+    newest_event: date | None,
+    behind: date | None,
+    model: CompiledModel | None,
+    last_check: datetime | None,
+    last_error: str | None,
+) -> discord.Embed:
+    """What the model is, how well it does, and whether its data is current.
+
+    The numbers go in their own blocks rather than a paragraph: three
+    percentages against three baselines is a table, and reads like one.
+    """
+    embed = discord.Embed(title="🤖 Prediction model", colour=PICKS_PURPLE)
+
+    header = []
+    if fight_count:
+        through = f" through {newest_event:%b %d, %Y}" if newest_event else ""
+        header.append(f"**{fight_count:,}** fights on record{through}")
+    else:
+        header.append("No fight data yet.")
+    if behind:
+        header.append(f"⚠️ Behind: a card on {behind:%b %d} is not in the data yet")
+    if last_error:
+        header.append(f"⚠️ {truncate(last_error, 300)}")
+    embed.description = "\n".join(header)
+
+    evaluation = model.evaluation if model else None
+    if evaluation:
+        embed.add_field(
+            name="Picks the winner",
+            value=f"**{evaluation.accuracy:.1%}**\n{evaluation.baseline_accuracy:.1%} going on records",
+            inline=True,
+        )
+        if evaluation.method_accuracy is not None:
+            embed.add_field(
+                name="And how it ends",
+                value=f"**{evaluation.method_accuracy:.1%}**\n{evaluation.method_baseline:.1%} always a decision",
+                inline=True,
+            )
+            embed.add_field(
+                name="Both together",
+                value=f"**{evaluation.exact_accuracy:.1%}**\nwinner and method",
+                inline=True,
+            )
+        embed.add_field(
+            name="How that was measured",
+            value=(
+                f"{evaluation.fights} fights since {evaluation.holdout_from:%b %Y}, none of them used "
+                f"for training · log loss {evaluation.log_loss:.3f}"
+            ),
+            inline=False,
+        )
+        if evaluation.technique_accuracy is not None:
+            embed.add_field(
+                name="Finishing technique",
+                value=(
+                    f"{evaluation.technique_accuracy:.1%} against {evaluation.technique_baseline:.1%} for "
+                    "always guessing the commonest. Not counted towards the record."
+                ),
+                inline=False,
+            )
+    elif model is None:
+        embed.add_field(name="Status", value="Not trained yet. This happens on its own.", inline=False)
+
+    if model and model.importances:
+        embed.add_field(
+            name="What decides a fight",
+            value=join(describe_feature(name) for name, _ in model.importances[:6]),
+            inline=False,
+        )
+
+    footer = []
+    if model:
+        footer.append(f"Trained {model.trained_at:%b %d} on {model.training_fights:,} decided fights")
+    if last_check:
+        footer.append(f"checked for new data {last_check:%b %d %H:%M}")
+    if footer:
+        embed.set_footer(text=" · ".join(footer))
+    return stamp(embed)
 
 
 def scorecard_embed(card: Scorecard, *, evaluation: Evaluation | None) -> discord.Embed:

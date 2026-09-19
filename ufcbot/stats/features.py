@@ -147,6 +147,67 @@ FEATURE_NAMES = (
 )
 
 
+# What each input is, in words. The model works in column names; anything shown
+# to a reader needs the English.
+FEATURE_LABELS = {
+    "age": "age",
+    "height": "height",
+    "reach": "reach",
+    "weight": "weight",
+    "southpaw": "southpaw stance",
+    "switch": "switch stance",
+    "fights": "UFC experience",
+    "wins": "wins",
+    "losses": "losses",
+    "win_rate": "win rate",
+    "win_streak": "winning streak",
+    "loss_streak": "losing streak",
+    "last_win": "won last time out",
+    "title_fights": "title fights",
+    "five_round_fights": "five-round fights",
+    "slpm": "strikes landed a minute",
+    "str_acc": "striking accuracy",
+    "sapm": "strikes absorbed a minute",
+    "str_def": "striking defence",
+    "td_avg": "takedowns per 15 minutes",
+    "td_acc": "takedown accuracy",
+    "td_def": "takedown defence",
+    "sub_avg": "submission attempts",
+    "kd_avg": "knockdowns scored",
+    "kd_absorbed_avg": "knockdowns taken",
+    "control_share": "control time",
+    "controlled_share": "time spent underneath",
+    "finish_rate": "finish rate",
+    "ko_win_rate": "wins by knockout",
+    "sub_win_rate": "wins by submission",
+    "ko_loss_rate": "losses by knockout",
+    "sub_loss_rate": "losses by submission",
+    "avg_fight_minutes": "average fight length",
+    "total_minutes": "career fight time",
+    "days_since_last_fight": "layoff",
+    "days_active": "time in the UFC",
+    "head_share": "strikes to the head",
+    "leg_share": "strikes to the legs",
+    "ground_share": "strikes on the ground",
+    "distance_share": "strikes at distance",
+    "sig_per_total": "share of strikes that count",
+    "striking_differential": "striking differential",
+    "elo": "rating",
+    "opponent_elo": "quality of opposition",
+    "beaten_elo": "quality of wins",
+    "lost_to_elo": "quality of losses",
+    "best_win_elo": "best win",
+    "elo_over_opponents": "rating above their opposition",
+    "finish_elo": "finishing rating",
+}
+
+
+def describe_feature(name: str) -> str:
+    """"d_td_def" -> "takedown defence". Falls back to the column name, tidied."""
+    bare = name[2:] if name[:2] in ("a_", "b_", "d_") else name
+    return FEATURE_LABELS.get(bare, bare.replace("_", " "))
+
+
 def matchup_row(
     a: dict[str, float],
     b: dict[str, float],

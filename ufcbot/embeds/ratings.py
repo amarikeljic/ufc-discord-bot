@@ -1,0 +1,72 @@
+"""The ratings boards, and how they moved since they were last published."""
+
+from __future__ import annotations
+
+import discord
+
+from ..util import truncate
+from .common import DASH, MEDALS, UFC_RED, add_chunked_fields, join, keep, stamp
+
+ARROWS = {"entered": "🆕", "left": "🚪", "up": "🔼", "down": "🔽"}
+
+def rankings_embed(
+    division: str, entries: list, *, pound_for_pound: bool = False, note: bool = False
+) -> discord.Embed:
+    """One division's ratings board. ``entries`` are ``Ranked`` records.
+
+    ``note`` explains what the rating is. Only the last board posted carries it,
+    so the channel says it once rather than a dozen times.
+    """
+    embed = discord.Embed(
+        title=truncate(f"📈 {division}" if not pound_for_pound else "👑 Pound for pound", 256),
+        colour=UFC_RED,
+    )
+    if not entries:
+        embed.description = "Nobody ranked here yet."
+        return stamp(embed)
+
+    lines = []
+    for entry in entries:
+        badge = MEDALS.get(entry.rank, f"`{entry.rank:>2}`")
+        facts = [f"**{entry.rating}**", entry.record]
+        if pound_for_pound and entry.division:
+            facts.append(entry.division)
+        lines.append(f"{badge} {keep(entry.name)} · {join(facts)}")
+
+    add_chunked_fields(embed, "Ratings", lines)
+    if note:
+        embed.add_field(
+            name="About these ratings",
+            value=(
+                "The bot's own rating, not the UFC's ranking. Everyone starts level and a win "
+                "moves it by how good the fighter beaten was, so beating a contender is worth "
+                "more than beating a debutant. Nobody votes, a belt counts for nothing by "
+                "itself, and a fighter arriving from another promotion starts level however "
+                "good they already are.\n\nRanked here: three or more UFC fights and a fight "
+                "in the last two years. A fighter's division is wherever they last fought, so "
+                "a move up shows the week it happens."
+            ),
+            inline=False,
+        )
+    return stamp(embed)
+
+def ratings_changes_embed(division: str, changes: list) -> discord.Embed:
+    """How one division's board moved. ``changes`` are ``RatingChange`` records."""
+    embed = discord.Embed(title=truncate(f"📊 {division} ratings", 256), colour=UFC_RED)
+
+    lines = []
+    for change in changes:
+        mark = ARROWS.get(change.kind, "•")
+        if change.kind == "entered":
+            what = f"in at **{change.now}**"
+        elif change.kind == "left":
+            what = f"out, was **{change.was}**"
+        else:
+            what = f"**{change.was} → {change.now}**"
+        facts = [what, f"after {change.reason}"]
+        if change.rating is not None:
+            facts.append(str(change.rating))
+        lines.append(f"{mark} {keep(change.name)} · {join(facts)}")
+
+    add_chunked_fields(embed, "Moves", lines or [DASH])
+    return stamp(embed)
