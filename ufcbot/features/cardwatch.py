@@ -21,7 +21,7 @@ import discord
 from ..embeds import card_changes_embed
 from ..models import Event
 from ..sources.espn import UFCData
-from ..storage import CardBout, GuildSettings, Storage
+from ..storage import CardBout, GuildSettings, ShortNotice, Storage
 from ..util import normalise
 
 log = logging.getLogger(__name__)
@@ -61,6 +61,8 @@ class CardChange:
     """Who is in it instead."""
     opponent: str | None = None
     """The fighter who stayed."""
+    bout_id: str | None = None
+    """Which fight it was, so a replacement can be matched to it later."""
 
 
 def _bout_state(event: Event) -> list[CardBout]:
@@ -106,6 +108,7 @@ def diff(
                     left=was.name_of(next(iter(gone))),
                     arrived=bout.name_of(next(iter(arrived))),
                     opponent=bout.name_of(stayed) if stayed else None,
+                    bout_id=bout.bout_id,
                 )
             )
         elif gone and arrived:
@@ -164,9 +167,37 @@ class CardWatch:
             if changes:
                 log.info("%s changed: %s", event.name, ", ".join(c.kind for c in changes))
                 found.append((event, changes))
+                await self._remember_replacements(event, changes)
 
         await self.storage.prune_card_bouts(datetime.now(UTC) - STATE_LIFETIME)
         return found
+
+    async def _remember_replacements(self, event: Event, changes: list[CardChange]) -> None:
+        """Write down who stepped in and how much warning they had.
+
+        Nothing reads this yet. Short notice measurably costs a fighter, and no
+        public dataset records it, but the bot is already watching for exactly
+        this: it sees the card change and it knows when the card is. Collected
+        from now on, it is a feature next season that cannot be bought today.
+        """
+        seen = datetime.now(UTC)
+        rows = [
+            ShortNotice(
+                espn_event_id=event.id,
+                bout_id=change.bout_id,
+                arrived=change.arrived,
+                departed=change.left,
+                opponent=change.opponent,
+                weight_class=change.weight_class,
+                event_start=event.start,
+                noticed_at=seen,
+                days_notice=max(0.0, (event.start - seen).total_seconds() / 86400),
+            )
+            for change in changes
+            if change.kind == REPLACED and change.bout_id and change.arrived
+        ]
+        if rows:
+            await self.storage.record_short_notice(rows)
 
     async def announce(
         self,

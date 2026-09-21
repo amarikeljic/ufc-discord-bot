@@ -9,17 +9,16 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime, timedelta
 
-from conftest import bout, card, fighter, prediction
+from conftest import bout, card, fighter, pickem_record, prediction
 
 from ufcbot.embeds import (
     card_changes_embed,
-    live_knockdown_text,
     live_open_embed,
-    live_pause_text,
     live_result_embed,
     live_round_embed,
     pickem_board_embed,
     pickem_picker_embed,
+    pickem_picks_embed,
     picks_board_embed,
     predictions_embed,
     rankings_embed,
@@ -60,7 +59,7 @@ def test_the_picks_board_carries_no_betting_line():
 
     value = embed.fields[0].value.replace(" ", " ")
     assert "Odds" not in embed.description
-    assert "-160" not in value and "DraftKings" not in value
+    assert "-160" not in value and "Polymarket" not in value
     assert "Arnold Allen" in value, "the pick itself is still there"
 
 
@@ -76,22 +75,22 @@ def test_a_full_card_of_picks_fits_in_an_embed():
 
 def test_the_predictions_command_carries_no_betting_line():
     fight = bout("B1", ALLEN, PICO)
-    fight.odds, fight.odds_provider = {"1": -160, "2": 135}, "DraftKings"
+    fight.odds, fight.odds_provider = {"1": -160, "2": 135}, "Polymarket"
     embed = predictions_embed(card(fight, start=START), {"B1": prediction()})
 
     assert "Odds" not in embed.description
     assert "-160" not in embed.fields[0].value
 
 
-def test_the_pickem_board_shows_the_lines_without_naming_the_book():
-    """Pick'em takes the sportsbook's price only, so there is nothing to say
-    about where it came from."""
+def test_the_pickem_board_shows_the_lines_without_naming_the_source():
+    """Every price comes from the same place, so saying so on every board is a
+    line of text that never varies."""
     fight = bout("B1", ALLEN, PICO)
-    fight.odds, fight.odds_provider = {"1": -160, "2": 135}, "DraftKings"
+    fight.odds, fight.odds_provider = {"1": -160, "2": 135}, "Polymarket"
 
     embed = pickem_board_embed(card(fight, start=START), {}, 4, now=datetime.now(UTC))
 
-    assert "DraftKings" not in embed.description
+    assert "Polymarket" not in embed.description
     assert "Odds from" not in embed.description
     assert "-160" in embed.fields[0].value, "the price itself is still shown"
     assert within_limits(embed)
@@ -172,10 +171,6 @@ def test_every_live_post_names_the_card():
         assert embed.footer.text == name
         assert embed.timestamp is not None
 
-    # The two plain messages have no footer to put it in, so it goes on the end.
-    assert "UFC 331" in live_knockdown_text(fight, 2, "3:41", ALLEN, "UFC 331")
-    assert "UFC 331" in live_pause_text(fight, 2, "2:12", "UFC 331")
-
 
 def test_a_scheduled_event_is_located_by_city_not_arena():
     event = card(bout("B1", ALLEN, PICO), start=START)
@@ -192,10 +187,38 @@ def test_the_fighter_card_shows_the_rating_and_where_it_places():
     ledger = Ledger(name="Islam Makhachev")
     ledger.fights, ledger.wins, ledger.elo = 18, 17, 1273.4
 
-    fields = {f.name: f.value for f in fighter_embed(None, FighterCareer(ledger, None), standing=(1, "Welterweight")).fields}
+    place = Ranked(rank=1, name=ledger.name, rating=1273, record="17-1-0", division="Welterweight")
+    fields = {f.name: f.value for f in fighter_embed(None, FighterCareer(ledger, None), standing=place).fields}
 
     assert "1273" in fields["Bot Rating"]
     assert "1st at Welterweight" in fields["Bot Rating"].replace("\xa0", " ")
+
+
+def test_the_fighter_card_calls_a_shared_rank_joint():
+    from ufcbot.embeds import fighter_embed
+    from ufcbot.stats.career import Ledger
+    from ufcbot.stats.service import FighterCareer
+
+    ledger = Ledger(name="Kamaru Usman")
+    ledger.fights, ledger.wins, ledger.elo = 20, 16, 1171.0
+    place = Ranked(rank=1, name=ledger.name, rating=1171, record="16-4-0", division="Middleweight", tied=True)
+
+    fields = {f.name: f.value for f in fighter_embed(None, FighterCareer(ledger, None), standing=place).fields}
+
+    assert "joint 1st at Middleweight" in fields["Bot Rating"].replace("\xa0", " ")
+
+
+def test_the_board_marks_a_shared_rank_and_does_not_hand_out_two_of_a_medal():
+    entries = [
+        Ranked(rank=1, name="A", rating=1200, record="10-0-0", division="Lightweight"),
+        Ranked(rank=2, name="B", rating=1171, record="9-1-0", division="Lightweight", tied=True),
+        Ranked(rank=2, name="C", rating=1171, record="9-1-0", division="Lightweight", tied=True),
+    ]
+    text = rankings_embed("Lightweight", entries).fields[0].value
+
+    assert "\U0001f947" in text, "the outright leader keeps the gold"
+    assert text.count("\U0001f948") == 0, "a shared second is not a silver medal"
+    assert text.count("=") == 2
 
 
 def test_the_model_status_card_reads_without_repeating_itself():
@@ -246,3 +269,53 @@ def test_the_status_card_says_so_when_there_is_no_model():
     )
     assert "No fight data yet" in embed.description
     assert any("Not trained yet" in f.value for f in embed.fields)
+
+
+# -- everyone's picks for a card -------------------------------------------------
+
+
+def graded(record, result: str, points: int):
+    record.result, record.points = result, points
+    record.graded_at = datetime.now(UTC)
+    return record
+
+
+def test_a_cards_picks_are_grouped_by_fight_with_who_backed_whom(soon):
+    picks = [
+        pickem_record(user_id=11, bout_id="B1", athlete_id="A", opponent_id="B", locks_at=soon),
+        pickem_record(user_id=22, bout_id="B1", athlete_id="A", opponent_id="B", locks_at=soon),
+        pickem_record(user_id=33, bout_id="B1", athlete_id="B", opponent_id="A", locks_at=soon),
+    ]
+    embed = pickem_picks_embed("UFC 331", picks)
+
+    assert "3 players" in embed.description and "3 picks" in embed.description
+    assert len(embed.fields) == 1, "one fight, one field"
+    value = embed.fields[0].value
+    assert "<@11>" in value and "<@22>" in value and "<@33>" in value
+    # Both corners are listed, and the heading reads the same way either way.
+    assert embed.fields[0].name == "Fighter A vs. Fighter B"
+
+
+def test_picks_still_to_lock_are_counted_but_not_shown():
+    embed = pickem_picks_embed("UFC 331", [], hidden=7)
+
+    assert not embed.fields
+    assert "lock" in embed.description
+
+
+def test_a_card_nobody_played_says_so():
+    assert "Nobody picked" in pickem_picks_embed("UFC 331", []).description
+
+
+def test_the_card_scores_only_appear_once_something_has_been_graded(soon):
+    pending = [pickem_record(user_id=11, bout_id="B1", athlete_id="A", opponent_id="B", locks_at=soon)]
+    assert not any(field.name == "Card scores" for field in pickem_picks_embed("UFC 331", pending).fields)
+
+    settled = [
+        graded(pickem_record(user_id=11, bout_id="B1", athlete_id="A", opponent_id="B", locks_at=soon), "win", 44),
+        graded(pickem_record(user_id=22, bout_id="B1", athlete_id="B", opponent_id="A", locks_at=soon), "loss", -100),
+    ]
+    scores = next(field for field in pickem_picks_embed("UFC 331", settled).fields if field.name == "Card scores")
+    # The winner leads, and both totals carry their sign.
+    assert scores.value.index("<@11>") < scores.value.index("<@22>")
+    assert "+44" in scores.value and "-100" in scores.value

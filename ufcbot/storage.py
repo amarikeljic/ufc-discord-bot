@@ -88,6 +88,26 @@ CREATE TABLE IF NOT EXISTS ranking_state (
 );
 
 -- Messages the bot maintains in configured channels, so they can be edited.
+CREATE TABLE IF NOT EXISTS notices_sent (
+    kind     TEXT NOT NULL,
+    subject  TEXT NOT NULL,
+    sent_at  TEXT NOT NULL,
+    PRIMARY KEY (kind, subject)
+);
+
+CREATE TABLE IF NOT EXISTS short_notice (
+    espn_event_id TEXT NOT NULL,
+    bout_id       TEXT NOT NULL,
+    arrived       TEXT NOT NULL,
+    departed      TEXT,
+    opponent      TEXT,
+    weight_class  TEXT,
+    event_start   TEXT NOT NULL,
+    noticed_at    TEXT NOT NULL,
+    days_notice   REAL NOT NULL,
+    PRIMARY KEY (espn_event_id, bout_id, arrived)
+);
+
 CREATE TABLE IF NOT EXISTS channel_posts (
     guild_id   INTEGER NOT NULL,
     kind       TEXT    NOT NULL,
@@ -250,6 +270,25 @@ class CardBout(NamedTuple):
 
     def name_of(self, athlete_id: str) -> str:
         return next((name for athlete, name in self.fighters if athlete == athlete_id), athlete_id)
+
+
+@dataclass(slots=True)
+class ShortNotice:
+    """A fighter who stepped into a bout after it was made, and how long before.
+
+    Kept because no public dataset records it and the bot is already watching
+    for it. Nothing reads it yet.
+    """
+
+    espn_event_id: str
+    bout_id: str
+    arrived: str
+    departed: str | None
+    opponent: str | None
+    weight_class: str | None
+    event_start: datetime
+    noticed_at: datetime
+    days_notice: float
 
 
 @dataclass(slots=True)
@@ -955,6 +994,79 @@ class Storage:
             rows = await cursor.fetchall()
         return [_pickem_from_row(row) for row in rows]
 
+    async def record_short_notice(self, rows: list[ShortNotice]) -> None:
+        """Remember replacements. A fighter already recorded for a bout is left alone,
+        so the first sighting is the one kept and re-reading a card changes nothing."""
+        await self.db.executemany(
+            """
+            INSERT OR IGNORE INTO short_notice
+                (espn_event_id, bout_id, arrived, departed, opponent, weight_class,
+                 event_start, noticed_at, days_notice)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    row.espn_event_id, row.bout_id, row.arrived, row.departed, row.opponent,
+                    row.weight_class, row.event_start.isoformat(), row.noticed_at.isoformat(),
+                    row.days_notice,
+                )
+                for row in rows
+            ],
+        )
+        await self.db.commit()
+
+    async def short_notice_for(self, espn_event_id: str) -> list[ShortNotice]:
+        """Replacements recorded on one card, least notice first."""
+        async with self.db.execute(
+            "SELECT * FROM short_notice WHERE espn_event_id = ? ORDER BY days_notice, bout_id",
+            (espn_event_id,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return [
+            ShortNotice(
+                espn_event_id=row["espn_event_id"],
+                bout_id=row["bout_id"],
+                arrived=row["arrived"],
+                departed=row["departed"],
+                opponent=row["opponent"],
+                weight_class=row["weight_class"],
+                event_start=datetime.fromisoformat(row["event_start"]),
+                noticed_at=datetime.fromisoformat(row["noticed_at"]),
+                days_notice=row["days_notice"],
+            )
+            for row in rows
+        ]
+
+    async def notice_due(self, kind: str, subject: str) -> bool:
+        """Whether this is the first time the bot has had to say this.
+
+        Records it as said, so a warning that repeats every pass is posted once.
+        """
+        async with self.db.execute(
+            "SELECT 1 FROM notices_sent WHERE kind = ? AND subject = ?", (kind, subject)
+        ) as cursor:
+            if await cursor.fetchone() is not None:
+                return False
+        await self.db.execute(
+            "INSERT INTO notices_sent (kind, subject, sent_at) VALUES (?, ?, ?)",
+            (kind, subject, datetime.now(UTC).isoformat()),
+        )
+        await self.db.commit()
+        return True
+
+    async def pickem_card_picks(self, guild_id: int, espn_event_id: str) -> list[PickemRecord]:
+        """Every member's picks for one card, in the order the fights are fought."""
+        async with self.db.execute(
+            """
+            SELECT * FROM pickem_picks
+            WHERE guild_id = ? AND espn_event_id = ?
+            ORDER BY locks_at DESC, bout_id, user_id
+            """,
+            (guild_id, espn_event_id),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return [_pickem_from_row(row) for row in rows]
+
     async def pickem_counts(self, guild_id: int, espn_event_id: str) -> dict[str, dict[str, int]]:
         """Bout id -> fighter id -> number of members who picked them.
 
@@ -1064,8 +1176,14 @@ class Storage:
         await self.db.commit()
         return graded + cursor.rowcount
 
-    async def pickem_leaderboard(self, guild_id: int) -> list[PickemStanding]:
-        """Every member with a settled pick, highest points first."""
+    async def pickem_leaderboard(
+        self, guild_id: int, espn_event_id: str | None = None
+    ) -> list[PickemStanding]:
+        """Every member with a settled pick, highest points first.
+
+        With an event, only that card counts, which is the same standings read
+        over one night instead of all of them.
+        """
         async with self.db.execute(
             """
             SELECT user_id,
@@ -1075,10 +1193,11 @@ class Storage:
                    COUNT(DISTINCT espn_event_id) AS cards
             FROM pickem_picks
             WHERE guild_id = ? AND result IN ('win', 'loss')
+              AND (? IS NULL OR espn_event_id = ?)
             GROUP BY user_id
             ORDER BY points DESC, wins DESC, losses ASC, user_id
             """,
-            (guild_id,),
+            (guild_id, espn_event_id, espn_event_id),
         ) as cursor:
             rows = await cursor.fetchall()
         return [

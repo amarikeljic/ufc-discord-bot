@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import random
 import time
 from collections import OrderedDict
-from typing import Any
+from typing import Any, NamedTuple
 
 import aiohttp
 
@@ -21,6 +22,52 @@ USER_AGENT = (
 
 class HttpError(Exception):
     """Raised when a request fails after all retries."""
+
+
+# Nothing can read an entry past its lifetime, so they are dropped on a timer
+# and not only when the cache fills. A card's play-by-play is cached for ten
+# seconds and a board's for fifteen minutes; without this, a quiet bot holds
+# hundreds of parsed payloads that no caller will ever be given again.
+SWEEP_INTERVAL = 120
+
+# The cache is capped by the weight of what it holds as well as the number of
+# things it holds, because those two are barely related. A pass over a full
+# schedule reads about 300 documents and 1.3MB of JSON, but parsed into Python
+# objects that costs roughly eight times its own size in memory -- a few hundred
+# thousand small dicts and strings. A cap counted only in entries therefore lets
+# the cache grow to several times the working set it exists to serve, which is
+# most of the difference between a bot that sits at 70MB and one that drifts
+# past 190MB after a day. Responses are measured as they arrive, which is free,
+# and the budget leaves ample room for that working set.
+MAX_BYTES = 4 * 1024 * 1024
+
+# ESPN sends these on its ``$ref`` links and not on the URLs built by hand, so
+# the same document arrives under two spellings. They do not change the
+# response, so they do not belong in the key: without this the largest documents
+# of all, the event cards, are held twice.
+IGNORED_QUERY = ("lang", "region")
+
+
+def cache_key(url: str) -> str:
+    """The URL with the parameters that do not change the response removed."""
+    base, separator, query = url.partition("?")
+    if not separator:
+        return url
+    kept = [
+        part
+        for part in query.split("&")
+        if part and part.split("=", 1)[0] not in IGNORED_QUERY
+    ]
+    return f"{base}?{'&'.join(kept)}" if kept else base
+
+
+class Entry(NamedTuple):
+    """One cached response: when it arrived, how long it may be served, and its weight."""
+
+    stored_at: float
+    ttl: int
+    payload: Any
+    size: int
 
 
 class HttpClient:
@@ -38,21 +85,24 @@ class HttpClient:
         max_concurrency: int = 8,
         timeout: int = 20,
         max_entries: int = 1500,
+        max_bytes: int = MAX_BYTES,
     ) -> None:
         self._cache_ttl = cache_ttl
         self._max_entries = max_entries
+        self._max_bytes = max_bytes
         self._semaphore = asyncio.Semaphore(max_concurrency)
         self._timeout = aiohttp.ClientTimeout(total=timeout)
         self._session: aiohttp.ClientSession | None = None
         # Ordered by how recently each entry was read, oldest first, so the cache
         # can be kept to a size worth holding without dropping what is in use.
-        # Entries are (stored at, longest TTL asked for, payload).
         #
         # The default leaves room for what a board pass actually touches. Each
         # fighter on a card costs two documents, a profile and a record, both held
         # for a day, so a dozen upcoming cards is already several hundred entries;
         # a cap below that would evict them between passes and fetch them again.
-        self._cache: OrderedDict[str, tuple[float, int, Any]] = OrderedDict()
+        self._cache: OrderedDict[str, Entry] = OrderedDict()
+        self._held = 0
+        self._last_sweep = time.monotonic()
         self._inflight: dict[str, asyncio.Future] = {}
 
     async def start(self) -> None:
@@ -83,13 +133,14 @@ class HttpClient:
         """
         ttl = self._cache_ttl if ttl is None else ttl
         now = time.monotonic()
+        key = cache_key(url)
 
-        cached = self._cache.get(url)
-        if cached is not None and now - cached[0] < ttl:
-            self._cache.move_to_end(url)
-            return cached[2]
+        cached = self._cache.get(key)
+        if cached is not None and now - cached.stored_at < ttl:
+            self._cache.move_to_end(key)
+            return cached.payload
 
-        existing = self._inflight.get(url)
+        existing = self._inflight.get(key)
         if existing is not None:
             return await asyncio.shield(existing)
 
@@ -97,22 +148,22 @@ class HttpClient:
         # Nothing awaits this future when no other caller joined, so retrieve any
         # exception to keep asyncio from warning about it.
         future.add_done_callback(lambda f: f.cancelled() or f.exception())
-        self._inflight[url] = future
+        self._inflight[key] = future
         try:
-            payload = await self._fetch_json(url)
+            payload, size = await self._fetch_json(url)
         except Exception as exc:  # propagated to every waiter
             if not future.done():
                 future.set_exception(exc)
             raise
         else:
-            self._store(url, payload, ttl)
+            self._store(key, payload, ttl, size)
             if not future.done():
                 future.set_result(payload)
             return payload
         finally:
-            self._inflight.pop(url, None)
+            self._inflight.pop(key, None)
 
-    def _store(self, url: str, payload: Any, ttl: int) -> None:
+    def _store(self, key: str, payload: Any, ttl: int, size: int) -> None:
         """Cache a response and keep the cache to its size.
 
         A URL can be asked for with different lifetimes -- live coverage wants a
@@ -120,26 +171,41 @@ class HttpClient:
         the longest lifetime asked for decides when the entry is swept, while
         each caller still compares against its own.
         """
-        previous = self._cache.get(url)
-        longest = max(ttl, previous[1]) if previous else ttl
-        self._cache[url] = (time.monotonic(), longest, payload)
-        self._cache.move_to_end(url)
-        if len(self._cache) > self._max_entries:
+        previous = self._cache.get(key)
+        longest = max(ttl, previous.ttl) if previous else ttl
+        if previous is not None:
+            self._held -= previous.size
+        now = time.monotonic()
+        self._cache[key] = Entry(now, longest, payload, size)
+        self._held += size
+        self._cache.move_to_end(key)
+        if (
+            len(self._cache) > self._max_entries
+            or self._held > self._max_bytes
+            or now - self._last_sweep >= SWEEP_INTERVAL
+        ):
             self._trim()
 
     def _trim(self) -> None:
-        """Drop expired entries, then the least recently read, until within size.
+        """Drop expired entries, then the least recently read, until within both caps.
 
         Fighter profiles are held for a day each, so a long-running bot would
         otherwise keep every athlete it has ever looked at.
         """
         now = time.monotonic()
-        for key in [k for k, (at, ttl, _) in self._cache.items() if now - at >= ttl]:
-            del self._cache[key]
-        while len(self._cache) > self._max_entries:
-            self._cache.popitem(last=False)
+        self._last_sweep = now
+        for key in [k for k, entry in self._cache.items() if now - entry.stored_at >= entry.ttl]:
+            self._held -= self._cache.pop(key).size
+        while self._cache and (len(self._cache) > self._max_entries or self._held > self._max_bytes):
+            self._held -= self._cache.popitem(last=False)[1].size
 
-    async def _fetch_json(self, url: str, attempts: int = 3) -> Any:
+    async def _fetch_json(self, url: str, attempts: int = 3) -> tuple[Any, int]:
+        """The parsed response and the size of the body it came from.
+
+        The body is read before it is parsed, which is what ``response.json``
+        does anyway, so its length costs nothing and is a far better measure of
+        what the entry will weigh than counting it as one of anything.
+        """
         session = self._session_or_raise()
         last_error: Exception | None = None
 
@@ -156,8 +222,10 @@ class HttpClient:
                         log.debug("Retryable %s from %s", response.status, url)
                         continue
                     response.raise_for_status()
-                    # Several ESPN hosts return JSON under a text/plain content type.
-                    return await response.json(content_type=None)
+                    # Several ESPN hosts return JSON under a text/plain content type,
+                    # so the body is parsed directly rather than by content type.
+                    body = await response.read()
+                    return json.loads(body), len(body)
             except HttpError:
                 raise
             except (TimeoutError, aiohttp.ClientError) as exc:

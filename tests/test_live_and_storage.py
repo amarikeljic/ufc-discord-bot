@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import sqlite3
+import time
 from datetime import UTC, datetime, timedelta
 
 from ufcbot.features.live import LiveCoverage
 from ufcbot.models import Bout, Fighter
+from ufcbot.sources.http import SWEEP_INTERVAL, Entry, HttpClient, cache_key
 from ufcbot.storage import Storage
+from ufcbot.util import format_duration
 
 
 def pending_bout(index: int, *, completed: bool = False) -> Bout:
@@ -99,3 +102,76 @@ async def test_an_older_database_is_upgraded_in_place(tmp_path):
         assert settings.rankings_include_women is True, "the default for a server that never chose"
     finally:
         await store.close()
+
+
+# -- the response cache ----------------------------------------------------------
+
+
+def held(client: HttpClient, key: str, *, age: float = 0.0, ttl: int = 86400, size: int = 100) -> None:
+    client._cache[key] = Entry(time.monotonic() - age, ttl, {"payload": key}, size)
+    client._held += size
+
+
+def test_expired_responses_are_dropped_on_a_timer_not_only_when_the_cache_fills():
+    """A quiet bot never reaches either cap, so nothing would evict what has gone
+    stale: hundreds of parsed payloads no caller can be given again."""
+    client = HttpClient()
+    held(client, "stale", age=3600, ttl=10)
+    held(client, "fresh")
+
+    client._last_sweep = time.monotonic() - SWEEP_INTERVAL - 1
+    client._store("new", {"a": 1}, ttl=900, size=10)
+
+    assert "stale" not in client._cache, "past its lifetime and unreadable"
+    assert set(client._cache) == {"fresh", "new"}
+
+
+def test_a_sweep_that_has_just_run_is_not_run_again():
+    client = HttpClient()
+    held(client, "stale", age=3600, ttl=10)
+
+    client._last_sweep = time.monotonic()
+    client._store("new", {"a": 1}, ttl=900, size=10)
+
+    assert "stale" in client._cache, "swept at most once every SWEEP_INTERVAL"
+
+
+def test_a_heavy_cache_is_trimmed_even_when_it_holds_few_things():
+    """Entries vary from a couple of kilobytes to well over a hundred, so a cap
+    counted in entries alone says almost nothing about what is being held."""
+    client = HttpClient(max_bytes=1000)
+    for index in range(5):
+        held(client, f"old{index}", size=300)
+
+    client._store("new", {"a": 1}, ttl=900, size=300)
+
+    assert client._held <= 1000
+    assert "new" in client._cache, "what just arrived is what is wanted"
+    assert "old0" not in client._cache, "the least recently read goes first"
+
+
+def test_the_weight_of_a_replaced_entry_is_not_counted_twice():
+    client = HttpClient()
+    client._store("same", {"a": 1}, ttl=900, size=500)
+    client._store("same", {"a": 2}, ttl=900, size=700)
+
+    assert client._held == 700
+
+
+def test_espn_link_parameters_that_change_nothing_share_one_entry():
+    """ESPN sends lang and region on its $ref links but not on URLs built by
+    hand, and the response is identical. Keyed separately, the biggest documents
+    of all are held twice."""
+    assert cache_key("https://x/events/1?lang=en&region=us") == "https://x/events/1"
+    assert cache_key("https://x/events/1") == "https://x/events/1"
+    # Anything that does change the response stays in the key.
+    assert cache_key("https://x/plays?limit=300&lang=en") == "https://x/plays?limit=300"
+
+
+# -- how long the bot has been up ------------------------------------------------
+
+
+def test_an_uptime_reads_in_the_two_units_that_matter():
+    assert format_duration(30) == "0m"
+    assert format_duration(90 * 60) == "1h 30m"
+    assert format_duration(26 * 3600 + 5 * 60) == "1d 2h", "days and hours, not minutes too"

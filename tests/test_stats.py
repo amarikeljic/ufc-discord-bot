@@ -12,8 +12,10 @@ from ufcbot.stats.features import FEATURE_NAMES, _matchup_value, matchup_row
 from ufcbot.stats.names import NameIndex
 from ufcbot.stats.rankings import (
     divisions_with_fighters,
+    is_fading,
     pound_for_pound_rank,
     rank_division,
+    rating_on,
     standing,
 )
 from ufcbot.stats.scorer import Blend, Boost, Linear, Tree
@@ -219,19 +221,21 @@ def test_a_fighters_place_in_their_division_and_overall():
         "small": rated("Small", 1280, division="Flyweight"),
     }
 
-    assert standing(ledgers, "second", on=TODAY) == (2, "Lightweight")
+    place = standing(ledgers, "second", on=TODAY)
+    assert (place.rank, place.division) == (2, "Lightweight")
     # Across every division, the flyweight sits between the two lightweights.
-    assert pound_for_pound_rank(ledgers, "second", on=TODAY) == 3
-    assert pound_for_pound_rank(ledgers, "small", on=TODAY) == 2
+    assert pound_for_pound_rank(ledgers, "second", on=TODAY).rank == 3
+    assert pound_for_pound_rank(ledgers, "small", on=TODAY).rank == 2
 
 
 def test_someone_ranked_deeper_than_a_board_prints_still_gets_a_number():
     """The boards stop at fifteen; a profile should not say nothing about the
     sixteenth-best fighter in a division."""
-    ledgers = {f"f{i}": rated(f"Fighter {i}", 1400 - i) for i in range(40)}
+    ledgers = {f"f{i}": rated(f"Fighter {i}", 1400 - 20 * i) for i in range(40)}
 
-    assert standing(ledgers, "f30", on=TODAY) == (31, "Lightweight")
-    assert pound_for_pound_rank(ledgers, "f30", on=TODAY) == 31
+    place = standing(ledgers, "f30", on=TODAY)
+    assert (place.rank, place.division) == (31, "Lightweight")
+    assert pound_for_pound_rank(ledgers, "f30", on=TODAY).rank == 31
 
 
 def test_an_unranked_fighter_has_no_place():
@@ -249,3 +253,81 @@ def test_an_unranked_fighter_has_no_place():
 def test_a_fighter_nobody_has_heard_of_has_no_place():
     assert standing({}, "who", on=TODAY) is None
     assert pound_for_pound_rank({}, "who", on=TODAY) is None
+
+
+# -- a rating fades while a fighter is not defending it --------------------------
+
+
+def test_a_rating_holds_through_an_ordinary_gap_between_fights():
+    """Fighters go most of a year between bouts all the time; that is not a layoff."""
+    for days in (30, 200, 364):
+        assert rating_on(rated("X", 1300, ago=days), TODAY) == 1300
+
+
+def test_a_long_layoff_fades_the_margin_the_fighter_built():
+    year_out = rating_on(rated("X", 1300, ago=365 + 365), TODAY)
+    half_out = rating_on(rated("X", 1300, ago=365 + 182), TODAY)
+
+    # A year past the grace period halves what they hold over the start.
+    assert year_out == 1150
+    assert 1150 < half_out < 1300
+    assert is_fading(rated("X", 1300, ago=400), TODAY)
+    assert not is_fading(rated("X", 1300, ago=300), TODAY)
+
+
+def test_fading_never_drags_a_fighter_below_where_they_started():
+    """Only the margin fades, so sitting still cannot make someone worse than a debutant."""
+    assert rating_on(rated("X", 900, ago=365 + 365), TODAY) == 950
+    assert rating_on(rated("X", 1000, ago=365 + 365), TODAY) == 1000
+
+
+def test_a_retired_fighter_stops_outranking_the_division_he_left():
+    """The case this was built for: a great fighter long gone, still sitting above
+    the man who actually holds the division now.
+
+    Two rules share the work. Fading closes the gap while he is away; the cut
+    takes him off once he has been away too long to count as a fighter at all.
+    """
+    champ = rated("Current Champ", 1170, ago=99)
+
+    def board(ago: int) -> list[str]:
+        ledgers = {"gone": rated("Retired Great", 1296, ago=ago), "champ": champ}
+        return [entry.name for entry in rank_division(ledgers, "Lightweight", on=TODAY)]
+
+    assert board(100) == ["Retired Great", "Current Champ"], "recently active: he is simply better"
+    assert rating_on(rated("Retired Great", 1296, ago=500), TODAY) < 1296, "away a year and more: fading"
+    assert board(600) == ["Current Champ"], "away too long to rank at all"
+
+
+# -- ratings too close to separate share a rank ----------------------------------
+
+
+def test_fighters_within_a_handful_of_points_share_a_rank():
+    ledgers = {
+        "a": rated("Clear", 1250),
+        "b": rated("Close", 1188),
+        "c": rated("Closer", 1186),
+    }
+    board = rank_division(ledgers, "Lightweight", on=TODAY)
+
+    assert [entry.rank for entry in board] == [1, 2, 2]
+    assert [entry.tied for entry in board] == [False, True, True]
+
+
+def test_a_tie_does_not_chain_across_the_whole_board():
+    """Each is within TIE_GAP of the one above, but the ends are far apart, so
+    they are not all one rank."""
+    ledgers = {str(i): rated(f"F{i}", 1200 - 4 * i) for i in range(6)}
+    ranks = [entry.rank for entry in rank_division(ledgers, "Lightweight", on=TODAY)]
+
+    assert ranks == [1, 1, 3, 3, 5, 5]
+
+
+def test_a_board_comes_back_the_same_way_twice():
+    """The change watcher compares one board against the last, so an arbitrary
+    order among equals would announce moves that never happened."""
+    ledgers = {"a": rated("Zoe", 1200), "b": rated("Adam", 1200)}
+    once = [entry.name for entry in rank_division(ledgers, "Lightweight", on=TODAY)]
+    again = [entry.name for entry in rank_division(dict(reversed(ledgers.items())), "Lightweight", on=TODAY)]
+
+    assert once == again == ["Adam", "Zoe"]

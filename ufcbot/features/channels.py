@@ -33,8 +33,15 @@ from ..stats.prediction import Evaluation, Prediction
 from ..stats.rankings import POUND_FOR_POUND, divisions_with_fighters, rank_division
 from ..storage import GuildSettings, Storage
 from ..ui.pickem import board_view
-from ..util import normalise
-from .pickem import OPEN, PickemService, bout_status, card_over
+from ..util import normalise, truncate
+from .pickem import (
+    OPEN,
+    PickemService,
+    benchmarks,
+    bout_status,
+    card_over,
+    ready_to_open,
+)
 from .tracking import PredictionTracker, build_scorecard
 
 log = logging.getLogger(__name__)
@@ -53,6 +60,10 @@ PICKEM_TITLES = ("🎯 Pick'em:", "🏁 Pick'em results", "🏆 Pick'em leaderbo
 
 # Keep editing a card's board this long after it starts, so results show up.
 PICKS_BOARD_LIFETIME = timedelta(days=4)
+
+# A card that has started is asked for this fresh: its winner flags change by the
+# minute and the board is redrawn as soon as live coverage posts a result.
+LIVE_CARD_TTL = 60
 
 # Discord allows roughly five message edits per channel every five seconds.
 WRITE_SPACING = 1.2
@@ -183,8 +194,10 @@ class ChannelPublisher:
         for summary in upcoming:
             # Without the full card there is nothing to re-record against, so the
             # board is rebuilt from what is already on record rather than from a
-            # card that happens to have no fights on it.
-            event = await self.data.get_event(summary.id)
+            # card that happens to have no fights on it. A card under way is asked
+            # for fresh: winner flags live in that document, and this board is
+            # rebuilt the moment live coverage posts a result.
+            event = await self.data.get_event(summary.id, ttl=LIVE_CARD_TTL if summary.start <= now else None)
             if event is None:
                 log.debug("Card for %s did not load; leaving its picks as they are", summary.name)
                 event = summary
@@ -331,21 +344,20 @@ class ChannelPublisher:
                 # and deleting a board takes everyone's picks off the screen.
                 log.debug("Keeping the pick'em board for %s; its card did not load", event_id)
                 continue
-            retire = (
-                (current is not None and event.start > current.start)
-                or now - event.start > PICKS_BOARD_LIFETIME
-                or (card_over(event, now) and await self.storage.pickem_unscored_count(guild.id, event_id) == 0)
-            )
-            if retire:
+            if (current is not None and event.start > current.start) or now - event.start > PICKS_BOARD_LIFETIME:
                 await self._remove_post(guild, channel, KIND_PICKEM, event_id, result)
                 removed = True
+            elif card_over(event, now) and await self.storage.pickem_unscored_count(guild.id, event_id) == 0:
+                # Everything is scored, so the board has nothing left to offer and
+                # becomes what people actually want to see: how the card went.
+                await self._pickem_results(guild, channel, event, result, force)
             else:
                 # Finished but still waiting on results: keep showing winners until scored.
                 await self._pickem_board(guild, channel, event, result, force, now)
 
         if current is not None:
             has_board = await self.storage.get_post(guild.id, KIND_PICKEM, current.id) is not None
-            if has_board or any(len(bout.odds) == 2 for bout in current.bouts):
+            if has_board or ready_to_open(current, now):
                 created = await self._pickem_board(guild, channel, current, result, force, now)
 
         if created or removed or force:
@@ -356,11 +368,52 @@ class ChannelPublisher:
             channel,
             KIND_PICKEM_LEADERBOARD,
             BOARD_KEY,
-            pickem_leaderboard_embed(await self.storage.pickem_leaderboard(guild.id)),
+            pickem_leaderboard_embed(
+                await self.storage.pickem_leaderboard(guild.id),
+                subtitle="Every card since the bot started keeping score.",
+                benchmarks=benchmarks(await self.storage.graded_predictions()),
+            ),
             result,
             force=force,
             # A new card's board lands at the bottom; move the leaderboard back below it.
             resend=created,
+        )
+
+    async def _pickem_results(
+        self,
+        guild: discord.Guild,
+        channel: discord.TextChannel,
+        event: Event,
+        result: PublishResult,
+        force: bool,
+    ) -> None:
+        """One card's final standings, in place of the board it replaces.
+
+        The same message is edited rather than a new one posted, so the card
+        keeps its place in the channel and nobody has to scroll past a board
+        that is over to reach the one that is next.
+        """
+        standings = await self.storage.pickem_leaderboard(guild.id, event.id)
+        scores = benchmarks(await self.storage.predictions_for_event(event.id))
+        result.pickem_boards += 1
+        await self._upsert(
+            guild,
+            channel,
+            KIND_PICKEM,
+            event.id,
+            pickem_leaderboard_embed(
+                standings,
+                title=truncate(f"🏁 Pick'em results: {event.name}", 256),
+                subtitle=f"📅 {discord.utils.format_dt(event.start, 'D')}",
+                benchmarks=scores,
+                empty="Nobody played this card.",
+            ),
+            result,
+            force=force,
+            # The picks buttons go with the card. An empty view clears them,
+            # where passing none would leave them on a card nobody can pick.
+            view=discord.ui.View(),
+            extra="results",
         )
 
     async def _pickem_board(

@@ -5,9 +5,8 @@ recorded once in the database, so a restart mid-card never repeats a post. ESPN
 only publishes cumulative fight stats, so per-round numbers are the difference
 between the totals captured at the end of consecutive rounds.
 
-Order for each fight: "Up next" as they walk out, knockdowns as they happen,
-stats at the end of every round including the last, then the result once the
-decision has been read out.
+Order for each fight: "Up next" as they walk out, stats at the end of every
+round including the last, then the result once the decision has been read out.
 """
 
 from __future__ import annotations
@@ -20,15 +19,9 @@ from datetime import UTC, datetime, timedelta
 
 import discord
 
-from ..embeds import (
-    live_knockdown_text,
-    live_open_embed,
-    live_pause_text,
-    live_result_embed,
-    live_round_embed,
-)
+from ..embeds import live_open_embed, live_result_embed, live_round_embed
 from ..embeds.images import IMAGE_NAME, MatchupImages
-from ..models import Bout, Event, Fighter
+from ..models import Bout, Event
 from ..sources.espn import UFCData
 from ..stats.service import FighterCareer
 from ..stats.techniques import method_from_espn, technique_from_espn
@@ -47,8 +40,6 @@ STATS_SETTLE = timedelta(seconds=20)
 # ESPN logs a "Results" play when the official decision is read. If it never
 # arrives, post the result anyway once this long has passed since the fight ended.
 OFFICIAL_FALLBACK = timedelta(minutes=10)
-# Knockdown counts to attribute the next knockdown to a fighter.
-KD_SNAPSHOT_ROUND = -1
 # How many fights past the one under way to keep watching, so a walkout is never
 # missed if ESPN is slow to mark the fight before it finished.
 LOOKAHEAD = 3
@@ -184,12 +175,7 @@ class LiveCoverage:
 
         if not done and over is not None:
             # Joined after the fight ended: skip the play-by-play and post only the result.
-            for key in (
-                ["open"]
-                + [f"kd:{p['id']}" for p in plays if p["type"] == "Knockdown"]
-                + [f"pause:{p['id']}" for p in plays if p["type"] == "Round Pause"]
-                + [f"round:{p['period']}" for p in plays if p["type"] == "Round End"]
-            ):
+            for key in ["open"] + [f"round:{p['period']}" for p in plays if p["type"] == "Round End"]:
                 await self.storage.mark_live_posted(bout.id, key)
             done = await self.storage.live_posted(bout.id)
 
@@ -221,39 +207,6 @@ class LiveCoverage:
                 embed.set_image(url=f"attachment://{IMAGE_NAME}")
             await self._send(channels, embed=embed, image=image)
             await self._mark(bout, "open", done)
-            posted += 1
-
-        for play in plays:
-            if play["type"] != "Knockdown":
-                continue
-            key = f"kd:{play['id']}"
-            if key in done:
-                continue
-            scorer = await self._knockdown_scorer(bout)
-            await self._send(
-                channels,
-                content=live_knockdown_text(
-                    bout, play["period"], play["clock"], scorer, event.short_name or event.name
-                ),
-            )
-            await self._mark(bout, key, done)
-            posted += 1
-
-        for play in plays:
-            # ESPN pauses the clock for a foul, a doctor's look or a kit problem.
-            # The restart is not posted: one message per stoppage is the news.
-            if play["type"] != "Round Pause":
-                continue
-            key = f"pause:{play['id']}"
-            if key in done:
-                continue
-            await self._send(
-                channels,
-                content=live_pause_text(
-                    bout, play["period"], play["clock"], event.short_name or event.name
-                ),
-            )
-            await self._mark(bout, key, done)
             posted += 1
 
         for play in plays:
@@ -394,19 +347,6 @@ class LiveCoverage:
         if len(raw) < 2:
             return None
         return {athlete: summarise(values) for athlete, values in raw.items()}
-
-    async def _knockdown_scorer(self, bout: Bout) -> Fighter | None:
-        """Whoever's knockdown count went up since the last check, if ESPN's stats show it yet."""
-        totals = await self._totals(bout)
-        if totals is None:
-            return None
-        previous = await self.storage.live_snapshot(bout.id, KD_SNAPSHOT_ROUND) or {}
-        await self.storage.save_live_snapshot(bout.id, KD_SNAPSHOT_ROUND, totals)
-        risers = [
-            athlete for athlete, stats in totals.items()
-            if stats["kd"] > (previous.get(athlete) or {}).get("kd", 0.0)
-        ]
-        return bout.fighter(risers[0]) if len(risers) == 1 else None
 
     @staticmethod
     def _odds(bout: Bout, record) -> tuple[dict[str, int], str | None]:

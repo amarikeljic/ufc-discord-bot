@@ -1,4 +1,4 @@
-"""Live coverage posts: fight previews, knockdowns, round stats and results."""
+"""Live coverage posts: fight previews, round stats and results."""
 
 from __future__ import annotations
 
@@ -163,40 +163,6 @@ def live_open_embed(
             embed.add_field(name="Tale of the tape", value=tape, inline=False)
     embed.set_footer(text=truncate(event_name, 2048))
     return stamp(embed)
-
-
-def _when(period: int, clock: str | None) -> str:
-    return f"R{period} {clock}" if clock and clock != "-" else f"R{period}"
-
-
-def live_knockdown_text(
-    bout: Bout, period: int, clock: str | None, scorer: Fighter | None, event_name: str | None = None
-) -> str:
-    when = _when(period, clock)
-    opponent = bout.opponent(scorer.id) if scorer else None
-    if scorer and opponent:
-        text = f"💥 **Knockdown!** {scorer.display_name} drops {opponent.display_name} · {keep(when)}"
-    else:
-        text = f"💥 **Knockdown!** {bout.matchup} · {keep(when)}"
-    return _on_card(text, event_name)
-
-
-def live_pause_text(bout: Bout, period: int, clock: str | None, event_name: str | None = None) -> str:
-    """A fight stopped mid-round: a foul, a doctor's look, a glove or mouthpiece.
-
-    ESPN records that the clock stopped but never why, so this says only that.
-    """
-    return _on_card(f"⏸️ **Action paused** · {bout.matchup} · {keep(_when(period, clock))}", event_name)
-
-
-def _on_card(text: str, event_name: str | None) -> str:
-    """Name the card at the end of a plain message.
-
-    The embeds around these two carry the card in their footer; a plain message
-    has nowhere else to put it. It goes last and is left breakable, so it is the
-    part that wraps on a narrow screen rather than the news.
-    """
-    return f"{text} · {event_name}" if event_name else text
 
 
 def live_round_embed(

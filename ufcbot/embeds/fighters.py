@@ -22,6 +22,7 @@ from .common import (
 )
 
 if TYPE_CHECKING:
+    from ..stats.rankings import Ranked
     from ..stats.service import FighterCareer
 
 
@@ -31,12 +32,17 @@ def _ordinal(number: int) -> str:
         return f"{number}th"
     return f"{number}{ {1: 'st', 2: 'nd', 3: 'rd'}.get(number % 10, 'th') }"
 
+
+def _place(entry: Ranked) -> str:
+    """Where a fighter stands: "4th", or "joint 4th" when the rating is too close to call."""
+    return f"joint {_ordinal(entry.rank)}" if entry.tied else _ordinal(entry.rank)
+
 def fighter_embed(
     profile: Fighter | None,
     career: FighterCareer | None,
     *,
-    standing: tuple[int, str] | None = None,
-    pound_for_pound: int | None = None,
+    standing: Ranked | None = None,
+    pound_for_pound: Ranked | None = None,
 ) -> discord.Embed:
     """Profile card: ESPN bio plus the exact ufcstats.com career numbers."""
     name = (career.name if career else None) or (profile.display_name if profile else "Unknown")
@@ -70,12 +76,14 @@ def fighter_embed(
         embed.add_field(name="Streak", value=streak(ledger), inline=True)
 
     if ledger and ledger.fights:
-        rating = [f"**{round(ledger.elo)}**"]
+        # The board's number, not the raw one: a rating faded by a long layoff
+        # has to read the same here as it does where they are ranked.
+        shown = standing or pound_for_pound
+        rating = [f"**{shown.rating if shown else round(ledger.elo)}**"]
         if standing:
-            place, division = standing
-            rating.append(f"{_ordinal(place)} at {division}")
+            rating.append(f"{_place(standing)} at {standing.division}")
         if pound_for_pound:
-            rating.append(f"{_ordinal(pound_for_pound)} P4P")
+            rating.append(f"{_place(pound_for_pound)} P4P")
         embed.add_field(name="Bot Rating", value=join(rating), inline=True)
 
     tape = []

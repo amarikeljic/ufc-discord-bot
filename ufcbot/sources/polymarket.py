@@ -1,10 +1,15 @@
-"""Odds from Polymarket, used for fights no sportsbook line reaches.
+"""Odds from Polymarket, the bot's only source of prices.
 
-ESPN carries DraftKings moneylines for numbered UFC cards, but not for Dana
-White's Contender Series. Polymarket lists both. It is a prediction market
-rather than a bookmaker: a price is the crowd's probability, so 0.545 means a
-fighter is a 54.5% favourite, which reads as a moneyline of -120. Because the
-two sides sum to 1, the price carries no bookmaker margin.
+ESPN carries one sportsbook, DraftKings, and carries it patchily: one fight of
+thirteen on a numbered card, none at all on Dana White's Contender Series. The
+market prices every fight on every card, so it is the source rather than the
+fallback it began as.
+
+It is a prediction market rather than a bookmaker: a price is the crowd's
+probability, so 0.545 means a fighter is a 54.5% favourite, which reads as a
+moneyline of -120. Because the two sides sum to 1, the price carries no
+bookmaker margin, which makes it a fairer thing to stake pick'em points on than
+a book's line.
 
 Everything here is best effort. A miss returns ``None`` and the caller shows the
 fight without odds.

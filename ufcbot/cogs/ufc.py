@@ -5,7 +5,10 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
-from datetime import date, timedelta
+import math
+import sys
+from datetime import date, datetime, timedelta
+from datetime import time as time_of_day
 from typing import TYPE_CHECKING
 
 import discord
@@ -18,18 +21,20 @@ from ..embeds import (
     event_embed,
     fighter_embed,
     model_status_embed,
-    pickem_card_embed,
+    pickem_picks_embed,
     pickem_stats_embed,
     prediction_embed,
     predictions_embed,
-    scorecard_embed,
+    stale_data_embed,
     stamp,
 )
+from ..embeds.common import plural
+from ..features.cardwatch import news_channel
 from ..features.sync import MissingPermissions, SyncResult
 from ..models import Event
-from ..stats.rankings import pound_for_pound_rank, standing
+from ..stats.rankings import Ranked, pound_for_pound_rank, standing
 from ..storage import GuildSettings
-from ..util import truncate
+from ..util import central_time, format_duration, resident_memory_mb, truncate
 
 if TYPE_CHECKING:
     from ..bot import UFCBot
@@ -39,6 +44,26 @@ log = logging.getLogger(__name__)
 # Live coverage bookkeeping is only needed while a card can still be interrupted
 # by a restart; after this it is dead weight in the database.
 LIVE_HISTORY = timedelta(days=14)
+
+# The boards are rebuilt on the hour rather than on a timer from start-up, so
+# "last updated" means the same thing whenever the bot was last restarted.
+ON_THE_HOUR = [time_of_day(hour=hour) for hour in range(24)]
+
+# Scheduled events are mirrored once a night, on Central time. A card being added
+# to the calendar is days-ahead news, so the only thing the hour decides is that
+# it does not arrive in the middle of a card.
+MIDNIGHT_CENTRAL = [time_of_day(hour=0, tzinfo=central_time())]
+
+# How long the newest card can be missing upstream before the bot says so. Two
+# days is ordinary lateness; beyond that something is wrong worth knowing about.
+STALE_DATA_AFTER = timedelta(days=4)
+
+# A live post makes the boards wrong at once -- a winner named, a pick settled --
+# so they are rebuilt there and then instead of waiting for the hour. Posts arrive
+# in bursts, so a rebuild that comes too soon after the last one waits for the
+# next tick rather than being dropped: the update always lands, at worst this
+# long after the post that caused it.
+LIVE_REFRESH_COOLDOWN = timedelta(seconds=45)
 
 
 class UFCCog(commands.Cog):
@@ -76,18 +101,18 @@ class UFCCog(commands.Cog):
 
     def __init__(self, bot: UFCBot) -> None:
         self.bot = bot
+        self._last_live_refresh: datetime | None = None
+        # Set when live coverage posts something, cleared once the boards have
+        # caught up with it.
+        self._boards_stale = False
 
     async def cog_load(self) -> None:
-        self.sync_loop.change_interval(minutes=self.bot.config.sync_interval_minutes)
         self.sync_loop.start()
-        if self.bot.config.enable_predictions:
-            self.stats_loop.start()
         self.channels_loop.start()
         self.live_loop.start()
 
     async def cog_unload(self) -> None:
         self.sync_loop.cancel()
-        self.stats_loop.cancel()
         self.channels_loop.cancel()
         self.live_loop.cancel()
 
@@ -134,7 +159,7 @@ class UFCCog(commands.Cog):
             embed=fighter_embed(profile, career, standing=place, pound_for_pound=p4p)
         )
 
-    def _standing(self, career) -> tuple[tuple[int, str] | None, int | None]:
+    def _standing(self, career) -> tuple[Ranked | None, Ranked | None]:
         """Where this fighter sits in their division and pound for pound."""
         key = self.bot.stats.resolve(career.name) if career else None
         if key is None:
@@ -252,16 +277,6 @@ class UFCCog(commands.Cog):
     ) -> list[app_commands.Choice[str]]:
         return await self._event_choices(current)
 
-    @ufc.command(name="scorecard", description="How the model's picks have done since tracking began")
-    async def scorecard(self, interaction: discord.Interaction) -> None:
-        settings = await self._settings(interaction.guild_id)
-        card = await self.bot.tracker.scorecard(settings.tracking_since)
-        embed = scorecard_embed(card, evaluation=self.bot.evaluation)
-        if not card.total:
-            embed.description = (
-                "No graded picks yet. Picks lock when a card starts and are scored once results are in."
-            )
-        await interaction.response.send_message(embed=embed)
 
     # -- pick'em ---------------------------------------------------------------
 
@@ -274,26 +289,23 @@ class UFCCog(commands.Cog):
         cards = await self.bot.storage.pickem_user_cards(guild_id, target.id)
         await interaction.response.send_message(embed=pickem_stats_embed(target, summary, cards))
 
-    @pickem.command(name="card", description="Pick-by-pick results for one card")
-    @app_commands.describe(event="Card name, for example 'UFC 331'", member="Whose picks to show; defaults to you")
-    async def pickem_card(
-        self, interaction: discord.Interaction, event: str, member: discord.Member | None = None
-    ) -> None:
-        target = member or interaction.user
-        is_self = target.id == interaction.user.id
-        # Your own unlocked picks stay private; other members' unlocked picks stay hidden.
-        await interaction.response.defer(ephemeral=is_self)
+    @pickem.command(name="picks", description="Everyone's picks for one card, fight by fight")
+    @app_commands.describe(event="Card name, for example 'UFC 331'")
+    async def pickem_picks(self, interaction: discord.Interaction, event: str) -> None:
+        await interaction.response.defer()
         found = await self.bot.data.find_event(event)
         if found is None:
             await interaction.followup.send(f"No event matched **{truncate(event, 80)}**.", ephemeral=True)
             return
-        picks = await self.bot.storage.pickem_user_picks(interaction.guild_id or 0, target.id, found.id)
+        picks = await self.bot.storage.pickem_card_picks(interaction.guild_id or 0, found.id)
+        # A pick is nobody's business until its fight locks, or the card would be
+        # a list of answers for whoever asks last.
         now = discord.utils.utcnow()
-        visible = picks if is_self else [pick for pick in picks if pick.locks_at <= now]
-        embed = pickem_card_embed(target, found.name, visible, hidden=len(picks) - len(visible))
-        await interaction.followup.send(embed=embed, ephemeral=is_self)
+        visible = [pick for pick in picks if pick.locks_at <= now]
+        embed = pickem_picks_embed(found.name, visible, hidden=len(picks) - len(visible))
+        await interaction.followup.send(embed=embed)
 
-    @pickem_card.autocomplete("event")
+    @pickem_picks.autocomplete("event")
     async def pickem_card_autocomplete(
         self, interaction: discord.Interaction, current: str
     ) -> list[app_commands.Choice[str]]:
@@ -307,6 +319,46 @@ class UFCCog(commands.Cog):
             if needle in name.casefold()
         ][:25]
 
+    # -- health -----------------------------------------------------------------
+
+    @ufc.command(name="ping", description="Round trip to Discord, how long the bot has been up, and memory")
+    async def ping(self, interaction: discord.Interaction) -> None:
+        # Measured around the reply itself: the gateway heartbeat says how far
+        # away Discord is, this says how long the bot took to answer.
+        started = discord.utils.utcnow()
+        await interaction.response.defer()
+
+        gateway = self.bot.latency
+        up = (discord.utils.utcnow() - self.bot.started_at).total_seconds()
+        lines = [
+            "🏓 Gateway **—**" if math.isnan(gateway) else f"🏓 Gateway **{gateway * 1000:.0f} ms**",
+            f"↩️ Response **{(discord.utils.utcnow() - started).total_seconds() * 1000:.0f} ms**",
+            f"⏱️ Up **{format_duration(up)}** · since {discord.utils.format_dt(self.bot.started_at, 'f')}",
+            f"🌐 {plural(len(self.bot.guilds), 'server')}",
+        ]
+
+        memory = resident_memory_mb()
+        if memory is not None:
+            lines.append(f"🧠 Memory **{memory:,.0f} MB**")
+        if "pandas" in sys.modules:
+            # Training normally runs in a subprocess that exits and gives its
+            # memory back. Where spawning is unavailable it falls back to this
+            # process, and what it loads there stays for the life of the bot.
+            lines.append("⚠️ Training ran in this process · restart to give back ~150 MB")
+
+        stats = self.bot.stats
+        if self.bot.config.enable_predictions:
+            newest = stats.careers.newest_event if stats.careers else None
+            if stats.can_predict:
+                state = f"ready · data to {newest:%b %d}" if newest else "ready"
+            else:
+                state = "not loaded"
+            lines.append(f"🤖 Model {state}")
+
+        name = self.bot.user.display_name if self.bot.user else "Bot"
+        embed = discord.Embed(title=name, description="\n".join(lines), colour=UFC_RED)
+        await interaction.followup.send(embed=stamp(embed))
+
     # -- channel boards ---------------------------------------------------------
 
     @channels.command(name="set", description="Choose channels for picks, accuracy, schedule and live fight coverage")
@@ -314,7 +366,7 @@ class UFCCog(commands.Cog):
         predictions="Channel for the picks board (one message per upcoming card)",
         accuracy="Channel for results recaps and the running scorecard",
         schedule="Channel for the upcoming-cards board",
-        live="Channel for live coverage: fight previews, knockdowns, round stats and results",
+        live="Channel for live coverage: fight previews, round stats and results",
         pickem="Channel for the pick'em game: the next card's board and the leaderboard",
         rankings="Channel for the ratings boards: one per division, plus pound for pound",
         womens_divisions="Include the women's divisions on the ratings boards (default yes)",
@@ -555,7 +607,7 @@ class UFCCog(commands.Cog):
             value=f"<#{settings.announce_channel_id}>" if settings.announce_channel_id else "Off",
             inline=True,
         )
-        embed.add_field(name="Runs every", value=f"{self.bot.config.sync_interval_minutes} min", inline=True)
+        embed.add_field(name="Runs", value="Nightly at midnight Central", inline=True)
         await interaction.response.send_message(embed=stamp(embed), ephemeral=True)
 
     @sync.command(name="settings", description="Change how cards are mirrored into this server")
@@ -656,8 +708,9 @@ class UFCCog(commands.Cog):
 
     # -- background jobs ----------------------------------------------------
 
-    @tasks.loop(minutes=180)
+    @tasks.loop(time=MIDNIGHT_CENTRAL)
     async def sync_loop(self) -> None:
+        """Mirror upcoming cards into this server's scheduled events."""
         for settings in await self.bot.storage.guilds_with_sync_enabled():
             guild = self.bot.get_guild(settings.guild_id)
             if guild is None:
@@ -676,14 +729,19 @@ class UFCCog(commands.Cog):
     async def before_sync_loop(self) -> None:
         await self.bot.wait_until_ready()
 
-    @tasks.loop(minutes=60)
-    async def stats_loop(self) -> None:
+    async def _refresh_stats(self) -> None:
         """Keep the dataset and model current.
 
         The most recent completed card on ESPN tells the service which event it
-        should expect to find upstream; while that card is missing the service
-        polls more often, since the dataset maintainer publishes the morning after.
+        should expect to find upstream. While that card is missing the service
+        checks on every pass instead of waiting: the maintainer publishes once a
+        day, in one go, and the check itself costs four conditional requests.
+
+        This runs first in the hourly pass so that a retrain's new ratings are
+        announced and drawn by the rest of it, rather than a pass later.
         """
+        if not self.bot.config.enable_predictions:
+            return
         stats = self.bot.stats
         try:
             recent = await self.bot.data.recent_events(days=21, limit=1)
@@ -692,18 +750,23 @@ class UFCCog(commands.Cog):
         except Exception as exc:  # freshness hint is optional
             log.debug("Could not determine the latest completed card: %r", exc)
 
-        if stats.needs_check():
-            result = await stats.refresh()
-            if result.downloaded or result.retrained:
-                log.info("Stats refresh: %s", result.message)
+        if not stats.needs_check():
+            return
+        result = await stats.refresh()
+        if result.downloaded or result.retrained:
+            log.info("Stats refresh: %s", result.message)
 
-    @stats_loop.before_loop
-    async def before_stats_loop(self) -> None:
-        await self.bot.wait_until_ready()
-
-    @tasks.loop(minutes=20)
+    @tasks.loop(time=ON_THE_HOUR)
     async def channels_loop(self) -> None:
-        """Grade finished cards, look for card changes, then refresh every board."""
+        """The hourly pass, in the order the steps depend on each other.
+
+        New data first, so everything below it describes the same fights: grade
+        what has finished, tidy up, then say what changed and redraw the boards.
+        """
+        try:
+            await self._refresh_stats()
+        except Exception:  # the rest of the pass still has work to do
+            log.exception("Refreshing the fight dataset failed")
         try:
             graded = await self.bot.tracker.grade_due()
             if graded:
@@ -718,6 +781,12 @@ class UFCCog(commands.Cog):
             await self.bot.storage.prune_live_data(discord.utils.utcnow() - LIVE_HISTORY)
         except Exception:  # housekeeping is never worth a failed tick
             log.exception("Pruning live coverage history failed")
+
+        await self._announce_and_publish()
+
+    async def _announce_and_publish(self) -> None:
+        """Say what has changed since the last look, then redraw every board."""
+        stale = await self._stale_notice()
 
         # Found once for everyone: whichever guild looked first would otherwise
         # be the only one told about a fight coming off a card.
@@ -739,15 +808,78 @@ class UFCCog(commands.Cog):
             try:
                 await self.bot.cardwatch.announce(guild, settings, changes)
                 await self.bot.ratingswatch.announce(guild, settings, moves)
+                if stale is not None:
+                    channel = news_channel(guild, settings)
+                    if channel is not None:
+                        await channel.send(embed=stale)
             except Exception:
                 log.exception("Announcing changes failed in guild %s", guild.id)
+
+        await self._publish_boards()
+
+    async def _stale_notice(self) -> discord.Embed | None:
+        """A warning when the dataset has stopped arriving, or None while it is fine.
+
+        A broken refresh is invisible otherwise: the boards keep drawing happily
+        from whatever was last downloaded. Said once per card that fails to
+        land, so a genuinely dead pipeline does not become daily noise.
+        """
+        stats = self.bot.stats
+        expected = stats.expected_newest
+        if not self.bot.config.enable_predictions or not stats.is_behind or expected is None:
+            return None
+        if date.today() - expected < STALE_DATA_AFTER:
+            return None  # upstream is often a day or two late; that is not news
+        if not await self.bot.storage.notice_due("stale_data", expected.isoformat()):
+            return None
+        newest = stats.careers.newest_event if stats.careers else None
+        return stale_data_embed(expected, newest, stats.last_error)
+
+    async def _publish_boards(self) -> None:
+        """Bring every guild's boards in line with what the bot knows now."""
+        for settings in await self.bot.storage.guilds_with_channels():
+            guild = self.bot.get_guild(settings.guild_id)
+            if guild is None:
+                continue
             result = await self.bot.publisher.publish(guild, settings)
             if result.errors:
                 log.warning("Boards in guild %s: %s", guild.id, "; ".join(result.errors))
 
+    async def _refresh_after_live(self) -> None:
+        """Redraw the boards once live coverage has posted something.
+
+        A result names a winner and settles pick'em points, and both boards show
+        it; on the hourly pass alone they would disagree with the live channel
+        for most of an hour.
+
+        Called on every tick while the boards are behind, not only on the tick
+        that posted. A fight's last round and its result often post seconds
+        apart, and the second of those is the one worth showing; holding the
+        flag until the rebuild actually runs means it is never the one dropped.
+        """
+        now = discord.utils.utcnow()
+        if self._last_live_refresh is not None and now - self._last_live_refresh < LIVE_REFRESH_COOLDOWN:
+            return  # too soon; the next tick will pick this up
+        self._last_live_refresh = now
+        self._boards_stale = False
+        try:
+            await self.bot.pickem.grade_due()
+        except Exception:  # the boards can still refresh
+            log.exception("Pick'em grading after a live update failed")
+        try:
+            await self._publish_boards()
+        except Exception:  # never worth killing the live loop over
+            log.exception("Refreshing the boards after a live update failed")
+
     @channels_loop.before_loop
     async def before_channels_loop(self) -> None:
         await self.bot.wait_until_ready()
+        # A loop on a clock waits for the next hour before its first run, so a
+        # restart at 3:05 would leave yesterday's boards up until 4:00.
+        try:
+            await self.channels_loop()
+        except Exception:
+            log.exception("The first board refresh after start-up failed")
 
     @tasks.loop(seconds=15)
     async def live_loop(self) -> None:
@@ -764,9 +896,13 @@ class UFCCog(commands.Cog):
         if not channels:
             return
         try:
-            await self.bot.live.tick(channels)
+            posted = await self.bot.live.tick(channels)
         except Exception:  # keep the loop alive through a bad tick
             log.exception("Live coverage tick failed")
+            return
+        self._boards_stale = self._boards_stale or bool(posted)
+        if self._boards_stale:
+            await self._refresh_after_live()
 
     @live_loop.before_loop
     async def before_live_loop(self) -> None:

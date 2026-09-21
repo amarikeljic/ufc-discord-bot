@@ -23,6 +23,7 @@ from ..stats.career import Ledger
 from ..stats.rankings import (
     divisions_with_fighters,
     is_eligible,
+    is_fading,
     is_womens,
     rank_division,
 )
@@ -38,7 +39,8 @@ DOWN = "down"
 
 # Why a fighter's standing moved.
 AFTER_RESULT = {"win": "a win", "loss": "a loss", "draw": "a draw", "nc": "a no contest"}
-INACTIVE = "not having fought in two years"
+INACTIVE = "not having fought in eighteen months"
+LAYOFF = "a long layoff"
 PUSHED = "results around them"
 
 
@@ -53,7 +55,7 @@ class RatingChange:
 
 
 def _reason(current, previous: RankedState | None, ledger: Ledger | None, on: date) -> str:
-    """Why this fighter moved: their own last fight, or everyone else's."""
+    """Why this fighter moved: their own last fight, their own absence, or everyone else's."""
     fought = current is not None and current.last_fight != (previous.last_fight if previous else None)
     if fought and current.last_result:
         return AFTER_RESULT.get(current.last_result, "a fight")
@@ -62,6 +64,10 @@ def _reason(current, previous: RankedState | None, ledger: Ledger | None, on: da
         if ledger is None or not is_eligible(ledger, on):
             return INACTIVE
         return PUSHED
+    if ledger is not None and is_fading(ledger, on):
+        # Still ranked, but slipping under their own rating rather than anyone
+        # else's results.
+        return LAYOFF
     return PUSHED
 
 

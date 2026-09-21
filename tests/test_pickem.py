@@ -11,7 +11,14 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from conftest import bout, card, fighter, pickem_record, unnamed_bout
 
-from ufcbot.features.pickem import WRONG_PICK_POINTS, PickemService, points_for
+from ufcbot.features.pickem import (
+    WRONG_PICK_POINTS,
+    PickemService,
+    benchmarks,
+    fully_priced,
+    points_for,
+)
+from ufcbot.storage import PredictionRecord
 
 MOICANO = fighter("20", "Renato Moicano")
 ORTEGA = fighter("21", "Brian Ortega")
@@ -146,3 +153,70 @@ async def test_void_picks_are_left_out_of_the_crowd_split(storage, soon):
 
     counts = await storage.pickem_counts(1, "EV1")
     assert counts.get("M1") == {"21": 1}
+
+
+# -- opening the board ---------------------------------------------------------
+
+
+def test_the_game_opens_only_once_every_fight_is_priced(soon):
+    a, b, c, d = (fighter(f"F{i}", f"Fighter {i}") for i in range(4))
+    one, two = bout("B1", a, b), bout("B2", c, d)
+    event = card(one, two, start=soon)
+
+    assert not fully_priced(event), "no odds at all"
+
+    one.odds = {a.id: -150, b.id: 130}
+    assert not fully_priced(event), "half the card priced is half a game"
+
+    two.odds = {c.id: -110}
+    assert not fully_priced(event), "one corner priced is not a fight anyone can pick"
+
+    two.odds[d.id] = -110
+    assert fully_priced(event)
+
+
+def test_a_card_with_no_named_fights_is_not_priced(soon):
+    assert not fully_priced(card(unnamed_bout("B1"), start=soon))
+
+
+# -- what the model and the market scored on the same fights ---------------------
+
+
+def graded_prediction(bout_id: str, *, prob_a: float, odds_a: int, odds_b: int, winner: str) -> PredictionRecord:
+    return PredictionRecord(
+        espn_event_id="EV1", bout_id=bout_id, event_name="UFC 333",
+        event_start=datetime.now(UTC), athlete_a="A", name_a="Fighter A",
+        athlete_b="B", name_b="Fighter B", prob_a=prob_a, weight_class="Lightweight",
+        position=0, odds_a=odds_a, odds_b=odds_b, winner_athlete=winner,
+        correct=(winner == ("A" if prob_a >= 0.5 else "B")),
+    )
+
+
+def test_the_model_and_the_market_are_scored_the_way_a_member_is():
+    # The model likes A, the book has B shorter, and B wins.
+    records = [graded_prediction("B1", prob_a=0.7, odds_a=200, odds_b=-250, winner="B")]
+
+    model, market = benchmarks(records)
+
+    assert (model.name, model.wins, model.losses) == ("🤖 The bot", 0, 1)
+    assert model.points == WRONG_PICK_POINTS
+    assert (market.wins, market.losses) == (1, 0)
+    assert market.points == points_for(-250), "paid at the price it backed"
+
+
+def test_a_fight_nobody_could_have_picked_is_not_scored():
+    """Pick'em only opens fights with both prices, and a draw is void for
+    everyone, so counting either would compare different sets of fights."""
+    unpriced = PredictionRecord(
+        espn_event_id="EV1", bout_id="B1", event_name="UFC 333", event_start=datetime.now(UTC),
+        athlete_a="A", name_a="A", athlete_b="B", name_b="B", prob_a=0.7,
+        weight_class="Lightweight", position=0, winner_athlete="A", correct=True,
+    )
+    drawn = graded_prediction("B2", prob_a=0.7, odds_a=-150, odds_b=130, winner="A")
+    drawn.winner_athlete = None
+
+    assert benchmarks([unpriced, drawn]) == []
+
+
+def test_nothing_is_claimed_before_a_card_is_graded():
+    assert benchmarks([]) == []

@@ -62,7 +62,6 @@ class Bout:
     completed: bool = False
 
     # Links to the per-fight documents, followed only when needed.
-    odds_ref: str | None = None
     status_ref: str | None = None
     plays_ref: str | None = None
     stats_refs: dict[str, str] = field(default_factory=dict)

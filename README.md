@@ -20,22 +20,27 @@ have done.
 - **Scorecard.** A running record of the model's accuracy, split by confidence, with the
   betting favourites' record over the same fights as a benchmark.
 - **Live coverage.** During a card: a preview as fighters walk out, with both fighters'
-  tale of the tape and career stats, then knockdown alerts, a note when the referee
-  stops the action mid-round, stats after every round, and the official result with
-  judges' scores. Previews and results include a side-by-side headshot graphic.
+  tale of the tape and career stats, then stats after every round, and the official
+  result with judges' scores. Previews and results include a side-by-side headshot
+  graphic. A result redraws the picks and pick'em boards at once, so nothing on screen
+  disagrees with the live channel.
 - **Card changes.** A fight coming off the card, a short-notice replacement or a bout
   added late is announced as soon as it shows up, days before the card if that is when
-  it happens.
+  it happens. Replacements are also written down with how much warning the fighter had:
+  nothing reads that yet, but no public dataset records it and the bot is already
+  watching, so it is a model input next season that cannot be bought today.
 - **Ratings moves.** When a division's board changes, the move is announced with the
-  reason: in, out, up or down, after a win, a loss, inactivity, or results around them.
+  reason: in, out, up or down, after a win, a loss, a long layoff, or results around them.
 - **Pick'em.** Members pick winners for the next UFC card from a private menu once odds
   are posted. A right pick scores what a 100-point bet would win at those odds, so
-  underdogs pay more; a wrong pick costs 100 points. The channel holds just the current
-  card and a server leaderboard, and members can check their win rate and card-by-card
-  history.
+  underdogs pay more; a wrong pick costs 100 points. When a card is scored its board
+  becomes that card's leaderboard, with an all-time leaderboard below it. Both show what
+  the model and the favourites scored on the same fights, so you can see whether you beat
+  them, without either being ranked among the players.
 - **Ratings.** A board per division and a pound-for-pound board, ranked by the rating the
   model itself trains on: everyone starts level and a win moves it by how good the fighter
-  beaten was.
+  beaten was. A rating fades once a fighter has been out over a year, and fighters too
+  close to separate share a rank.
 - **Discord scheduled events.** Every upcoming card mirrored into your server's events.
 
 ## Commands
@@ -46,9 +51,9 @@ have done.
 | `/ufc fighter <name>` | Fighter profile and career stats |
 | `/ufc predict <a> <b> [rounds] [title]` | Head-to-head prediction |
 | `/ufc predictions [event]` | Picks for every fight on a card |
-| `/ufc scorecard` | The model's record since tracking began |
 | `/ufc pickem stats [member]` | Points, rank, win rate and card history |
-| `/ufc pickem card <event> [member]` | Pick-by-pick results for one card |
+| `/ufc pickem picks <event>` | Everyone's picks for one card, fight by fight |
+| `/ufc ping` | Latency, uptime and memory |
 | `/ufc channels set` | Choose channels for picks, accuracy, schedule, live coverage, pick'em and ratings |
 | `/ufc channels status` / `refresh` / `clear` | Manage those channels |
 | `/ufc sync enable` / `disable` / `now` / `status` / `settings` | Discord scheduled events |
@@ -119,7 +124,6 @@ All settings live in `.env`; see `.env.example` for descriptions.
 | `DISCORD_TOKEN` | required | Bot token |
 | `DEV_GUILD_IDS` | empty | Servers where commands register instantly |
 | `DATABASE_PATH` | `ufcbot.sqlite3` | SQLite database file |
-| `SYNC_INTERVAL_MINUTES` | `180` | How often scheduled events sync |
 | `DEFAULT_DAYS_AHEAD` | `60` | How far ahead to track cards |
 | `DEFAULT_EVENT_DURATION_MINUTES` | `240` | Length of each scheduled event |
 | `DEFAULT_START_ANCHOR` | `main_card` | Scheduled events start at `main_card` or `prelims` |
@@ -128,6 +132,7 @@ All settings live in `.env`; see `.env.example` for descriptions.
 | `ENABLE_PREDICTIONS` | `true` | Stats, predictions and picks |
 | `DATA_DIR` / `MODEL_DIR` | `data` / `models` | Dataset and trained model locations |
 | `STATS_REFRESH_HOURS` | `24` | How often to check for new fight data |
+| `LOG_LEVEL` | `INFO` | Logging verbosity |
 
 ## How it works
 
@@ -136,20 +141,33 @@ All settings live in `.env`; see `.env.example` for descriptions.
 | What | How often |
 | --- | --- |
 | Live channel | Every 15 seconds during a card |
-| Picks, schedule and scorecard boards | Every 20 minutes |
-| Changes to upcoming cards | Every 20 minutes |
-| Moves on the ratings boards | Every 20 minutes |
+| Picks, schedule and scorecard boards | On the hour, and the moment a live post goes out |
+| Changes to upcoming cards | On the hour |
+| Moves on the ratings boards | On the hour |
+| Fight dataset and model | On the hour, and acted on only when it is due |
 | Odds and fight card data | Cached for 10 and 15 minutes |
-| Discord scheduled events | Every 3 hours |
-| Fight dataset and model | Checked daily; every 6 hours after a card until new data arrives |
+| Discord scheduled events | Nightly at midnight Central |
+
+Everything but live coverage and the nightly sync happens in one pass on the hour, in the
+order the steps depend on each other: check for new fight data, grade what has finished,
+then announce what changed and redraw the boards. New ratings are therefore announced and
+drawn by the same pass that downloaded them. The pass is on the hour rather than on a
+timer from start-up, so "last updated" means the same thing whether the bot was restarted
+at noon or at half past, and it also runs once immediately on start-up so a restart does
+not leave stale boards up until the hour.
+
+Checking for fight data is not the same as downloading it. `STATS_REFRESH_HOURS` (24 by
+default) is how long the bot waits between real checks; while it knows a card is missing
+upstream it checks every hour instead, and an unchanged check is four conditional
+requests that come back "not modified".
 
 Boards are edited in place, and only when their content changes, so an unchanged refresh
 makes no Discord API calls.
 
 A change to a card — a withdrawal, a replacement, a bout added — reaches the boards
-within about half an hour: up to fifteen minutes of cached card data, then the next
-twenty-minute pass. What the boards cannot do is get ahead of ESPN, which is often a day
-or more behind on short-notice changes. When a fight's two fighters are no longer the two
+within about an hour and a quarter: up to fifteen minutes of cached card data, then the
+next pass on the hour. What the boards cannot do is get ahead of ESPN, which is often a
+day or more behind on short-notice changes. When a fight's two fighters are no longer the two
 the pick was made for, the pick is dropped rather than shown against a fight that is not
 happening.
 
@@ -166,30 +184,51 @@ points, favourite or underdog.
 | +235 underdog | +235 | -100 |
 
 Points are locked in with the odds at the moment you pick; changing a pick uses the
-new odds. The game runs on the next UFC card only. Picks open once a sportsbook posts
-lines for a fight and lock when that part of the card starts. Draws, no contests and
+new odds. The game runs on the next UFC card only. The board goes up once every fight on
+the card has been priced — or, inside the last 48 hours, on whatever prices exist, so one
+prelim that never gets a line cannot keep the whole server from playing. Each pick locks
+when that part of the card starts. Draws, no contests and
 cancelled fights are void, and so is a pick on a fighter who was replaced before the
 bell: that fight never happened, so the pick scores nothing either way rather than
 counting as a loss. A fight coming off the card is voided as soon as the bot sees it
 go, rather than sitting in your picks as pending until the card is over.
 Other members' picks stay hidden until the fight locks,
-though the board shows the overall split. When the card is over and every pick is
-scored, its board is deleted and the next card's board replaces it once odds are up.
+though the board shows the overall split. `/ufc pickem picks <event>` lays out a whole
+card fight by fight afterwards: who backed whom, at what price, and what it scored them.
+When the card is over and every pick is scored, its board becomes that card's
+leaderboard, in the same message so it keeps its place in the channel, and it is removed a
+few days later. Below it sits the all-time leaderboard, which is every card the bot has
+kept score on.
+
+Both leaderboards carry two extra lines: what the model scored on the same fights, and
+what backing every favourite would have scored. Neither is ranked among the players. They
+pick every fight where a member picks the ones they like, and neither is playing for
+anything, so ranking them would be scoring two different games together. They are there to
+answer the only question a leaderboard cannot: not who is top, but whether anyone is
+actually beating the bot. Only fights that were graded, ended with a winner and had both
+prices count towards them, which is exactly the set a member could have played.
 
 ### Where the odds come from
 
 Odds appear in pick'em, where they are what you are playing for, and on live coverage,
-where they are the closing line on a fight about to happen. The picks board carries none:
-it is the model's opinion, and a moneyline next to it only invites the two to be confused.
+where they are the closing price on a fight about to happen. The picks board carries none:
+it is the model's opinion, and a price next to it only invites the two to be confused.
 
-Pick'em takes DraftKings' price through ESPN and nothing else, because points are staked
-on it. Everywhere else, a fight ESPN leaves unpriced falls back to Polymarket, a prediction
-market whose price is a probability: 0.545 means a 54.5% favourite, which reads as -120.
-Because the two sides sum to 1, that price carries no bookmaker margin, and live coverage
-names it when it is the source.
+All of them come from [Polymarket](https://gamma-api.polymarket.com). ESPN carries a
+sportsbook line too, but only DraftKings and only patchily — checked across 63 bouts on ten
+cards it was the only book ESPN offered at all, and it priced one fight of thirteen on a
+numbered card and none at all on Contender Series, where the market priced every one. UFC's
+official betting partner is bet365, which publishes no public API and does not appear
+anywhere in ESPN's odds feed, so it is not an option.
 
-Every pick is still stored with the line that stood when it was made, which is what lets
-the scorecard measure the model against the fighters the market favoured.
+A prediction market price is a probability rather than a bookmaker's line: 0.545 means a
+54.5% favourite, which reads as -120. Because the two sides sum to 1 it carries no
+bookmaker margin, which makes it a fairer thing to stake pick'em points on than a price
+built to take a cut.
+
+Every pick is still stored with the price that stood when it was made, which is what lets
+the scorecard and the pick'em leaderboards measure the model and the members against the
+fighters the market favoured.
 
 ### The prediction model
 
@@ -205,7 +244,7 @@ KO/TKO, submission, unanimous decision and split decision. The likeliest finishi
 technique comes from the winner's finishing history, how the opponent has been finished
 before, and the league-wide rate.
 
-Ratings carry strength of schedule. Every fighter starts at 1500 and each result moves
+Ratings carry strength of schedule. Every fighter starts at 1000 and each result moves
 both fighters by how surprising it was, so beating a contender is worth more than beating
 a debutant, and a record built against nobody reads differently from the same record built
 against contenders. The model sees each fighter's rating, the average rating of everyone
@@ -253,24 +292,55 @@ most submissions are rear-naked chokes. It is never counted towards the model's 
 scorecard keeps it in its own block, marked as decoration. Neither data source separates KO
 from TKO.
 
+If the fight data stops arriving — upstream moves, a download keeps failing — the boards
+carry on drawing from whatever was last downloaded, which looks exactly like everything
+working. So once the newest card has been missing for four days the bot says so once, in
+the same channel as the rest of its news, and says what still works meanwhile.
+
 ### Ratings boards
 
-The ratings board ranks whoever has fought in the last two years and has at least three UFC
-fights, by the same rating. `/ufc channels set womens_divisions:False` leaves the women's
-divisions out entirely, boards and pound-for-pound alike. A fighter's division is the one their most recent fight was made
-at, so a move up shows the week it happens, and a catchweight leaves it alone. The women's
-divisions are kept separate from the men's.
+The ratings board ranks whoever has fought in the last eighteen months and has at least
+three UFC fights, by the same rating. `/ufc channels set womens_divisions:False` leaves the
+women's divisions out entirely, boards and pound-for-pound alike. A fighter's division is
+the one their most recent fight was made at, so a move up shows the week it happens, and a
+catchweight leaves it alone. The women's divisions are kept separate from the men's.
 
 It is not the UFC's ranking and will not agree with it. Nobody votes, holding a belt counts
 for nothing by itself, and a fighter arriving from another promotion starts level with
 everyone else however good they already are. Everyone starts at 1000; the number only ever
-means something next to another fighter's, so where it starts is a matter of taste.
+means something next to another fighter's, so where it starts is a matter of taste. Read it
+as who has done the most against the best, not as a title picture: champions often sit
+below contenders here, and that is the method working, not failing.
+
+Two things stop a raw rating from reading as a ranking, and both are handled when the board
+is built rather than in the rating itself. `Ledger.elo` stays exactly as the fights left it,
+so nothing here changes what the model trains or predicts on.
+
+**A rating fades while nobody is defending it.** A rating is what a fighter has earned, and
+a fighter who is not fighting is not earning. Left alone, someone who retires keeps the
+number they walked away with and outranks everyone still competing for it — the two-year
+board had a retired heavyweight rated 126 points above the man who actually held the
+division. So nothing happens for a year, which covers any ordinary gap between bouts,
+injuries included; past that, what a fighter holds over the starting rating halves for
+every further year out, and past eighteen months they are off the board altogether. Only
+the margin fades, so sitting still can never drag anyone below where they began.
+
+**Ratings too close to separate share a rank,** marked `=`. Across the divisional boards
+the median gap between neighbours is under four points, and a single result moves a rating
+by up to 32, so most adjacent pairs are inside the noise of one fight. Sorting those into
+1st and 2nd claims a precision the number does not have. Fighters within five points share
+a place instead, on the board and on the fighter card, which reads "joint 4th".
+
+Records on the board count UFC fights only, which is all the dataset has: a fighter with a
+long road career shows fewer wins here than their MMA record. A rating also travels with a
+fighter across a division change, earned against whoever they have actually faced.
 
 Only the last board posted carries the explanation, so the channel says it once rather than
 a dozen times.
 
 When a board moves, the move is posted to the live channel with its reason: a fighter's own
-win or loss, two years without a fight, or somebody else's result pushing them along. Only
+win or loss, a long layoff pulling their rating down, eighteen months without a fight, or
+somebody else's result pushing them along. Only
 the divisional boards are watched -- a server that leaves the women's divisions out has a
 different pound-for-pound list from one that does not, so there is no single set of changes
 to announce for that one.
@@ -278,9 +348,12 @@ to announce for that one.
 ### Keeping data current
 
 Fight statistics come from [Greco1899/scrape_ufc_stats](https://github.com/Greco1899/scrape_ufc_stats),
-which republishes ufcstats.com data the morning after each card. The bot checks for
-changes using ETags, validates each download in a staging folder before using it, then
-rebuilds career stats and retrains.
+which republishes ufcstats.com data once a day, in one go, at about 18:04 UTC. The bot
+checks for changes using ETags, validates each download in a staging folder before using
+it, then rebuilds career stats and retrains. While the newest card is missing it checks
+every hour rather than waiting, since an unchanged check is four conditional requests
+that come back "not modified"; ratings usually move within a couple of hours of upstream
+publishing, and the move is announced as soon as the retrain finishes.
 
 That whole job runs in a process of its own, started when it is needed and gone when it
 finishes. It leaves two files behind, and the bot picks them up and swaps them in:
@@ -292,10 +365,32 @@ finishes. It leaves two files behind, and the bot picks them up and swaps them i
 
 ### Memory
 
-The bot holds about 60 MB. Parsing the dataset needs pandas and training needs
-scikit-learn, which between them cost around 150 MB resident and another 100 MB while
-training runs — for a job that runs once a day. So they stay in the refresh process,
-which peaks near 350 MB for a minute or two and then exits, giving all of it back.
+The bot holds about 66 MB at rest, and roughly 110 MB is the ceiling:
+
+| What | Cost |
+| --- | --- |
+| Python and discord.py | 47 MB |
+| The rest of the bot's own code | 7 MB |
+| Career data for every fighter | 9 MB |
+| The compiled model | 3 MB |
+| Response cache | up to 32 MB |
+| Headshot cache | up to 12 MB |
+
+Parsing the dataset needs pandas and training needs scikit-learn, which between them cost
+around 150 MB resident and another 100 MB while training runs — for a job that runs once a
+day. So they stay in the refresh process, which peaks near 350 MB for a minute or two and
+then exits, giving all of it back. `/ufc ping` reports what the process actually holds,
+and says so if training ever fell back into it, since that is the one way the bot keeps
+those libraries for good.
+
+The response cache is capped by weight as well as by count, because the two are barely
+related: a fighter profile is 3 KB and a fight card is 130 KB. Parsed into Python objects
+a response costs about eight times the size of the JSON it came from, so a cap counted
+only in entries let the cache grow to several times the working set it exists to serve
+— a pass over a full schedule reads about 300 documents and 1.3 MB of JSON. It is held to
+4 MB of responses, evicting whatever was least recently read, and anything past its
+lifetime is dropped on a timer rather than waiting for the cache to fill, since nothing
+can be served from it again.
 
 Scoring a fight does not need either library: training writes the fitted trees and
 coefficients out as plain numbers, and `scorer.py` walks them with nothing but the
@@ -309,14 +404,13 @@ scikit-learn installed at all, as long as `data/` and `models/` are filled in by
 
 ### Live coverage
 
-ESPN's play-by-play marks round starts and ends, knockdowns, pauses in the action and
-results. ESPN only publishes running stat totals, so each round's numbers are the
-difference between the totals at consecutive round ends. Each update is recorded in the
-database, so a restart mid-card never repeats a post.
+ESPN's play-by-play marks round starts and ends and results. ESPN only publishes running
+stat totals, so each round's numbers are the difference between the totals at consecutive
+round ends. Each update is recorded in the database, so a restart mid-card never repeats
+a post.
 
-A pause is the clock stopping mid-round — a foul, a doctor's look, a lost mouthpiece.
-ESPN records that it happened but never why, so the post says only that, and the restart
-is left unsaid: one message per stoppage.
+Knockdowns and pauses are in the play-by-play too but are not posted: they arrive several
+to a round, and a channel of one-line alerts buries the round stats and the result.
 
 Fights are fought one at a time, so the poll only asks about the fight under way, the
 next couple, and any that have finished without their result being posted. On a
@@ -326,7 +420,7 @@ twelve-fight card that is about three requests every fifteen seconds instead of 
 
 Withdrawals and replacements are not in the play-by-play, which only covers a card while
 it is being fought. Instead the fights on each upcoming card are remembered and compared
-with the next reading, every twenty minutes, so a change is found whenever it happens.
+with the next reading, once an hour, so a change is found whenever it happens.
 Changes are posted to the live channel, or the schedule channel when there is no live
 channel set.
 
@@ -339,17 +433,16 @@ The walkout preview pairs ESPN's bio (record, age, height, weight, reach, stance
 country) with the ufcstats.com career numbers for both fighters. A fighter who is not in
 the dataset yet, such as a debutant, still gets the ESPN rows.
 
-Every live post names its card: the embeds carry it in the footer alongside the time they
-were built, and the knockdown and pause alerts, which are plain messages with no footer
-to put it in, carry it on the end of the line. Channel boards label their footer "Last
-updated" instead, because the bot edits those messages in place.
+Every live post names its card in the footer, alongside the time it was built. Channel
+boards label their footer "Last updated" instead, because the bot edits those messages in
+place.
 
 ## Data sources
 
-- **ESPN's public MMA API:** calendar, fight cards, fighter profiles, DraftKings odds,
-  results, play-by-play, fight stats and judges' scores.
-- **[Polymarket](https://gamma-api.polymarket.com):** odds for fights ESPN does not price,
-  Contender Series above all. No account or API key is needed.
+- **ESPN's public MMA API:** calendar, fight cards, fighter profiles, results,
+  play-by-play, fight stats and judges' scores.
+- **[Polymarket](https://gamma-api.polymarket.com):** odds for every fight. No account or
+  API key is needed.
 - **[Greco1899/scrape_ufc_stats](https://github.com/Greco1899/scrape_ufc_stats):**
   round-by-round fight statistics and fighter measurements from ufcstats.com.
 - **TheSportsDB:** optional event poster art.
@@ -386,9 +479,12 @@ ufcbot/
   ui/
     pickem.py           Pick'em buttons and the private picker
   embeds/
-    common.py           Colours and text helpers
-    cards.py            Fight card, schedule and fighter embeds
-    picks.py            Picks, prediction, recap and scorecard embeds
+    common.py           Colours, limits and text helpers
+    cards.py            Fight cards, the schedule and card changes
+    fighters.py         The fighter profile card
+    picks.py            Picks, prediction, recap, scorecard and model status
+    ratings.py          Ratings boards, their moves, and the stale-data warning
+    events.py           Text for Discord scheduled events
     live.py             Live coverage embeds
     pickem.py           Pick'em board, picker, leaderboard and stats
     images.py           Headshot matchup graphics
@@ -417,7 +513,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-78 tests, a few seconds, no network and no Discord: they run against a real SQLite
+130 tests, a few seconds, no network and no Discord: they run against a real SQLite
 database in a temporary directory and fight cards built by hand. Most of them are about
 what happens when a card changes underneath the bot, because that is where the awkward
 cases live -- a fighter replaced, a fight cancelled, a card that only half-loaded -- and
@@ -432,6 +528,8 @@ picks over one bad response.
 | `test_stats.py` | Divisions, ratings, rankings, the compiled scorer's arithmetic, name matching |
 | `test_live_and_storage.py` | Which fights live coverage polls; database upgrades and pruning |
 | `test_embeds.py` | Every board builds, stays inside Discord's limits and says the right thing |
+| `test_channels.py` | What the publisher edits, re-sends and deletes in a channel |
+| `test_ratings.py` | How a ratings board is read as having moved |
 
 The model is not retrained here -- that takes a minute and needs the dataset. Training
 checks itself instead: it scores real fights through both the fitted model and the
@@ -454,8 +552,8 @@ short-notice replacement: the fight stays on the card and loses its pick until t
 fighter has UFC history.
 
 **A card still shows a fight that was changed.** Fight cards come from ESPN, which can be
-a day or more behind on withdrawals and replacements. The boards follow within about half
-an hour of ESPN updating; `/ufc channels refresh` only helps once it has.
+a day or more behind on withdrawals and replacements. The boards follow within about an
+hour of ESPN updating; `/ufc channels refresh` only helps once it has.
 
 **Upgrading from a version with `models/ufc_predictor.joblib`.** That file is no longer
 read and can be deleted. The first refresh writes `models/ufc_model.pkl` and

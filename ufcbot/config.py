@@ -42,7 +42,6 @@ class Config:
     token: str
     dev_guild_ids: list[int] = field(default_factory=list)
     database_path: str = "ufcbot.sqlite3"
-    sync_interval_minutes: int = 180
     default_days_ahead: int = 60
     default_duration_minutes: int = 240
     default_start_anchor: str = "main_card"
@@ -71,7 +70,6 @@ class Config:
             token=token,
             dev_guild_ids=_guild_ids("DEV_GUILD_IDS"),
             database_path=os.getenv("DATABASE_PATH", "ufcbot.sqlite3").strip() or "ufcbot.sqlite3",
-            sync_interval_minutes=max(15, _int("SYNC_INTERVAL_MINUTES", 180)),
             default_days_ahead=max(1, min(365, _int("DEFAULT_DAYS_AHEAD", 60))),
             default_duration_minutes=max(30, min(1440, _int("DEFAULT_EVENT_DURATION_MINUTES", 240))),
             default_start_anchor=anchor,

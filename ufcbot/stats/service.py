@@ -36,9 +36,15 @@ from .worker import refresh as run_refresh
 
 log = logging.getLogger(__name__)
 
-# Upstream refreshes the morning after a card; allow a little slack before
-# calling the dataset behind.
+# Upstream refreshes the day after a card; allow a little slack before calling
+# the dataset behind.
 UPSTREAM_GRACE = timedelta(days=2)
+
+# Once a card is known to be missing, check on every pass rather than waiting.
+# Upstream publishes in one go at about 18:04 UTC, so a long interval can leave
+# ratings stale for most of a day after they were ready; an unchanged check is
+# four requests that come back "not modified".
+BEHIND_INTERVAL = timedelta(minutes=50)
 
 # Cards whose picks are remembered before the oldest are dropped.
 PICK_CACHE_CARDS = 64
@@ -154,8 +160,7 @@ class StatsService:
         if self.last_check is None:
             return True
         if self.is_behind:
-            # Upstream normally lands the day after a card; poll a little faster.
-            return now - self.last_check >= timedelta(hours=6)
+            return now - self.last_check >= BEHIND_INTERVAL
         return now - self.last_check >= self.refresh_interval
 
     async def refresh(self, *, force_retrain: bool = False) -> RefreshResult:

@@ -18,7 +18,7 @@ from datetime import UTC, datetime, timedelta
 
 from ..models import Bout, Event
 from ..sources.espn import UFCData
-from ..storage import PickemRecord, Storage
+from ..storage import PickemRecord, PredictionRecord, Storage
 from ..util import format_odds, normalise
 from .tracking import VOID_AFTER
 
@@ -28,10 +28,87 @@ STAKE = 100
 WRONG_PICK_POINTS = -STAKE
 # A card counts as over this long after it starts, even if a result never posts.
 CARD_LENGTH = timedelta(hours=12)
+# How close to the first bell the board stops waiting for a complete set of odds.
+LAST_CALL = timedelta(hours=48)
 
 OPEN = "open"
 LOCKED = "locked"
 NO_ODDS = "no_odds"
+
+
+@dataclass(slots=True)
+class Benchmark:
+    """What someone who is not playing would have scored on the same fights."""
+
+    name: str
+    wins: int
+    losses: int
+    points: int
+
+    @property
+    def settled(self) -> int:
+        return self.wins + self.losses
+
+    @property
+    def win_rate(self) -> float:
+        return self.wins / self.settled if self.settled else 0.0
+
+
+def benchmarks(records: list[PredictionRecord]) -> list[Benchmark]:
+    """The model's picks and the market's, scored under pick'em rules.
+
+    Only fights that were graded, ended with a winner and had both prices are
+    counted: those are exactly the fights a member could have played, which is
+    what makes the three numbers comparable.
+
+    They are never ranked among the members. Both pick every fight on the card
+    where a member picks the ones they like, and neither is playing for anything,
+    so putting them in the standings would be comparing two different games.
+    """
+    model = Benchmark("\U0001f916 The bot", 0, 0, 0)
+    market = Benchmark("\U0001f4b0 The favourites", 0, 0, 0)
+
+    for record in records:
+        if record.winner_athlete is None or record.odds_a is None or record.odds_b is None:
+            continue
+        odds = {record.athlete_a: record.odds_a, record.athlete_b: record.odds_b}
+        for side, picked in ((model, record.favourite_athlete), (market, record.market_favourite_athlete)):
+            if picked is None:
+                continue
+            if picked == record.winner_athlete:
+                side.wins += 1
+                side.points += points_for(odds[picked])
+            else:
+                side.losses += 1
+                side.points += WRONG_PICK_POINTS
+
+    return [side for side in (model, market) if side.settled]
+
+
+def fully_priced(event: Event) -> bool:
+    """Whether every fight still on the card has a price on both corners."""
+    fights = event.fights
+    return bool(fights) and all(len(bout.odds) == 2 for bout in fights)
+
+
+def ready_to_open(event: Event, now: datetime) -> bool:
+    """Whether the pick'em board should go up for this card.
+
+    Normally it waits for a full card of prices: a board posted half-priced is
+    one most of the server cannot finish, and the fights still missing lines are
+    exactly the ones nobody would get to pick.
+
+    That wait cannot be open-ended, though. One prelim that never gets a line
+    would otherwise keep the whole server from playing the card at all, so
+    inside the last two days the board opens on whatever prices exist. The
+    fights still unpriced show as such and cannot be picked until they are.
+    """
+    fights = event.fights
+    if not fights:
+        return False
+    if all(len(bout.odds) == 2 for bout in fights):
+        return True
+    return event.start - now <= LAST_CALL and any(len(bout.odds) == 2 for bout in fights)
 
 
 def points_for(odds: int) -> int:
@@ -96,7 +173,7 @@ class PickemService:
         """A card with fighters and current odds, fresh enough to take picks against."""
         event = await self.data.get_event(event_id, ttl=60)
         if event is not None:
-            await self.data.load_odds(event, ttl=300, fallback=False)
+            await self.data.load_odds(event, ttl=300)
         return event
 
     async def current_event(self) -> Event | None:

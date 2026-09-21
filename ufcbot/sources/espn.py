@@ -40,10 +40,10 @@ STATIC_TTL = 24 * 60 * 60
 class UFCData:
     """Reads UFC schedules, fight cards and fighter profiles."""
 
-    def __init__(self, http: HttpClient, *, odds_fallback: PolymarketOdds | None = None) -> None:
+    def __init__(self, http: HttpClient, *, odds: PolymarketOdds | None = None) -> None:
         self.http = http
         # ESPN has no lines for some cards, Contender Series among them.
-        self.odds_fallback = odds_fallback
+        self.odds = odds
 
     # -- schedules ----------------------------------------------------------
 
@@ -308,15 +308,7 @@ class UFCData:
             if own_ref:
                 linescore_refs[athlete_id] = own_ref.split("?")[0] + "/linescores"
 
-        # Most cards link their odds document inline. Contender Series competitions do
-        # not, so fall back to the standard address, which serves lines once they exist.
-        competition_ref = (https(competition.get("$ref")) or "").split("?")[0]
-        odds_ref = https((competition.get("odds") or {}).get("$ref"))
-        if not odds_ref and competition_ref:
-            odds_ref = f"{competition_ref}/odds"
-
         return Bout(
-            odds_ref=odds_ref,
             status_ref=https((competition.get("status") or {}).get("$ref")),
             plays_ref=https((competition.get("details") or {}).get("$ref")),
             stats_refs=stats_refs,
@@ -354,51 +346,27 @@ class UFCData:
 
     # -- per-fight detail --------------------------------------------------
 
-    async def load_odds(self, event: Event, *, ttl: int = 600, fallback: bool = True) -> None:
-        """Attach current moneylines to every bout that has them.
-
-        ``fallback`` allows the prediction market to fill in for fights no
-        sportsbook prices. Pick'em turns it off: points are staked at a real
-        book's line or not at all.
-        """
+    async def load_odds(self, event: Event, *, ttl: int = 600) -> None:
+        """Attach current prices to every bout on the card."""
         await asyncio.gather(
-            *(self.load_bout_odds(bout, ttl=ttl) for bout in event.bouts if bout.odds_ref),
+            *(self.load_bout_odds(bout, ttl=ttl, around=event.start) for bout in event.bouts),
             return_exceptions=True,
         )
-        if fallback and self.odds_fallback is not None:
-            await asyncio.gather(
-                *(self._fallback_odds(bout, event) for bout in event.bouts if len(bout.odds) < 2),
-                return_exceptions=True,
-            )
 
-    async def _fallback_odds(self, bout: Bout, event: Event) -> None:
-        odds = await self.odds_fallback.odds_for(bout, around=bout.start or event.start)
-        if odds:
-            bout.odds = odds
+    async def load_bout_odds(self, bout: Bout, *, ttl: int = 600, around: datetime | None = None) -> None:
+        """Attach current prices to one bout.
+
+        ESPN carries a sportsbook line for some fights, but only DraftKings and
+        only patchily -- one of thirteen on a numbered card, none at all on
+        Contender Series. The market prices every fight on every card, so it is
+        the source rather than the fallback it used to be.
+        """
+        if self.odds is None:
+            return
+        prices = await self.odds.odds_for(bout, around=around or bout.start or datetime.now(UTC), ttl=ttl)
+        if prices:
+            bout.odds = prices
             bout.odds_provider = POLYMARKET
-
-    async def load_bout_odds(self, bout: Bout, *, ttl: int = 600) -> None:
-        """Attach current moneylines to one bout. Every card ESPN lists has them, Contender Series included."""
-        if not bout.odds_ref:
-            return
-        try:
-            payload = await self.http.get_json(bout.odds_ref, ttl=ttl)
-        except HttpError:
-            return
-        items = sorted(payload.get("items") or [], key=lambda i: (i.get("provider") or {}).get("priority", 99))
-        for item in items:
-            odds: dict[str, int] = {}
-            for side in ("homeAthleteOdds", "awayAthleteOdds"):
-                entry = item.get(side) or {}
-                athlete_ref = (entry.get("athlete") or {}).get("$ref") or ""
-                athlete_id = athlete_ref.split("/athletes/")[-1].split("?")[0] if "/athletes/" in athlete_ref else None
-                line = entry.get("moneyLine")
-                if athlete_id and isinstance(line, (int, float)):
-                    odds[athlete_id] = int(line)
-            if len(odds) == 2:
-                bout.odds = odds
-                bout.odds_provider = (item.get("provider") or {}).get("name")
-                return
 
     async def load_status(self, bout: Bout, *, ttl: int = 30) -> None:
         """Fill the bout's live state and, once over, how it ended."""
