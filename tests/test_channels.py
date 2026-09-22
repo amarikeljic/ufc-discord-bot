@@ -15,14 +15,20 @@ from datetime import timedelta
 
 import discord
 import pytest
-from conftest import bout, card, fighter
+from conftest import bout, card, fighter, pickem_record
 
 from ufcbot.features import channels as channels_module
 from ufcbot.features.channels import (
     BOARD_KEY,
+    KIND_PICKEM,
+    KIND_PICKEM_CARD_LEADERBOARD,
+    KIND_PICKEM_LEADERBOARD,
     KIND_PICKS,
+    LAST_CARD_TITLE,
+    THIS_CARD_TITLE,
     ChannelPublisher,
     PublishResult,
+    card_leaderboard_title,
 )
 from ufcbot.features.pickem import ready_to_open
 
@@ -289,3 +295,83 @@ def test_a_card_with_no_prices_at_all_never_opens(soon):
     event = card(bout("B1", ALLEN, PICO), start=soon)
     assert not ready_to_open(event, soon - timedelta(minutes=5))
     assert not ready_to_open(card(start=soon), soon)
+
+
+# -- the two leaderboards ----------------------------------------------------------
+
+
+async def pick(storage, *, user: int, event: str, bout: str, start, athlete: str = "A") -> None:
+    await storage.save_pickem_pick(
+        pickem_record(
+            user_id=user, bout_id=bout, athlete_id=athlete, opponent_id="B",
+            locks_at=start, event_id=event,
+        )
+    )
+
+
+def an_event(event_id: str, start) -> object:
+    return card(bout("B1", ALLEN, PICO), start=start, event_id=event_id)
+
+
+async def test_the_card_leaderboard_is_about_the_last_card_scored(storage, soon):
+    """Two cards, only the older one graded: that is the one to show."""
+    older, newer = soon - timedelta(days=30), soon
+    await pick(storage, user=1, event="OLD", bout="B1", start=older)
+    await pick(storage, user=1, event="NEW", bout="B2", start=newer)
+    await storage.grade_pickem_bout("B1", "A", loss_points=-100, fighters={"A", "B"})
+
+    assert (await storage.pickem_last_scored_card(1))[0] == "OLD"
+
+    # Once the newer card starts landing results it takes over.
+    await storage.grade_pickem_bout("B2", "A", loss_points=-100, fighters={"A", "B"})
+    assert (await storage.pickem_last_scored_card(1))[0] == "NEW"
+
+
+async def test_a_card_nobody_has_a_settled_pick_on_is_not_the_one_shown(storage, soon):
+    await pick(storage, user=1, event="EV1", bout="B1", start=soon)
+    assert await storage.pickem_last_scored_card(1) is None
+
+
+def test_the_title_follows_the_card_being_fought(soon):
+    """The rule the user reads as the board changing hands: "this card" from the
+    first result of the card in play, "last card" once the next one is up."""
+    current = an_event("NEW", soon)
+
+    # Mid-card: the card being fought is the one most recently scored.
+    assert card_leaderboard_title("NEW", current) == THIS_CARD_TITLE
+    # The next card's board is up and nothing on it is scored yet.
+    assert card_leaderboard_title("OLD", current) == LAST_CARD_TITLE
+    # Between cards, with no card running at all.
+    assert card_leaderboard_title("OLD", None) == LAST_CARD_TITLE
+    assert card_leaderboard_title(None, current) == LAST_CARD_TITLE
+
+
+async def test_the_leaderboards_survive_the_card_changing(storage):
+    """They are the two messages worth a permanent place in the channel. A card's
+    board comes and goes beneath them; these are only ever edited."""
+    pub, guild, channel, result = publisher(storage), FakeGuild(), FakeChannel(), PublishResult()
+
+    for kind in (KIND_PICKEM_LEADERBOARD, KIND_PICKEM_CARD_LEADERBOARD):
+        await pub._upsert(guild, channel, kind, BOARD_KEY, an_embed("standings"), result)
+    posted = list(channel.sent)
+
+    # A card ends and its board is removed; the leaderboards are untouched.
+    await pub._upsert(guild, channel, KIND_PICKEM, "OLD", an_embed("board"), result)
+    await pub._remove_post(guild, channel, KIND_PICKEM, "OLD", result)
+
+    assert channel.deleted == [channel.sent[2]], "only the card's board was deleted"
+    for message_id in posted:
+        assert message_id not in channel.deleted
+
+
+async def test_a_new_card_gets_a_new_board_message(storage):
+    """Each card's board is its own message, so the channel reads as one card
+    ending and the next beginning rather than one message quietly changing."""
+    pub, guild, channel, result = publisher(storage), FakeGuild(), FakeChannel(), PublishResult()
+
+    await pub._upsert(guild, channel, KIND_PICKEM, "OLD", an_embed("old card"), result)
+    await pub._remove_post(guild, channel, KIND_PICKEM, "OLD", result)
+    await pub._upsert(guild, channel, KIND_PICKEM, "NEW", an_embed("new card"), result)
+
+    assert len(channel.sent) == 2 and channel.sent[0] != channel.sent[1]
+    assert channel.edited == [], "a different card is never an edit of the last one"

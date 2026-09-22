@@ -33,10 +33,9 @@ have done.
   reason: in, out, up or down, after a win, a loss, a long layoff, or results around them.
 - **Pick'em.** Members pick winners for the next UFC card from a private menu once odds
   are posted. A right pick scores what a 100-point bet would win at those odds, so
-  underdogs pay more; a wrong pick costs 100 points. When a card is scored its board
-  becomes that card's leaderboard, with an all-time leaderboard below it. Both show what
-  the model and the favourites scored on the same fights, so you can see whether you beat
-  them, without either being ranked among the players.
+  underdogs pay more; a wrong pick costs 100 points. The channel keeps an all-time
+  leaderboard and one for the card being fought, and both show what the model and the
+  favourites scored on the same fights, so you can see whether you beat them.
 - **Ratings.** A board per division and a pound-for-pound board, ranked by the rating the
   model itself trains on: everyone starts level and a win moves it by how good the fighter
   beaten was. A rating fades once a fighter has been out over a year, and fighters too
@@ -195,18 +194,25 @@ go, rather than sitting in your picks as pending until the card is over.
 Other members' picks stay hidden until the fight locks,
 though the board shows the overall split. `/ufc pickem picks <event>` lays out a whole
 card fight by fight afterwards: who backed whom, at what price, and what it scored them.
-When the card is over and every pick is scored, its board becomes that card's
-leaderboard, in the same message so it keeps its place in the channel, and it is removed a
-few days later. Below it sits the all-time leaderboard, which is every card the bot has
-kept score on.
+The channel holds three messages. **All Time Pick'em Leaderboard** and the card
+leaderboard below it are never deleted, only edited, so they keep their place in the
+scrollback. Beneath them sits the current card's board, and that one is deleted and
+reposted whenever the card changes, which is what marks one card ending and the next
+beginning.
 
-Both leaderboards carry two extra lines: what the model scored on the same fights, and
-what backing every favourite would have scored. Neither is ranked among the players. They
-pick every fight where a member picks the ones they like, and neither is playing for
-anything, so ranking them would be scoring two different games together. They are there to
-answer the only question a leaderboard cannot: not who is top, but whether anyone is
-actually beating the bot. Only fights that were graded, ended with a winner and had both
-prices count towards them, which is exactly the set a member could have played.
+The card leaderboard is always about whichever card was scored most recently, so its title
+turns over on its own. It reads **This Card's Pick'em Leaderboard** from the moment the
+first fight of the card being fought is graded, and goes back to **Last Card's Pick'em
+Leaderboard** when the next card's odds are out and its board goes up with nothing scored
+on it yet.
+
+Both leaderboards carry two extra lines under the standings: what the model scored on the
+same fights, and what backing every favourite would have scored. Neither is ranked among
+the players. They pick every fight where a member picks the ones they like, and neither is
+playing for anything, so ranking them would be scoring two different games together. They
+are there to answer the only question a leaderboard cannot: not who is top, but whether
+anyone is actually beating the bot. Only fights that were graded, ended with a winner and
+had both prices count towards them, which is exactly the set a member could have played.
 
 ### Where the odds come from
 
@@ -513,7 +519,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-130 tests, a few seconds, no network and no Discord: they run against a real SQLite
+135 tests, a few seconds, no network and no Discord: they run against a real SQLite
 database in a temporary directory and fight cards built by hand. Most of them are about
 what happens when a card changes underneath the bot, because that is where the awkward
 cases live -- a fighter replaced, a fight cancelled, a card that only half-loaded -- and
@@ -528,7 +534,7 @@ picks over one bad response.
 | `test_stats.py` | Divisions, ratings, rankings, the compiled scorer's arithmetic, name matching |
 | `test_live_and_storage.py` | Which fights live coverage polls; database upgrades and pruning |
 | `test_embeds.py` | Every board builds, stays inside Discord's limits and says the right thing |
-| `test_channels.py` | What the publisher edits, re-sends and deletes in a channel |
+| `test_channels.py` | What the publisher edits, re-sends and deletes; the leaderboards' lifecycle |
 | `test_ratings.py` | How a ratings board is read as having moved |
 
 The model is not retrained here -- that takes a minute and needs the dataset. Training

@@ -1293,6 +1293,28 @@ class Storage:
             rows = await cursor.fetchall()
         return [row["event_name"] for row in rows]
 
+    async def pickem_last_scored_card(self, guild_id: int) -> tuple[str, str, datetime] | None:
+        """The most recent card anyone has a settled pick on: (id, name, start).
+
+        While a card is being fought this is that card, from the moment its first
+        fight is graded. Between cards it is the one that just finished.
+        """
+        async with self.db.execute(
+            """
+            SELECT espn_event_id, event_name, MAX(event_start) AS event_start
+            FROM pickem_picks
+            WHERE guild_id = ? AND result IN ('win', 'loss')
+            GROUP BY espn_event_id
+            ORDER BY event_start DESC
+            LIMIT 1
+            """,
+            (guild_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        return row["espn_event_id"], row["event_name"], datetime.fromisoformat(row["event_start"])
+
     async def pickem_unscored_count(self, guild_id: int, espn_event_id: str) -> int:
         async with self.db.execute(
             "SELECT COUNT(*) AS n FROM pickem_picks WHERE guild_id = ? AND espn_event_id = ? AND graded_at IS NULL",

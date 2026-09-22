@@ -146,18 +146,18 @@ def pickem_leaderboard_embed(
     *,
     viewer_id: int | None = None,
     limit: int = 15,
-    title: str = "🏆 Pick'em leaderboard",
+    title: str = "🏆 All Time Pick'em Leaderboard",
     subtitle: str | None = None,
     benchmarks: list[Benchmark] | None = None,
     empty: str = "No settled picks yet.\nMake your picks on the next card to get on the board.",
 ) -> discord.Embed:
-    """The standings, with the model and the market shown beside them.
+    """The standings, with the model and the market under them.
 
-    The benchmarks are deliberately not in the ranked list: they pick every
-    fight where a member picks the ones they like, and they are not playing for
+    The benchmarks sit below the ranked list rather than in it: they pick every
+    fight where a member picks the ones they like, and neither is playing for
     anything, so ranking them would be scoring two different games together.
     """
-    embed = discord.Embed(title=title, colour=PICKEM_TEAL)
+    embed = discord.Embed(title=truncate(title, 256), colour=PICKEM_TEAL)
 
     if standings:
         lines = [_standing_line(rank, s) for rank, s in enumerate(standings[:limit], 1)]
@@ -167,16 +167,10 @@ def pickem_leaderboard_embed(
                 lines += ["…", _standing_line(rank, standings[rank - 1])]
     else:
         lines = [empty]
-    embed.description = "\n".join([subtitle, "", *lines] if subtitle else lines)
 
     if benchmarks:
-        embed.add_field(
-            name="Not playing, but picking",
-            value="\n".join(
-                [*_benchmark_lines(benchmarks), "", "*Scored the same way, on the same fights.*"]
-            ),
-            inline=False,
-        )
+        lines += ["", *_benchmark_lines(benchmarks)]
+    embed.description = "\n".join([subtitle, "", *lines] if subtitle else lines)
     return stamp(embed)
 
 
