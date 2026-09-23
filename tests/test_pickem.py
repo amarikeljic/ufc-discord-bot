@@ -18,7 +18,7 @@ from ufcbot.features.pickem import (
     fully_priced,
     points_for,
 )
-from ufcbot.storage import PredictionRecord
+from ufcbot.records import PredictionRecord
 
 MOICANO = fighter("20", "Renato Moicano")
 ORTEGA = fighter("21", "Brian Ortega")

@@ -24,7 +24,7 @@ from .common import (
 from .picks import pick_value, result_lines
 
 if TYPE_CHECKING:
-    from ..storage import PredictionRecord
+    from ..records import PredictionRecord
 
 MAX_FIELDS = 25
 

@@ -8,7 +8,10 @@ import logging
 import random
 import time
 from collections import OrderedDict
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Any, NamedTuple
+from urllib.parse import urlsplit
 
 import aiohttp
 
@@ -21,7 +24,16 @@ USER_AGENT = (
 
 
 class HttpError(Exception):
-    """Raised when a request fails after all retries."""
+    """Raised when a request fails after all retries.
+
+    ``answered`` says whether the host replied. A 404 is a failed request but a
+    working server, and the difference is the whole of telling an outage from a
+    fighter who has no page.
+    """
+
+    def __init__(self, message: str, *, answered: bool = False) -> None:
+        super().__init__(message)
+        self.answered = answered
 
 
 # Nothing can read an entry past its lifetime, so they are dropped on a timer
@@ -37,9 +49,56 @@ SWEEP_INTERVAL = 120
 # thousand small dicts and strings. A cap counted only in entries therefore lets
 # the cache grow to several times the working set it exists to serve, which is
 # most of the difference between a bot that sits at 70MB and one that drifts
-# past 190MB after a day. Responses are measured as they arrive, which is free,
-# and the budget leaves ample room for that working set.
-MAX_BYTES = 4 * 1024 * 1024
+# past 190MB after a day. Responses are measured as they arrive, which is free.
+#
+# A pass over a full schedule now holds 0.6MB, fighter profiles having moved out
+# of here and into UFCData as Fighter objects, so this leaves about five times
+# the room that pass needs.
+MAX_BYTES = 3 * 1024 * 1024
+
+# A host is only called unreachable after this long with nothing but silence,
+# and only if the bot kept asking. ESPN drops a connection or returns a 500 most
+# days without anything being wrong, and a bot with no card to look at makes no
+# requests at all, so neither time nor failures alone says anything.
+OUTAGE_AFTER = timedelta(hours=3)
+OUTAGE_ATTEMPTS = 20
+
+
+@dataclass(slots=True)
+class HostHealth:
+    """How one host has been answering. Any answer at all clears it."""
+
+    failures: int = 0
+    failing_since: float | None = None
+    """Monotonic, for measuring how long; the clock can move under us."""
+    failing_at: datetime | None = None
+    """Wall clock, for saying when it started."""
+    last_error: str = ""
+
+    def answered(self) -> None:
+        self.failures = 0
+        self.failing_since = None
+        self.failing_at = None
+        self.last_error = ""
+
+    def failed(self, error: str) -> None:
+        self.failures += 1
+        self.last_error = error
+        if self.failing_since is None:
+            self.failing_since = time.monotonic()
+            self.failing_at = datetime.now(UTC)
+
+
+@dataclass(slots=True)
+class Outage:
+    """A host that has stopped answering, and for how long."""
+
+    host: str
+    since: datetime
+    hours: float
+    failures: int
+    last_error: str
+
 
 # ESPN sends these on its ``$ref`` links and not on the URLs built by hand, so
 # the same document arrives under two spellings. They do not change the
@@ -101,6 +160,7 @@ class HttpClient:
         # for a day, so a dozen upcoming cards is already several hundred entries;
         # a cap below that would evict them between passes and fetch them again.
         self._cache: OrderedDict[str, Entry] = OrderedDict()
+        self._health: dict[str, HostHealth] = {}
         self._held = 0
         self._last_sweep = time.monotonic()
         self._inflight: dict[str, asyncio.Future] = {}
@@ -126,10 +186,15 @@ class HttpClient:
             raise HttpError("HTTP client is not started")
         return self._session
 
-    async def get_json(self, url: str, *, ttl: int | None = None) -> Any:
+    async def get_json(self, url: str, *, ttl: int | None = None, store: bool = True) -> Any:
         """GET a URL and parse JSON, served from cache when fresh.
 
         Requests for the same URL that overlap in time share one round trip.
+
+        ``store`` off keeps the parsed response out of the cache, for callers
+        that keep something smaller of their own. A fighter's profile is three
+        kilobytes of JSON to fill in ten fields, and holding thousands of those
+        documents costs far more than holding the fighters.
         """
         ttl = self._cache_ttl if ttl is None else ttl
         now = time.monotonic()
@@ -151,17 +216,72 @@ class HttpClient:
         self._inflight[key] = future
         try:
             payload, size = await self._fetch_json(url)
+        except HttpError as exc:  # propagated to every waiter
+            self._note(url, answered=exc.answered, error=str(exc))
+            if not future.done():
+                future.set_exception(exc)
+            raise
         except Exception as exc:  # propagated to every waiter
+            self._note(url, answered=False, error=repr(exc))
             if not future.done():
                 future.set_exception(exc)
             raise
         else:
-            self._store(key, payload, ttl, size)
+            self._note(url, answered=True)
+            if store:
+                self._store(key, payload, ttl, size)
             if not future.done():
                 future.set_result(payload)
             return payload
         finally:
             self._inflight.pop(key, None)
+
+    # -- how the other end is doing ------------------------------------------
+
+    def _note(self, url: str, *, answered: bool, error: str = "") -> None:
+        health = self._health.setdefault(urlsplit(url).netloc, HostHealth())
+        if answered:
+            health.answered()
+        else:
+            health.failed(error)
+
+    def outage(
+        self,
+        host: str,
+        *,
+        after: timedelta = OUTAGE_AFTER,
+        attempts: int = OUTAGE_ATTEMPTS,
+    ) -> Outage | None:
+        """Whether a host has genuinely stopped answering, or None while it is fine.
+
+        Both tests have to pass. Long enough that a bad afternoon is not an
+        outage, and enough attempts that a quiet bot -- no card on, nothing to
+        look up -- is never mistaken for a broken one.
+        """
+        health = self._health.get(host)
+        if health is None or health.failing_since is None or health.failing_at is None:
+            return None
+        if health.failures < attempts:
+            return None
+        idle = time.monotonic() - health.failing_since
+        if idle < after.total_seconds():
+            return None
+        return Outage(
+            host=host,
+            since=health.failing_at,
+            hours=idle / 3600,
+            failures=health.failures,
+            last_error=health.last_error,
+        )
+
+    def answering(self, host: str) -> bool:
+        """Whether this host has answered since it last failed.
+
+        Used as a control: a second host answering says the trouble is at the
+        far end rather than with this machine's connection.
+        """
+        health = self._health.get(host)
+        return health is not None and health.failures == 0
 
     def _store(self, key: str, payload: Any, ttl: int, size: int) -> None:
         """Cache a response and keep the cache to its size.
@@ -216,12 +336,14 @@ class HttpClient:
             try:
                 async with self._semaphore, session.get(url) as response:
                     if response.status == 404:
-                        raise HttpError(f"404 Not Found: {url}")
+                        raise HttpError(f"404 Not Found: {url}", answered=True)
                     if response.status in (429, 500, 502, 503, 504):
                         last_error = HttpError(f"{response.status} from {url}")
                         log.debug("Retryable %s from %s", response.status, url)
                         continue
-                    response.raise_for_status()
+                    if response.status >= 400:
+                        # The server is there and has refused. Not an outage.
+                        raise HttpError(f"{response.status} from {url}", answered=True)
                     # Several ESPN hosts return JSON under a text/plain content type,
                     # so the body is parsed directly rather than by content type.
                     body = await response.read()

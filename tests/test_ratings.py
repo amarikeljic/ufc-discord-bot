@@ -6,8 +6,8 @@ from datetime import date, timedelta
 
 from ufcbot.embeds import ratings_changes_embed
 from ufcbot.features.ratings import DOWN, ENTERED, INACTIVE, LEFT, PUSHED, UP, diff
+from ufcbot.records import RankedState
 from ufcbot.stats.career import Ledger
-from ufcbot.storage import RankedState
 
 TODAY = date(2026, 9, 18)
 RECENT = TODAY - timedelta(days=30)

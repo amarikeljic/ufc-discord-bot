@@ -32,8 +32,8 @@ from .common import (
 )
 
 if TYPE_CHECKING:
+    from ..records import PredictionRecord
     from ..stats.service import FighterCareer
-    from ..storage import PredictionRecord
 
 
 def _stats_table(bout: Bout, stats: dict[str, dict[str, float]]) -> str | None:

@@ -40,7 +40,9 @@ have done.
   model itself trains on: everyone starts level and a win moves it by how good the fighter
   beaten was. A rating fades once a fighter has been out over a year, and fighters too
   close to separate share a rank.
-- **Discord scheduled events.** Every upcoming card mirrored into your server's events.
+- **Discord scheduled events.** Every upcoming card mirrored into your server's events,
+  and ended as soon as the card's last result is in rather than hours later. A card with
+  nobody named yet is left off until a fighter is announced.
 
 ## Commands
 
@@ -52,7 +54,7 @@ have done.
 | `/ufc predictions [event]` | Picks for every fight on a card |
 | `/ufc pickem stats [member]` | Points, rank, win rate and card history |
 | `/ufc pickem picks <event>` | Everyone's picks for one card, fight by fight |
-| `/ufc ping` | Latency, uptime and memory |
+| `/ufc server` | Latency, uptime, memory and how current the data is |
 | `/ufc channels set` | Choose channels for picks, accuracy, schedule, live coverage, pick'em and ratings |
 | `/ufc channels status` / `refresh` / `clear` | Manage those channels |
 | `/ufc sync enable` / `disable` / `now` / `status` / `settings` | Discord scheduled events |
@@ -145,7 +147,11 @@ All settings live in `.env`; see `.env.example` for descriptions.
 | Moves on the ratings boards | On the hour |
 | Fight dataset and model | On the hour, and acted on only when it is due |
 | Odds and fight card data | Cached for 10 and 15 minutes |
-| Discord scheduled events | Nightly at midnight Central |
+| Discord scheduled events | Nightly at midnight Central; ended on the card's last result |
+
+The three loops live in `cogs/jobs.py`, apart from the slash commands, because the two
+answer to different things: a command answers a person and returns, a job answers a clock
+and has to survive whatever it finds.
 
 Everything but live coverage and the nightly sync happens in one pass on the hour, in the
 order the steps depend on each other: check for new fight data, grade what has finished,
@@ -183,10 +189,10 @@ points, favourite or underdog.
 | +235 underdog | +235 | -100 |
 
 Points are locked in with the odds at the moment you pick; changing a pick uses the
-new odds. The game runs on the next UFC card only. The board goes up once every fight on
-the card has been priced — or, inside the last 48 hours, on whatever prices exist, so one
-prelim that never gets a line cannot keep the whole server from playing. Each pick locks
-when that part of the card starts. Draws, no contests and
+new odds. The game runs on the next UFC card only, and opens 48 hours before the first
+bell once every fight on that card has been priced — or, if some fight never gets a line,
+on whatever prices exist by then, so one prelim cannot keep the whole server from playing.
+Each pick locks when that part of the card starts. Draws, no contests and
 cancelled fights are void, and so is a pick on a fighter who was replaced before the
 bell: that fight never happened, so the pick scores nothing either way rather than
 counting as a loss. A fight coming off the card is voided as soon as the bot sees it
@@ -194,17 +200,26 @@ go, rather than sitting in your picks as pending until the card is over.
 Other members' picks stay hidden until the fight locks,
 though the board shows the overall split. `/ufc pickem picks <event>` lays out a whole
 card fight by fight afterwards: who backed whom, at what price, and what it scored them.
-The channel holds three messages. **All Time Pick'em Leaderboard** and the card
-leaderboard below it are never deleted, only edited, so they keep their place in the
-scrollback. Beneath them sits the current card's board, and that one is deleted and
-reposted whenever the card changes, which is what marks one card ending and the next
-beginning.
+The channel holds two messages. **All Time Pick'em Leaderboard** is never deleted, only
+edited. Below it sits one message that turns over with the card, and it is only ever in
+one of three states:
 
-The card leaderboard is always about whichever card was scored most recently, so its title
-turns over on its own. It reads **This Card's Pick'em Leaderboard** from the moment the
-first fight of the card being fought is graded, and goes back to **Last Card's Pick'em
-Leaderboard** when the next card's odds are out and its board goes up with nothing scored
-on it yet.
+| State | When | Buttons |
+| --- | --- | --- |
+| **Last Card's Pick'em Leaderboard** | between cards | My picks |
+| The card's pick'em board | from 48 hours before the first bell | Make your picks, My picks |
+| **This Card's Pick'em Leaderboard** | from the first bell until the last result | My picks |
+
+Moving between the three deletes that message and posts a new one, rather than editing it
+in place. A card opening for picks, or a card ending, should read as something happening in
+the channel; a message quietly changing under everyone reads as nothing at all. It also
+puts the new state at the bottom, under the all-time board.
+
+The third state ends on the last result rather than on the clock. When live coverage posts
+a result it checks whether every fight on the card now has one, and if it does, the
+leaderboard goes back to **Last Card's** and the Discord event for that card is ended
+there and then — within about a minute of the last fight, instead of running on to the end
+time it was given days earlier.
 
 Both leaderboards carry two extra lines under the standings: what the model scored on the
 same fights, and what backing every favourite would have scored. Neither is ranked among
@@ -303,6 +318,29 @@ carry on drawing from whatever was last downloaded, which looks exactly like eve
 working. So once the newest card has been missing for four days the bot says so once, in
 the same channel as the rest of its news, and says what still works meanwhile.
 
+### When ESPN stops answering
+
+Cards, fighters, results and live coverage all come from one undocumented feed, so if it
+goes away most of the bot goes quiet without saying why. The client records how every host
+is answering, and the hourly pass posts a warning to the announcements channel once ESPN
+has returned **nothing for three hours across at least twenty attempts**.
+
+Both thresholds exist to keep it quiet. ESPN drops connections and returns 500s most days,
+so a bad minute is not an outage however many requests fail inside it; and a bot with no
+card to look at makes almost no requests, so hours of silence prove nothing on their own.
+A single answer of any kind resets both counts.
+
+What counts as an answer matters as much. A 404 is a failed request and a working server —
+retired fighters have no profile page and the bot asks for them constantly — so a 404, and
+any other refusal, clears the failure run rather than adding to it. Only a connection that
+never opens, or a 5xx that survives every retry, is silence.
+
+The warning says how long, how many attempts, what still works and what does not. It also
+checks a second host: if the odds API is answering while ESPN is not, the trouble is at
+ESPN's end rather than with the machine the bot runs on, and the warning says which. When
+ESPN comes back the bot posts an all-clear, so the warning is never left standing after the
+problem has gone.
+
 ### Ratings boards
 
 The ratings board ranks whoever has fought in the last eighteen months and has at least
@@ -371,32 +409,48 @@ finishes. It leaves two files behind, and the bot picks them up and swaps them i
 
 ### Memory
 
-The bot holds about 66 MB at rest, and roughly 110 MB is the ceiling:
+The bot holds about 66 MB at rest, and roughly 95 MB is the ceiling:
 
 | What | Cost |
 | --- | --- |
-| Python and discord.py | 47 MB |
+| Python, aiohttp and discord.py | 47 MB |
 | The rest of the bot's own code | 7 MB |
 | Career data for every fighter | 9 MB |
 | The compiled model | 3 MB |
-| Response cache | up to 32 MB |
-| Headshot cache | up to 12 MB |
+| Response cache | up to 24 MB |
+| Headshot cache | up to 6 MB, and released between cards |
+| Fighter profiles | 0.5 MB |
 
 Parsing the dataset needs pandas and training needs scikit-learn, which between them cost
 around 150 MB resident and another 100 MB while training runs — for a job that runs once a
 day. So they stay in the refresh process, which peaks near 350 MB for a minute or two and
-then exits, giving all of it back. `/ufc ping` reports what the process actually holds,
+then exits, giving all of it back. `/ufc server` reports what the process actually holds,
 and says so if training ever fell back into it, since that is the one way the bot keeps
 those libraries for good.
 
-The response cache is capped by weight as well as by count, because the two are barely
-related: a fighter profile is 3 KB and a fight card is 130 KB. Parsed into Python objects
-a response costs about eight times the size of the JSON it came from, so a cap counted
-only in entries let the cache grow to several times the working set it exists to serve
-— a pass over a full schedule reads about 300 documents and 1.3 MB of JSON. It is held to
-4 MB of responses, evicting whatever was least recently read, and anything past its
-lifetime is dropped on a timer rather than waiting for the cache to fill, since nothing
-can be served from it again.
+Three things keep the caches honest, all of them measured rather than guessed.
+
+**The response cache is capped by weight, not by count.** A fighter profile is 3 KB and a
+fight card is 130 KB, so counting entries says almost nothing about what is held. It is
+kept to 3 MB of responses against a working set of 0.6 MB, evicting whatever was least
+recently read, and anything past its lifetime is dropped on a timer rather than waiting
+for the cache to fill, since nothing can be served from it again.
+
+**Fighters are held as fighters, not as the documents they came from.** An ESPN profile is
+3 KB of JSON that fills in ten fields, and parsed it costs about 23 KB. Keeping the
+`Fighter` instead costs 653 bytes, so the eight hundred profiles a busy day touches come to
+half a megabyte rather than eighteen.
+
+**Headshots are dropped between cards.** A twelve-fight card is 4.7 MB of faces and the cap
+sits above that, so nothing is evicted part way through a card and fetched again for the
+result post. But a card is four hours and the next one is a fortnight away, so anything
+untouched for six hours goes; during a card every face is read twice, at the walkout and
+at the result, so nothing in use ages out.
+
+Two other things were tried and rejected. Interning JSON keys across cached responses
+saves 8% of the cache for 70% slower parsing, which is not a trade worth making. Cutting
+the headshot cap below a card's worth saves 2 MB and costs a re-download of every face
+mid-event.
 
 Scoring a fight does not need either library: training writes the fitted trees and
 coefficients out as plain numbers, and `scorer.py` walks them with nothing but the
@@ -466,10 +520,12 @@ ufcbot/
   config.py             Settings from .env
   instance.py           Prevents two copies running at once
   models.py             Event, Bout and Fighter
+  records.py            The shapes stored and passed around: settings, picks, results
   storage.py            SQLite database
   util.py               Small helpers
   cogs/
-    ufc.py              Slash commands and background jobs
+    ufc.py              Slash commands
+    jobs.py             The three background loops
   sources/
     http.py             HTTP client with caching and retries
     espn.py             ESPN schedules, cards, fighters, odds and live data
@@ -489,7 +545,8 @@ ufcbot/
     cards.py            Fight cards, the schedule and card changes
     fighters.py         The fighter profile card
     picks.py            Picks, prediction, recap, scorecard and model status
-    ratings.py          Ratings boards, their moves, and the stale-data warning
+    ratings.py          Ratings boards and their moves
+    health.py           What the bot says when something it depends on breaks
     events.py           Text for Discord scheduled events
     live.py             Live coverage embeds
     pickem.py           Pick'em board, picker, leaderboard and stats
@@ -512,6 +569,10 @@ ufcbot/
 scikit-learn, and only `worker.py` imports them. See
 [Memory](#memory) for why that matters.
 
+`records.py` holds the dataclasses and `storage.py` the database that reads and
+writes them, so the embeds and the buttons can name a shape without importing a
+SQLite driver and the schema behind it.
+
 ## Tests
 
 ```bash
@@ -519,7 +580,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-135 tests, a few seconds, no network and no Discord: they run against a real SQLite
+252 tests, a few seconds, no network and no Discord: they run against a real SQLite
 database in a temporary directory and fight cards built by hand. Most of them are about
 what happens when a card changes underneath the bot, because that is where the awkward
 cases live -- a fighter replaced, a fight cancelled, a card that only half-loaded -- and
@@ -536,6 +597,11 @@ picks over one bad response.
 | `test_embeds.py` | Every board builds, stays inside Discord's limits and says the right thing |
 | `test_channels.py` | What the publisher edits, re-sends and deletes; the leaderboards' lifecycle |
 | `test_ratings.py` | How a ratings board is read as having moved |
+| `test_espn.py` | Reading ESPN's feed, and the shapes where a field is missing |
+| `test_storage.py` | The bookkeeping the rest of the bot trusts without checking |
+| `test_polymarket.py` | Reading a price, and the many markets that are not one |
+| `test_cogs.py` | That the cogs only reach for helpers that exist |
+| `test_outage.py` | Telling an ESPN outage from a bad afternoon |
 
 The model is not retrained here -- that takes a minute and needs the dataset. Training
 checks itself instead: it scores real fights through both the fitted model and the
@@ -560,7 +626,3 @@ fighter has UFC history.
 **A card still shows a fight that was changed.** Fight cards come from ESPN, which can be
 a day or more behind on withdrawals and replacements. The boards follow within about an
 hour of ESPN updating; `/ufc channels refresh` only helps once it has.
-
-**Upgrading from a version with `models/ufc_predictor.joblib`.** That file is no longer
-read and can be deleted. The first refresh writes `models/ufc_model.pkl` and
-`data/career.pkl` in its place, which takes a minute or two.

@@ -19,6 +19,7 @@ from datetime import date
 import discord
 
 from ..embeds import ratings_changes_embed
+from ..records import GuildSettings, RankedState
 from ..stats.career import Ledger
 from ..stats.rankings import (
     divisions_with_fighters,
@@ -27,7 +28,7 @@ from ..stats.rankings import (
     is_womens,
     rank_division,
 )
-from ..storage import GuildSettings, RankedState, Storage
+from ..storage import Storage
 from .cardwatch import news_channel
 
 log = logging.getLogger(__name__)

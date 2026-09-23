@@ -20,7 +20,7 @@ from ..util import format_odds, truncate
 if TYPE_CHECKING:
     from ..features.pickem import PickemService
     from ..models import Bout, Event
-    from ..storage import PickemRecord
+    from ..records import PickemRecord
 
 PAGE_SIZE = 4
 PICKER_TIMEOUT = 840  # just under Discord's 15-minute interaction window
@@ -203,5 +203,16 @@ def board_view(event_id: str, *, accepting: bool) -> discord.ui.View:
     """The two buttons under the card's pick'em board."""
     view = discord.ui.View(timeout=None)
     view.add_item(OpenPickerButton(event_id, disabled=not accepting))
+    view.add_item(MyPicksButton(event_id))
+    return view
+
+
+def my_picks_view(event_id: str) -> discord.ui.View:
+    """The one button under a leaderboard: what you picked on that card.
+
+    No picker: a leaderboard is up either before a card is open for picks or
+    after it has closed, and neither is a moment anyone can pick in.
+    """
+    view = discord.ui.View(timeout=None)
     view.add_item(MyPicksButton(event_id))
     return view

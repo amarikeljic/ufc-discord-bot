@@ -7,13 +7,13 @@ import io
 import logging
 import math
 import sys
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from datetime import time as time_of_day
 from typing import TYPE_CHECKING
 
 import discord
 from discord import app_commands
-from discord.ext import commands, tasks
+from discord.ext import commands
 
 from ..config import VALID_ANCHORS
 from ..embeds import (
@@ -25,15 +25,13 @@ from ..embeds import (
     pickem_stats_embed,
     prediction_embed,
     predictions_embed,
-    stale_data_embed,
     stamp,
 )
 from ..embeds.common import plural
-from ..features.cardwatch import news_channel
-from ..features.sync import MissingPermissions, SyncResult
+from ..features.sync import MissingPermissions
 from ..models import Event
+from ..records import GuildSettings
 from ..stats.rankings import Ranked, pound_for_pound_rank, standing
-from ..storage import GuildSettings
 from ..util import central_time, format_duration, resident_memory_mb, truncate
 
 if TYPE_CHECKING:
@@ -101,21 +99,6 @@ class UFCCog(commands.Cog):
 
     def __init__(self, bot: UFCBot) -> None:
         self.bot = bot
-        self._last_live_refresh: datetime | None = None
-        # Set when live coverage posts something, cleared once the boards have
-        # caught up with it.
-        self._boards_stale = False
-
-    async def cog_load(self) -> None:
-        self.sync_loop.start()
-        self.channels_loop.start()
-        self.live_loop.start()
-
-    async def cog_unload(self) -> None:
-        self.sync_loop.cancel()
-        self.channels_loop.cancel()
-        self.live_loop.cancel()
-
     # -- lookups ------------------------------------------------------------
 
     @ufc.command(name="results", description="Show results from the most recent UFC card")
@@ -321,8 +304,8 @@ class UFCCog(commands.Cog):
 
     # -- health -----------------------------------------------------------------
 
-    @ufc.command(name="ping", description="Round trip to Discord, how long the bot has been up, and memory")
-    async def ping(self, interaction: discord.Interaction) -> None:
+    @ufc.command(name="server", description="How the bot is doing: latency, uptime, memory and data")
+    async def server(self, interaction: discord.Interaction) -> None:
         # Measured around the reply itself: the gateway heartbeat says how far
         # away Discord is, this says how long the bot took to answer.
         started = discord.utils.utcnow()
@@ -330,33 +313,52 @@ class UFCCog(commands.Cog):
 
         gateway = self.bot.latency
         up = (discord.utils.utcnow() - self.bot.started_at).total_seconds()
-        lines = [
-            "🏓 Gateway **—**" if math.isnan(gateway) else f"🏓 Gateway **{gateway * 1000:.0f} ms**",
-            f"↩️ Response **{(discord.utils.utcnow() - started).total_seconds() * 1000:.0f} ms**",
-            f"⏱️ Up **{format_duration(up)}** · since {discord.utils.format_dt(self.bot.started_at, 'f')}",
-            f"🌐 {plural(len(self.bot.guilds), 'server')}",
-        ]
-
+        answered = (discord.utils.utcnow() - started).total_seconds() * 1000
         memory = resident_memory_mb()
-        if memory is not None:
-            lines.append(f"🧠 Memory **{memory:,.0f} MB**")
+
+        embed = discord.Embed(
+            title=self.bot.user.display_name if self.bot.user else "Bot",
+            description=f"Online for **{format_duration(up)}** \u00b7 since "
+            f"{discord.utils.format_dt(self.bot.started_at, 'f')}",
+            colour=UFC_RED,
+        )
+        if self.bot.user:
+            embed.set_thumbnail(url=self.bot.user.display_avatar.url)
+
+        embed.add_field(
+            name="Connection",
+            value="\n".join(
+                [
+                    "Gateway \u2014" if math.isnan(gateway) else f"Gateway **{gateway * 1000:.0f}ms**",
+                    f"Response **{answered:.0f}ms**",
+                    f"Serving {plural(len(self.bot.guilds), 'server')}",
+                ]
+            ),
+            inline=True,
+        )
+
+        health = [f"Memory **{memory:,.0f} MB**" if memory is not None else "Memory \u2014"]
+        stats = self.bot.stats
+        if self.bot.config.enable_predictions:
+            newest = stats.careers.newest_event if stats.careers else None
+            if not stats.can_predict:
+                health.append("Model **not loaded**")
+            elif newest:
+                health.append(f"Fights to **{newest:%b %d}**")
+                health.append("Ratings **up to date**" if not stats.is_behind else "Ratings **behind**")
+            else:
+                health.append("Model **ready**")
+        embed.add_field(name="Health", value="\n".join(health), inline=True)
+
         if "pandas" in sys.modules:
             # Training normally runs in a subprocess that exits and gives its
             # memory back. Where spawning is unavailable it falls back to this
             # process, and what it loads there stays for the life of the bot.
-            lines.append("⚠️ Training ran in this process · restart to give back ~150 MB")
-
-        stats = self.bot.stats
-        if self.bot.config.enable_predictions:
-            newest = stats.careers.newest_event if stats.careers else None
-            if stats.can_predict:
-                state = f"ready · data to {newest:%b %d}" if newest else "ready"
-            else:
-                state = "not loaded"
-            lines.append(f"🤖 Model {state}")
-
-        name = self.bot.user.display_name if self.bot.user else "Bot"
-        embed = discord.Embed(title=name, description="\n".join(lines), colour=UFC_RED)
+            embed.add_field(
+                name="\u26a0\ufe0f Heads up",
+                value="Training ran in this process. A restart gives back about 150 MB.",
+                inline=False,
+            )
         await interaction.followup.send(embed=stamp(embed))
 
     # -- channel boards ---------------------------------------------------------
@@ -676,238 +678,12 @@ class UFCCog(commands.Cog):
             await interaction.followup.send(f"Sync failed: {exc}")
             return
 
-        await self._announce(guild, settings, result)
+        await self.bot.syncer.announce_new_cards(guild, settings, result)
 
         lines = [header] if header else []
         lines.append(f"Scheduled events: {result.summary()}.")
         lines.extend(f"• {truncate(error, 200)}" for error in result.errors[:3])
         await interaction.followup.send("\n".join(lines))
-
-    async def _announce(
-        self, guild: discord.Guild, settings: GuildSettings, result: SyncResult
-    ) -> None:
-        """Post newly added cards to the configured channel, if there is one."""
-        if not settings.announce_channel_id or not result.new_events:
-            return
-
-        channel = guild.get_channel(settings.announce_channel_id)
-        if not isinstance(channel, discord.TextChannel):
-            return
-        if not channel.permissions_for(guild.me).send_messages:
-            return
-
-        for event in result.new_events[:5]:
-            try:
-                await channel.send(
-                    content="📅 New UFC card on the calendar",
-                    embed=event_embed(event, show_records=False, picks=self.bot.picks_for(event)),
-                )
-            except discord.HTTPException as exc:
-                log.debug("Announcement failed in guild %s: %r", guild.id, exc)
-                return
-
-    # -- background jobs ----------------------------------------------------
-
-    @tasks.loop(time=MIDNIGHT_CENTRAL)
-    async def sync_loop(self) -> None:
-        """Mirror upcoming cards into this server's scheduled events."""
-        for settings in await self.bot.storage.guilds_with_sync_enabled():
-            guild = self.bot.get_guild(settings.guild_id)
-            if guild is None:
-                continue
-            try:
-                result = await self.bot.syncer.sync_guild(guild, settings)
-                if result.created or result.updated:
-                    log.info("Synced guild %s: %s", guild.id, result.summary())
-                await self._announce(guild, settings, result)
-            except MissingPermissions as exc:
-                log.warning("Skipping guild %s: %s", guild.id, exc)
-            except Exception:  # one guild must not stop the rest
-                log.exception("Background sync failed for guild %s", guild.id)
-
-    @sync_loop.before_loop
-    async def before_sync_loop(self) -> None:
-        await self.bot.wait_until_ready()
-
-    async def _refresh_stats(self) -> None:
-        """Keep the dataset and model current.
-
-        The most recent completed card on ESPN tells the service which event it
-        should expect to find upstream. While that card is missing the service
-        checks on every pass instead of waiting: the maintainer publishes once a
-        day, in one go, and the check itself costs four conditional requests.
-
-        This runs first in the hourly pass so that a retrain's new ratings are
-        announced and drawn by the rest of it, rather than a pass later.
-        """
-        if not self.bot.config.enable_predictions:
-            return
-        stats = self.bot.stats
-        try:
-            recent = await self.bot.data.recent_events(days=21, limit=1)
-            if recent:
-                stats.expected_newest = recent[0].start.date()
-        except Exception as exc:  # freshness hint is optional
-            log.debug("Could not determine the latest completed card: %r", exc)
-
-        if not stats.needs_check():
-            return
-        result = await stats.refresh()
-        if result.downloaded or result.retrained:
-            log.info("Stats refresh: %s", result.message)
-
-    @tasks.loop(time=ON_THE_HOUR)
-    async def channels_loop(self) -> None:
-        """The hourly pass, in the order the steps depend on each other.
-
-        New data first, so everything below it describes the same fights: grade
-        what has finished, tidy up, then say what changed and redraw the boards.
-        """
-        try:
-            await self._refresh_stats()
-        except Exception:  # the rest of the pass still has work to do
-            log.exception("Refreshing the fight dataset failed")
-        try:
-            graded = await self.bot.tracker.grade_due()
-            if graded:
-                log.info("Graded %d card(s)", len(graded))
-        except Exception:  # boards can still refresh
-            log.exception("Grading failed")
-        try:
-            await self.bot.pickem.grade_due()
-        except Exception:  # boards can still refresh
-            log.exception("Pick'em grading failed")
-        try:
-            await self.bot.storage.prune_live_data(discord.utils.utcnow() - LIVE_HISTORY)
-        except Exception:  # housekeeping is never worth a failed tick
-            log.exception("Pruning live coverage history failed")
-
-        await self._announce_and_publish()
-
-    async def _announce_and_publish(self) -> None:
-        """Say what has changed since the last look, then redraw every board."""
-        stale = await self._stale_notice()
-
-        # Found once for everyone: whichever guild looked first would otherwise
-        # be the only one told about a fight coming off a card.
-        try:
-            changes = await self.bot.cardwatch.poll()
-        except Exception:  # announcements are never worth a failed tick
-            log.exception("Checking cards for changes failed")
-            changes = []
-        try:
-            moves = await self.bot.ratingswatch.poll(self.bot.ledgers())
-        except Exception:
-            log.exception("Checking the ratings boards for changes failed")
-            moves = []
-
-        for settings in await self.bot.storage.guilds_with_channels():
-            guild = self.bot.get_guild(settings.guild_id)
-            if guild is None:
-                continue
-            try:
-                await self.bot.cardwatch.announce(guild, settings, changes)
-                await self.bot.ratingswatch.announce(guild, settings, moves)
-                if stale is not None:
-                    channel = news_channel(guild, settings)
-                    if channel is not None:
-                        await channel.send(embed=stale)
-            except Exception:
-                log.exception("Announcing changes failed in guild %s", guild.id)
-
-        await self._publish_boards()
-
-    async def _stale_notice(self) -> discord.Embed | None:
-        """A warning when the dataset has stopped arriving, or None while it is fine.
-
-        A broken refresh is invisible otherwise: the boards keep drawing happily
-        from whatever was last downloaded. Said once per card that fails to
-        land, so a genuinely dead pipeline does not become daily noise.
-        """
-        stats = self.bot.stats
-        expected = stats.expected_newest
-        if not self.bot.config.enable_predictions or not stats.is_behind or expected is None:
-            return None
-        if date.today() - expected < STALE_DATA_AFTER:
-            return None  # upstream is often a day or two late; that is not news
-        if not await self.bot.storage.notice_due("stale_data", expected.isoformat()):
-            return None
-        newest = stats.careers.newest_event if stats.careers else None
-        return stale_data_embed(expected, newest, stats.last_error)
-
-    async def _publish_boards(self) -> None:
-        """Bring every guild's boards in line with what the bot knows now."""
-        for settings in await self.bot.storage.guilds_with_channels():
-            guild = self.bot.get_guild(settings.guild_id)
-            if guild is None:
-                continue
-            result = await self.bot.publisher.publish(guild, settings)
-            if result.errors:
-                log.warning("Boards in guild %s: %s", guild.id, "; ".join(result.errors))
-
-    async def _refresh_after_live(self) -> None:
-        """Redraw the boards once live coverage has posted something.
-
-        A result names a winner and settles pick'em points, and both boards show
-        it; on the hourly pass alone they would disagree with the live channel
-        for most of an hour.
-
-        Called on every tick while the boards are behind, not only on the tick
-        that posted. A fight's last round and its result often post seconds
-        apart, and the second of those is the one worth showing; holding the
-        flag until the rebuild actually runs means it is never the one dropped.
-        """
-        now = discord.utils.utcnow()
-        if self._last_live_refresh is not None and now - self._last_live_refresh < LIVE_REFRESH_COOLDOWN:
-            return  # too soon; the next tick will pick this up
-        self._last_live_refresh = now
-        self._boards_stale = False
-        try:
-            await self.bot.pickem.grade_due()
-        except Exception:  # the boards can still refresh
-            log.exception("Pick'em grading after a live update failed")
-        try:
-            await self._publish_boards()
-        except Exception:  # never worth killing the live loop over
-            log.exception("Refreshing the boards after a live update failed")
-
-    @channels_loop.before_loop
-    async def before_channels_loop(self) -> None:
-        await self.bot.wait_until_ready()
-        # A loop on a clock waits for the next hour before its first run, so a
-        # restart at 3:05 would leave yesterday's boards up until 4:00.
-        try:
-            await self.channels_loop()
-        except Exception:
-            log.exception("The first board refresh after start-up failed")
-
-    @tasks.loop(seconds=15)
-    async def live_loop(self) -> None:
-        """Post live fight updates while a card is on. Cheap when nothing is happening."""
-        channels: list[discord.TextChannel] = []
-        for settings in await self.bot.storage.guilds_with_live():
-            guild = self.bot.get_guild(settings.guild_id)
-            channel = guild.get_channel(settings.live_channel_id) if guild else None
-            if not isinstance(channel, discord.TextChannel):
-                continue
-            permissions = channel.permissions_for(guild.me)
-            if permissions.send_messages and permissions.embed_links:
-                channels.append(channel)
-        if not channels:
-            return
-        try:
-            posted = await self.bot.live.tick(channels)
-        except Exception:  # keep the loop alive through a bad tick
-            log.exception("Live coverage tick failed")
-            return
-        self._boards_stale = self._boards_stale or bool(posted)
-        if self._boards_stale:
-            await self._refresh_after_live()
-
-    @live_loop.before_loop
-    async def before_live_loop(self) -> None:
-        await self.bot.wait_until_ready()
-
 
 async def setup(bot: UFCBot) -> None:
     await bot.add_cog(UFCCog(bot))

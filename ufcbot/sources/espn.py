@@ -15,6 +15,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
+from collections import OrderedDict
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from urllib.parse import quote
 
@@ -36,6 +39,13 @@ MAX_RANGE_DAYS = 364
 # Athlete bios and venues barely change; cache them far longer than schedules.
 STATIC_TTL = 24 * 60 * 60
 
+# Fighters are held as fighters rather than as the documents they were read
+# from. A card resolves two profiles per bout and the same names come back card
+# after card, so the profiles are worth keeping -- but a parsed ESPN document
+# costs about eight times the JSON it came from, where the dozen fields taken
+# out of it cost almost nothing. A full schedule touches a few hundred.
+ATHLETE_CACHE = 800
+
 
 class UFCData:
     """Reads UFC schedules, fight cards and fighter profiles."""
@@ -44,6 +54,7 @@ class UFCData:
         self.http = http
         # ESPN has no lines for some cards, Contender Series among them.
         self.odds = odds
+        self._athletes: OrderedDict[str, tuple[float, Fighter]] = OrderedDict()
 
     # -- schedules ----------------------------------------------------------
 
@@ -333,15 +344,34 @@ class UFCData:
         athlete_ref = https((competitor.get("athlete") or {}).get("$ref"))
         if not athlete_ref:
             return None
+        fighter = await self._athlete(athlete_ref)
+        if fighter is None:
+            return None
+        # The record belongs to the bout, not the fighter, so it is fetched per
+        # competitor and written onto this caller's own copy.
+        fighter.record = await self._load_record(https((competitor.get("record") or {}).get("$ref")))
+        return fighter
+
+    async def _athlete(self, athlete_ref: str) -> Fighter | None:
+        """One fighter's profile, kept as a Fighter rather than as its document."""
+        now = time.monotonic()
+        cached = self._athletes.get(athlete_ref)
+        if cached is not None and now - cached[0] < STATIC_TTL:
+            self._athletes.move_to_end(athlete_ref)
+            return replace(cached[1])
+
         try:
-            payload = await self.http.get_json(athlete_ref, ttl=STATIC_TTL)
+            payload = await self.http.get_json(athlete_ref, ttl=STATIC_TTL, store=False)
         except HttpError:
             return None
-
         fighter = _fighter_from_payload(payload)
         if fighter is None:
             return None
-        fighter.record = await self._load_record(https((competitor.get("record") or {}).get("$ref")))
+
+        self._athletes[athlete_ref] = (now, replace(fighter))
+        self._athletes.move_to_end(athlete_ref)
+        while len(self._athletes) > ATHLETE_CACHE:
+            self._athletes.popitem(last=False)
         return fighter
 
     # -- per-fight detail --------------------------------------------------

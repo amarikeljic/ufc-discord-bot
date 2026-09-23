@@ -38,10 +38,10 @@ from .common import (
 
 if TYPE_CHECKING:
     from ..features.tracking import GradedEvent, Scorecard
+    from ..records import PredictionRecord
     from ..stats.prediction import Evaluation
     from ..stats.scorer import CompiledModel
     from ..stats.service import FighterCareer
-    from ..storage import PredictionRecord
 
 
 def pick_value(

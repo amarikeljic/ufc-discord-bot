@@ -13,15 +13,18 @@ from typing import TYPE_CHECKING
 import discord
 
 from ..embeds import (
+    event_embed,
     scheduled_event_description,
     scheduled_event_location,
     scheduled_event_name,
 )
 from ..models import Event
+from ..records import GuildSettings
 from ..sources.espn import UFCData
 from ..sources.posters import PosterLookup
-from ..storage import GuildSettings, Storage
+from ..storage import Storage
 from ..util import normalise
+from .pickem import results_official
 
 if TYPE_CHECKING:
     from ..stats.prediction import Prediction
@@ -35,6 +38,9 @@ START_MARGIN = timedelta(minutes=5)
 # Small pause between writes so a first run over a full calendar does not
 # hammer the guild's scheduled-event rate limit.
 WRITE_DELAY = 1.0
+# A card being fought changes by the minute, so it is not read from a copy made
+# for the boards a quarter of an hour ago.
+LIVE_CARD_TTL = 60
 
 
 @dataclass(slots=True)
@@ -102,6 +108,10 @@ class EventSyncer:
         events: list[Event] = []
         for summary, result in zip(wanted, detailed):
             if isinstance(result, Event):
+                if not result.has_anyone_named:
+                    # A date with a row of empty slots. Wait for a name.
+                    log.debug("Skipping %s: no fighter named yet", result.name)
+                    continue
                 events.append(result)
             else:
                 # The card list is still useful without the full fight card.
@@ -215,6 +225,88 @@ class EventSyncer:
         )
         payload.discord_id = scheduled.id
         log.info("Updated scheduled event %r", payload.name)
+
+    async def announce_new_cards(
+        self, guild: discord.Guild, settings: GuildSettings, result: SyncResult
+    ) -> None:
+        """Post newly added cards to the configured channel, if there is one.
+
+        Lives here rather than in a cog because it describes a sync result, and
+        both the nightly job and ``/ufc sync now`` have one to describe.
+        """
+        if not settings.announce_channel_id or not result.new_events:
+            return
+
+        channel = guild.get_channel(settings.announce_channel_id)
+        if not isinstance(channel, discord.TextChannel):
+            return
+        if not channel.permissions_for(guild.me).send_messages:
+            return
+
+        for event in result.new_events[:5]:
+            try:
+                await channel.send(
+                    content="📅 New UFC card on the calendar",
+                    embed=event_embed(event, show_records=False, picks=self.pick_provider(event) if self.pick_provider else {}),
+                )
+            except discord.HTTPException as exc:
+                log.debug("Announcement failed in guild %s: %r", guild.id, exc)
+                return
+
+    async def close_finished(self, guild: discord.Guild, *, now: datetime | None = None) -> int:
+        """End Discord events for cards whose last result is in. Returns how many.
+
+        An external scheduled event runs until the end time it was given, which
+        is a guess made days earlier: four hours after the first bell. A card
+        that finishes early therefore sits "live" on the calendar until the
+        small hours. Once every fight has a result there is nothing left to be
+        live about.
+
+        Called after every result live coverage posts, so it has to be cheap
+        when there is nothing to do: the cards are read from cache, and Discord
+        is only asked about its events once a card actually looks finished.
+        """
+        links = await self.storage.get_links(guild.id)
+        if not links:
+            return 0
+
+        now = now or datetime.now(UTC)
+        try:
+            recent = await self.data.recent_events(days=3, limit=5)
+        except Exception as exc:  # the calendar can wait for the next result
+            log.debug("Could not list recent cards for guild %s: %r", guild.id, exc)
+            return 0
+
+        finished = []
+        for summary in recent:
+            link = links.get(summary.id)
+            if link is None:
+                continue
+            card = await self.data.get_event(summary.id, ttl=LIVE_CARD_TTL)
+            if card is not None and results_official(card, now):
+                finished.append((link[0], card))
+        if not finished:
+            return 0
+
+        try:
+            scheduled = {event.id: event for event in await guild.fetch_scheduled_events()}
+        except discord.HTTPException as exc:
+            log.debug("Could not read scheduled events in guild %s: %r", guild.id, exc)
+            return 0
+
+        ended = 0
+        for discord_id, card in finished:
+            scheduled_event = scheduled.get(discord_id)
+            if scheduled_event is None or scheduled_event.status is not discord.EventStatus.active:
+                continue
+            try:
+                await scheduled_event.end()
+                ended += 1
+                log.info("Ended the Discord event for %s; all results are in", card.name)
+            except discord.HTTPException as exc:
+                log.warning("Could not end the Discord event for %s: %r", card.name, exc)
+            await asyncio.sleep(WRITE_DELAY)
+        return ended
 
     async def _prune(
         self,

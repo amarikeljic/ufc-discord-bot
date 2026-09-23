@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import time
 from collections import OrderedDict
 
 from PIL import Image, ImageDraw, ImageEnhance, ImageFont, ImageOps
@@ -27,35 +28,64 @@ LOSER_TINT = (70, 70, 74)
 NAME_STRIP = 64
 IMAGE_NAME = "matchup.jpg"
 
-# Headshots are held by size rather than by count: a card's worth is a few
-# hundred kilobytes, and counting them instead would let a run of large ones
-# quietly hold tens of megabytes.
-CACHE_BYTES = 12 * 1024 * 1024
+# Headshots are held by size rather than by count, because they vary: measured
+# across a twelve-fight card they run 230KB each and a full card comes to 4.7MB.
+# The cap is set above that so nothing is evicted part way through a card and
+# fetched again for the result post.
+CACHE_BYTES = 6 * 1024 * 1024
 MAX_HEADSHOT_BYTES = 3_000_000
+
+# ...but a card is four hours and the gap to the next one is a fortnight, and
+# these are only ever wanted while a card is on. Holding 4.7MB of faces for two
+# weeks to save re-fetching them is the wrong trade, so anything untouched for
+# this long is dropped. During a card every headshot is read repeatedly, for the
+# walkout and again for the result, so nothing in use ever ages out.
+HEADSHOT_TTL = 6 * 60 * 60
 
 
 class MatchupImages:
-    def __init__(self, http: HttpClient, *, cache_bytes: int = CACHE_BYTES) -> None:
+    def __init__(
+        self, http: HttpClient, *, cache_bytes: int = CACHE_BYTES, ttl: float = HEADSHOT_TTL
+    ) -> None:
         self.http = http
         self._cache_bytes = cache_bytes
+        self._ttl = ttl
         self._held = 0
-        self._cache: OrderedDict[str, bytes | None] = OrderedDict()
+        # url -> (last read, image), oldest read first.
+        self._cache: OrderedDict[str, tuple[float, bytes | None]] = OrderedDict()
 
     async def headshot(self, url: str | None) -> bytes | None:
         if not url:
             return None
-        if url in self._cache:
+        now = time.monotonic()
+        cached = self._cache.get(url)
+        if cached is not None:
+            self._cache[url] = (now, cached[1])
             self._cache.move_to_end(url)
-            return self._cache[url]
+            self._expire(now)
+            return cached[1]
+
         data = await self.http.get_bytes(url, max_bytes=MAX_HEADSHOT_BYTES)
         if data is not None and not data.startswith(b"\x89PNG"):
             data = None
-        self._cache[url] = data
+        self._cache[url] = (now, data)
+        self._cache.move_to_end(url)
         self._held += len(data) if data else 0
-        while self._held > self._cache_bytes and len(self._cache) > 1:
-            _, dropped = self._cache.popitem(last=False)
-            self._held -= len(dropped) if dropped else 0
+        self._expire(now)
         return data
+
+    def _expire(self, now: float) -> None:
+        """Drop what has gone cold, then what is oldest, until within the cap.
+
+        Both run oldest-first, and the cache is ordered by when each image was
+        last read, so a card in progress keeps everything it is using.
+        """
+        while self._cache:
+            url, (read_at, data) = next(iter(self._cache.items()))
+            if now - read_at < self._ttl and self._held <= self._cache_bytes:
+                break
+            self._cache.pop(url)
+            self._held -= len(data) if data else 0
 
     async def matchup(self, a: Fighter, b: Fighter, *, winner_id: str | None = None) -> bytes | None:
         """JPEG of both fighters, or None when neither has a headshot."""

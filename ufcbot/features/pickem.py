@@ -17,8 +17,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from ..models import Bout, Event
+from ..records import PickemRecord, PredictionRecord
 from ..sources.espn import UFCData
-from ..storage import PickemRecord, PredictionRecord, Storage
+from ..storage import Storage
 from ..util import format_odds, normalise
 from .tracking import VOID_AFTER
 
@@ -106,7 +107,7 @@ def ready_to_open(event: Event, now: datetime) -> bool:
     fights = event.fights
     if not fights:
         return False
-    if all(len(bout.odds) == 2 for bout in fights):
+    if fully_priced(event):
         return True
     return event.start - now <= LAST_CALL and any(len(bout.odds) == 2 for bout in fights)
 
@@ -128,6 +129,17 @@ def card_over(event: Event, now: datetime) -> bool:
         return True
     fights = event.fights
     return event.start <= now and bool(fights) and all(bout.completed for bout in fights)
+
+
+def results_official(event: Event, now: datetime) -> bool:
+    """Every fight on the card has a result, rather than enough time having passed.
+
+    ``card_over`` gives up after twelve hours so a card whose last result never
+    lands still closes. This is the stricter reading, for the things that should
+    only happen once the night is genuinely finished.
+    """
+    fights = event.fights
+    return bool(fights) and event.start <= now and all(bout.completed for bout in fights)
 
 
 def lock_time(event: Event, bout: Bout) -> datetime:

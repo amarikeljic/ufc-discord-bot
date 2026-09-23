@@ -10,7 +10,7 @@ from __future__ import annotations
 from conftest import bout, card, fighter, unnamed_bout
 
 from ufcbot.features.cardwatch import ADDED, REMOVED, REPLACED, _bout_state, diff
-from ufcbot.storage import CardBout
+from ufcbot.records import CardBout
 
 ALLEN = fighter("1", "Arnold Allen")
 PICO = fighter("2", "Aaron Pico")
@@ -100,3 +100,31 @@ async def test_saving_a_card_replaces_what_was_there(storage, soon):
     await storage.save_card_bouts("EV1", _bout_state(before(soon)))
     await storage.save_card_bouts("EV1", _bout_state(card(bout("B1", ALLEN, PICO), start=soon)))
     assert set(await storage.card_bouts("EV1")) == {"B1"}
+
+
+# -- placeholders are not fights ---------------------------------------------------
+
+
+def test_an_empty_slot_leaving_the_card_is_not_a_fight_coming_off():
+    """ESPN carries unannounced bouts as placeholders with nobody in them and
+    swaps them for the real fight. "TBA vs. TBA is off the card" is noise."""
+    previous = {"B1": CardBout(bout_id="B1", fighters=())}
+    current = [CardBout(bout_id="B2", fighters=(("1", "Arnold Allen"), ("2", "Aaron Pico")))]
+
+    kinds = [change.kind for change in diff(previous, current)]
+
+    assert kinds == ["added"], "the fight arriving is the whole story"
+
+
+def test_a_real_fight_coming_off_is_still_reported():
+    previous = {"B1": CardBout(bout_id="B1", fighters=(("1", "Arnold Allen"), ("2", "Aaron Pico")))}
+
+    assert [change.kind for change in diff(previous, [])] == ["removed"]
+
+
+def test_a_card_with_nobody_named_is_not_a_card_yet(soon):
+    """A date and a row of empty slots is not something to put on a calendar."""
+
+
+    assert not card(unnamed_bout("B1"), unnamed_bout("B2"), start=soon).has_anyone_named
+    assert card(bout("B1", fighter("1", "A"), fighter("2", "B")), start=soon).has_anyone_named

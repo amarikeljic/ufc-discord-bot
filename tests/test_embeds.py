@@ -27,8 +27,8 @@ from ufcbot.embeds import (
 )
 from ufcbot.embeds.common import EMBED_BUDGET
 from ufcbot.features.cardwatch import CardChange
+from ufcbot.records import PickemRecord, PredictionRecord
 from ufcbot.stats.rankings import Ranked
-from ufcbot.storage import PickemRecord, PredictionRecord
 
 ALLEN = fighter("1", "Arnold Allen")
 PICO = fighter("2", "Aaron Pico")

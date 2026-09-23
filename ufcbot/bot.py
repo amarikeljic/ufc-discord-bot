@@ -18,18 +18,19 @@ from .features.ratings import RatingsWatch
 from .features.sync import EventSyncer
 from .features.tracking import PredictionTracker
 from .models import Event
+from .records import GuildSettings
 from .sources.espn import UFCData
 from .sources.http import HttpClient
 from .sources.polymarket import PolymarketOdds
 from .sources.posters import PosterLookup
 from .stats.prediction import Evaluation, Prediction
 from .stats.service import StatsService
-from .storage import GuildSettings, Storage
+from .storage import Storage
 from .ui.pickem import PICKEM_BUTTONS
 
 log = logging.getLogger(__name__)
 
-EXTENSIONS = ("ufcbot.cogs.ufc",)
+EXTENSIONS = ("ufcbot.cogs.ufc", "ufcbot.cogs.jobs")
 
 
 class UFCBot(commands.Bot):

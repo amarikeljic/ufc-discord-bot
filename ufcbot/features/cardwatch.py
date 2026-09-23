@@ -20,8 +20,9 @@ import discord
 
 from ..embeds import card_changes_embed
 from ..models import Event
+from ..records import CardBout, GuildSettings, ShortNotice
 from ..sources.espn import UFCData
-from ..storage import CardBout, GuildSettings, ShortNotice, Storage
+from ..storage import Storage
 from ..util import normalise
 
 log = logging.getLogger(__name__)
@@ -32,6 +33,21 @@ REPLACED = "replaced"
 
 # A card nothing has refreshed in this long has been and gone.
 STATE_LIFETIME = timedelta(days=21)
+
+
+def announcement_channel(guild: discord.Guild, settings: GuildSettings) -> discord.TextChannel | None:
+    """Where this server hears about the bot itself, rather than about fighting.
+
+    The announcements channel if one is set, since that is where a server has
+    already said it wants to be told things, and the news channel otherwise so a
+    warning always lands somewhere rather than nowhere.
+    """
+    channel = guild.get_channel(settings.announce_channel_id or 0)
+    if isinstance(channel, discord.TextChannel):
+        permissions = channel.permissions_for(guild.me)
+        if permissions.send_messages and permissions.embed_links:
+            return channel
+    return news_channel(guild, settings)
 
 
 def news_channel(guild: discord.Guild, settings: GuildSettings) -> discord.TextChannel | None:
@@ -112,11 +128,15 @@ def diff(
                 )
             )
         elif gone and arrived:
-            changes.append(CardChange(REMOVED, was.matchup, was.weight_class))
+            if was.fighters:
+                changes.append(CardChange(REMOVED, was.matchup, was.weight_class))
             changes.append(CardChange(ADDED, bout.matchup, bout.weight_class))
 
     for bout_id, was in previous.items():
-        if bout_id not in seen:
+        # An empty slot leaving the card is not a fight coming off it. ESPN
+        # carries unannounced bouts as placeholders and swaps them for the real
+        # thing, which should read as the fight being added and nothing else.
+        if bout_id not in seen and was.fighters:
             changes.append(CardChange(REMOVED, was.matchup, was.weight_class))
     return changes
 

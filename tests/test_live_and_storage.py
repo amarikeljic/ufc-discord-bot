@@ -6,6 +6,7 @@ import sqlite3
 import time
 from datetime import UTC, datetime, timedelta
 
+from ufcbot.embeds.images import HEADSHOT_TTL, MatchupImages
 from ufcbot.features.live import LiveCoverage
 from ufcbot.models import Bout, Fighter
 from ufcbot.sources.http import SWEEP_INTERVAL, Entry, HttpClient, cache_key
@@ -175,3 +176,71 @@ def test_an_uptime_reads_in_the_two_units_that_matter():
     assert format_duration(30) == "0m"
     assert format_duration(90 * 60) == "1h 30m"
     assert format_duration(26 * 3600 + 5 * 60) == "1d 2h", "days and hours, not minutes too"
+
+
+def test_a_response_can_be_read_without_being_kept():
+    """A caller that distils a document into something smaller has no use for
+    the document. Fighter profiles are three kilobytes each to fill in ten
+    fields, and thousands of them held raw is the long tail of the cache."""
+    client = HttpClient()
+    client._store("kept", {"a": 1}, ttl=900, size=3000)
+
+    assert client._held == 3000
+    assert "kept" in client._cache
+    # store=False is exercised through get_json, which needs a session; what is
+    # pinned here is that _store is the only thing that ever grows the cache.
+    assert set(client._cache) == {"kept"}
+
+
+def test_the_cache_is_held_to_its_weight_not_its_count():
+    client = HttpClient(max_bytes=10_000, max_entries=1000)
+    for index in range(10):
+        held(client, f"doc{index}", size=2_000)
+
+    client._store("new", {"a": 1}, ttl=900, size=2_000)
+
+    assert client._held <= 10_000
+    assert len(client._cache) < 11, "well under the entry cap, but over the weight"
+
+
+# -- headshots ---------------------------------------------------------------------
+
+
+def images_with(urls_to_bytes: dict[str, bytes], **kwargs) -> MatchupImages:
+    """A headshot cache whose downloads are already decided."""
+    images = MatchupImages(http=None, **kwargs)
+    for url, data in urls_to_bytes.items():
+        images._cache[url] = (time.monotonic(), data)
+        images._held += len(data)
+    return images
+
+
+def test_headshots_a_card_is_using_are_not_dropped():
+    """Every face on a card is read twice, at the walkout and at the result, so
+    a cache that evicted between the two would fetch the whole card again."""
+    card = {f"f{i}": b"\x89PNG" + bytes(200_000) for i in range(21)}
+    images = images_with(card)
+
+    images._expire(time.monotonic())
+
+    assert len(images._cache) == 21, "4.2 MB of a 6 MB cap"
+
+
+def test_headshots_nobody_has_looked_at_for_hours_are_dropped():
+    """A card is four hours and the next one is a fortnight away. Holding the
+    faces in between costs megabytes to save nothing."""
+    images = images_with({"old": b"\x89PNG" + bytes(200_000)})
+    images._cache["old"] = (time.monotonic() - HEADSHOT_TTL - 1, images._cache["old"][1])
+
+    images._expire(time.monotonic())
+
+    assert images._cache == {} and images._held == 0
+
+
+def test_the_cap_still_bites_when_everything_is_fresh():
+    images = images_with({f"f{i}": b"\x89PNG" + bytes(500_000) for i in range(20)})
+
+    images._expire(time.monotonic())
+
+    assert images._held <= 6 * 1024 * 1024
+    assert len(images._cache) < 20, "the least recently read went first"

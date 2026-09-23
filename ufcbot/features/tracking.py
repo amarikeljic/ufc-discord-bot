@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 
 from ..models import Event
+from ..records import PredictionRecord
 from ..sources.espn import UFCData
 from ..stats.prediction import Prediction
 from ..stats.techniques import (
@@ -23,7 +24,7 @@ from ..stats.techniques import (
     same_technique,
     technique_from_espn,
 )
-from ..storage import PredictionRecord, Storage
+from ..storage import Storage
 
 log = logging.getLogger(__name__)
 
@@ -276,8 +277,6 @@ class PredictionTracker:
             entry.records.append(record)
         return sorted(by_event.values(), key=lambda e: e.start)
 
-    async def scorecard(self, since: date | None) -> Scorecard:
-        return build_scorecard(since, await self.graded_events(since))
 
 
 def build_scorecard(since: date | None, events: list[GradedEvent]) -> Scorecard:

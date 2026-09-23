@@ -28,18 +28,18 @@ from ..embeds import (
     scorecard_embed,
 )
 from ..models import Event
+from ..records import GuildSettings
 from ..sources.espn import UFCData
 from ..stats.prediction import Evaluation, Prediction
 from ..stats.rankings import POUND_FOR_POUND, divisions_with_fighters, rank_division
-from ..storage import GuildSettings, Storage
-from ..ui.pickem import board_view
+from ..storage import Storage
+from ..ui.pickem import board_view, my_picks_view
 from ..util import normalise
 from .pickem import (
     OPEN,
     PickemService,
     benchmarks,
     bout_status,
-    card_over,
     ready_to_open,
 )
 from .tracking import PredictionTracker, build_scorecard
@@ -51,7 +51,6 @@ KIND_SCHEDULE = "schedule"
 KIND_SCORECARD = "scorecard"
 KIND_PICKEM = "pickem"
 KIND_PICKEM_LEADERBOARD = "pickem_leaderboard"
-KIND_PICKEM_CARD_LEADERBOARD = "pickem_card_leaderboard"
 KIND_RANKINGS = "rankings"
 BOARD_KEY = "board"
 
@@ -62,17 +61,38 @@ PICKEM_TITLES = ("🎯 Pick'em:", "🏆")
 THIS_CARD_TITLE = "🏆 This Card's Pick'em Leaderboard"
 LAST_CARD_TITLE = "🏆 Last Card's Pick'em Leaderboard"
 
+# The pick'em channel holds two messages: the all-time leaderboard, which is
+# never deleted, and one below it that turns over with the card. That second
+# message is only ever in one of three states.
+STAGE_BOARD = "board"
+STAGE_THIS_CARD = "this"
+STAGE_LAST_CARD = "last"
 
-def card_leaderboard_title(scored_card_id: str | None, current: Event | None) -> str:
-    """Whether the card leaderboard is about the card in play or the one before.
+# How long before the first bell the game opens. Before that the channel shows
+# the last card instead, so there is something to read between cards without a
+# board sitting open for a fortnight.
+PICKEM_OPENS = timedelta(hours=48)
 
-    The card it shows is whichever one was scored most recently, so the title
-    turns over on its own: it reads "this card" from the moment the first fight
-    of the card being fought is graded, and goes back to "last card" when the
-    next card's board goes up with nothing scored on it yet.
+
+def pickem_stage(
+    current: Event | None,
+    last_card_id: str | None,
+    now: datetime,
+    *,
+    priced: bool,
+) -> tuple[str, str | None]:
+    """Which of the three the rotating message should be, and for which card.
+
+    In order of precedence, because they describe one card's night as it runs:
+    the card being fought, then the card about to be fought once it is close
+    enough and priced, then the last card anyone scored.
     """
-    in_play = scored_card_id is not None and current is not None and scored_card_id == current.id
-    return THIS_CARD_TITLE if in_play else LAST_CARD_TITLE
+    if current is not None:
+        if current.start <= now:
+            return STAGE_THIS_CARD, current.id
+        if current.start - now <= PICKEM_OPENS and priced:
+            return STAGE_BOARD, current.id
+    return STAGE_LAST_CARD, last_card_id
 
 # Keep editing a card's board this long after it starts, so results show up.
 PICKS_BOARD_LIFETIME = timedelta(days=4)
@@ -342,60 +362,25 @@ class ChannelPublisher:
         result: PublishResult,
         force: bool,
     ) -> None:
-        """The current card's board and the leaderboard, and nothing else.
+        """The all-time leaderboard, and one message below it that turns over.
 
-        Pick'em runs on one card at a time. A board for any other card is deleted:
-        a later card's straight away, a finished card's once every pick is scored.
+        The second message is the card's board while the game is open, that
+        card's leaderboard while it is being fought, and the last card's
+        leaderboard the rest of the time. It is keyed by which of those it is,
+        so moving between them deletes the old message and posts a new one:
+        a card ending and the next beginning should read as an event in the
+        channel, not as a message quietly changing under everyone.
         """
         now = datetime.now(UTC)
         current = await self.pickem.current_event()
-        created = removed = False
+        last = await self.storage.pickem_last_scored_card(guild.id)
+        stage, event_id = pickem_stage(
+            current,
+            last[0] if last else None,
+            now,
+            priced=current is not None and ready_to_open(current, now),
+        )
 
-        for event_id in await self.storage.posts_of_kind(guild.id, KIND_PICKEM):
-            if current is not None and event_id == current.id:
-                continue
-            event = await self.data.get_event(event_id, ttl=300)
-            if event is None:
-                # A card that will not load right now is not a card that is over,
-                # and deleting a board takes everyone's picks off the screen.
-                log.debug("Keeping the pick'em board for %s; its card did not load", event_id)
-                continue
-            retire = (
-                (current is not None and event.start > current.start)
-                or now - event.start > PICKS_BOARD_LIFETIME
-                or (card_over(event, now) and await self.storage.pickem_unscored_count(guild.id, event_id) == 0)
-            )
-            if retire:
-                await self._remove_post(guild, channel, KIND_PICKEM, event_id, result)
-                removed = True
-            else:
-                # Finished but still waiting on results: keep showing winners until scored.
-                await self._pickem_board(guild, channel, event, result, force, now)
-
-        if current is not None:
-            has_board = await self.storage.get_post(guild.id, KIND_PICKEM, current.id) is not None
-            if has_board or ready_to_open(current, now):
-                created = await self._pickem_board(guild, channel, current, result, force, now)
-
-        if created or removed or force:
-            await self._sweep_pickem(guild, channel, result)
-
-        await self._pickem_leaderboards(guild, channel, current, result, force)
-
-    async def _pickem_leaderboards(
-        self,
-        guild: discord.Guild,
-        channel: discord.TextChannel,
-        current: Event | None,
-        result: PublishResult,
-        force: bool,
-    ) -> None:
-        """All time, and the card in play or the last one, in that order.
-
-        Neither message is ever deleted. They are the two things in the channel
-        worth keeping a place in the scrollback, and a card's board coming and
-        going beneath them is what marks one card from the next.
-        """
         await self._upsert(
             guild,
             channel,
@@ -410,27 +395,54 @@ class ChannelPublisher:
             force=force,
         )
 
-        # The most recent card anyone has a settled pick on. That is the card
-        # being fought from the moment its first result lands, and the one just
-        # gone once the next card's board goes up with nothing scored on it yet.
-        card = await self.storage.pickem_last_scored_card(guild.id)
-        if card is None:
-            embed = pickem_leaderboard_embed(
-                [],
-                title=LAST_CARD_TITLE,
-                empty="No card has been scored yet.",
-            )
+        # Whatever the message used to be goes first, so the replacement lands
+        # at the bottom of the channel rather than above the leaderboard.
+        wanted = f"{stage}:{event_id}" if event_id else None
+        removed = False
+        for key in await self.storage.posts_of_kind(guild.id, KIND_PICKEM):
+            if key != wanted:
+                await self._remove_post(guild, channel, KIND_PICKEM, key, result)
+                removed = True
+        if wanted is None:
+            return
+
+        if stage == STAGE_BOARD:
+            await self._pickem_board(guild, channel, current, wanted, result, force, now)
         else:
-            event_id, event_name, _start = card
-            embed = pickem_leaderboard_embed(
-                await self.storage.pickem_leaderboard(guild.id, event_id),
-                title=card_leaderboard_title(event_id, current),
-                subtitle=event_name,
-                benchmarks=benchmarks(await self.storage.predictions_for_event(event_id)),
-                empty="Nobody played this card.",
-            )
+            await self._pickem_card_leaderboard(guild, channel, stage, event_id, result, force)
+        if removed or force:
+            await self._sweep_pickem(guild, channel, result)
+
+    async def _pickem_card_leaderboard(
+        self,
+        guild: discord.Guild,
+        channel: discord.TextChannel,
+        stage: str,
+        event_id: str,
+        result: PublishResult,
+        force: bool,
+    ) -> None:
+        """One card's standings, with the button that shows what you picked on it."""
+        standings = await self.storage.pickem_leaderboard(guild.id, event_id)
+        name = await self.storage.pickem_event_name(guild.id, event_id)
+        this_card = stage == STAGE_THIS_CARD
+        result.pickem_boards += 1
         await self._upsert(
-            guild, channel, KIND_PICKEM_CARD_LEADERBOARD, BOARD_KEY, embed, result, force=force
+            guild,
+            channel,
+            KIND_PICKEM,
+            f"{stage}:{event_id}",
+            pickem_leaderboard_embed(
+                standings,
+                title=THIS_CARD_TITLE if this_card else LAST_CARD_TITLE,
+                subtitle=name,
+                benchmarks=benchmarks(await self.storage.predictions_for_event(event_id)),
+                empty="No results in yet." if this_card else "Nobody played this card.",
+            ),
+            result,
+            force=force,
+            view=my_picks_view(event_id),
+            extra=stage,
         )
 
     async def _pickem_board(
@@ -438,20 +450,21 @@ class ChannelPublisher:
         guild: discord.Guild,
         channel: discord.TextChannel,
         event: Event,
+        key: str,
         result: PublishResult,
         force: bool,
         now: datetime,
-    ) -> bool:
-        """Post or refresh a card's board. Returns True when a new message was sent."""
+    ) -> None:
+        """The card's board, with the picker and the button that shows your picks."""
         counts = await self.storage.pickem_counts(guild.id, event.id)
         players = await self.storage.pickem_player_count(guild.id, event.id)
         accepting = any(bout_status(event, bout, now) == OPEN for bout in event.fights)
         result.pickem_boards += 1
-        return await self._upsert(
+        await self._upsert(
             guild,
             channel,
             KIND_PICKEM,
-            event.id,
+            key,
             pickem_board_embed(event, counts, players, now=now),
             result,
             force=force,
@@ -478,10 +491,9 @@ class ChannelPublisher:
     async def _sweep_pickem(self, guild: discord.Guild, channel: discord.TextChannel, result: PublishResult) -> None:
         """Delete leftover pick'em posts, such as old results posts or boards for other cards."""
         keep = {post.message_id for post in (await self.storage.posts_of_kind(guild.id, KIND_PICKEM)).values()}
-        for kind in (KIND_PICKEM_LEADERBOARD, KIND_PICKEM_CARD_LEADERBOARD):
-            post = await self.storage.get_post(guild.id, kind, BOARD_KEY)
-            if post:
-                keep.add(post.message_id)
+        leaderboard = await self.storage.get_post(guild.id, KIND_PICKEM_LEADERBOARD, BOARD_KEY)
+        if leaderboard:
+            keep.add(leaderboard.message_id)
         try:
             async for message in channel.history(limit=100):
                 if message.id in keep or message.author.id != guild.me.id or not message.embeds:

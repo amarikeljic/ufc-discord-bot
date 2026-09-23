@@ -54,10 +54,42 @@ class CareerData:
     version: int = CAREER_VERSION
 
     def save(self, path: Path) -> None:
+        self._share_repeated_text()
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(path.suffix + ".part")
         tmp.write_bytes(pickle.dumps(self, protocol=pickle.HIGHEST_PROTOCOL))
         tmp.replace(path)
+
+    def _share_repeated_text(self) -> None:
+        """Point every copy of the same string at one object before pickling.
+
+        A few dozen words -- thirteen divisions, four results, the method and
+        technique names -- are stored once per fighter, and each fighter's name
+        is stored twice over, in their ledger and in their tale of the tape.
+        Pickle records one copy per distinct object, so sharing them here means
+        the bot allocates one copy per distinct word rather than one per
+        fighter, for nothing at runtime: this runs in the refresh process, which
+        exits straight afterwards.
+        """
+        pool: dict[str, str] = {}
+
+        def shared(value: str | None) -> str | None:
+            if value is None:
+                return None
+            return pool.setdefault(value, value)
+
+        for ledger in self.ledgers.values():
+            ledger.name = shared(ledger.name)
+            ledger.division = shared(ledger.division)
+            ledger.last_result = shared(ledger.last_result)
+            for slot in ("win_methods", "loss_methods", "win_techniques", "loss_techniques"):
+                counts = getattr(ledger, slot)
+                if counts:
+                    setattr(ledger, slot, {shared(key): value for key, value in counts.items()})
+
+        for info in self.fighters.values():
+            info.name = shared(info.name)
+            info.stance = shared(info.stance)
 
     @classmethod
     def load(cls, path: Path) -> CareerData:

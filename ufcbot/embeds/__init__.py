@@ -20,6 +20,7 @@ from .events import (
     scheduled_event_name,
 )
 from .fighters import fighter_embed
+from .health import api_outage_embed, api_restored_embed, stale_data_embed
 from .live import (
     live_open_embed,
     live_result_embed,
@@ -41,10 +42,12 @@ from .picks import (
     recap_embed,
     scorecard_embed,
 )
-from .ratings import rankings_embed, ratings_changes_embed, stale_data_embed
+from .ratings import rankings_embed, ratings_changes_embed
 
 __all__ = [
     "UFC_RED",
+    "api_outage_embed",
+    "api_restored_embed",
     "card_changes_embed",
     "event_embed",
     "fighter_embed",

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import date
-
 import discord
 
 from ..util import truncate
@@ -12,28 +10,6 @@ from .common import DASH, MEDALS, UFC_RED, add_chunked_fields, join, keep, stamp
 ARROWS = {"entered": "🆕", "left": "🚪", "up": "🔼", "down": "🔽"}
 
 
-def stale_data_embed(expected: date, newest: date | None, last_error: str | None) -> discord.Embed:
-    """That the fight dataset has stopped arriving, and what still works meanwhile.
-
-    Said once per card that fails to land, in the same channel as the other
-    news, because the boards go on looking authoritative while the numbers
-    behind them quietly stop moving.
-    """
-    embed = discord.Embed(
-        title="⚠️ Fight data is behind",
-        colour=UFC_RED,
-        description=(
-            f"The results from **{expected:%b %d}** have not arrived, and the bot has been "
-            "asking for them for days.\n\nRatings, picks and the model are still working, "
-            "but they do not know about that card yet."
-        ),
-    )
-    facts = [f"Newest fights held: {newest:%b %d, %Y}" if newest else "No fight data loaded"]
-    if last_error:
-        facts.append(f"Last attempt: {truncate(last_error, 200)}")
-    facts.append("Nothing to do if upstream is simply late — it catches up on its own.")
-    embed.add_field(name="Where it stands", value="\n".join(facts), inline=False)
-    return stamp(embed)
 
 def rankings_embed(
     division: str, entries: list, *, pound_for_pound: bool = False, note: bool = False

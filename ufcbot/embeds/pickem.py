@@ -31,7 +31,7 @@ from .common import (
 )
 
 if TYPE_CHECKING:
-    from ..storage import PickemCard, PickemRecord, PickemStanding, PickemSummary
+    from ..records import PickemCard, PickemRecord, PickemStanding, PickemSummary
 
 PICKEM_TEAL = discord.Colour.from_str("#1ABC9C")
 RESULT_ICON = {"win": "✅", "loss": "❌", "void": "➖", None: "⏳"}

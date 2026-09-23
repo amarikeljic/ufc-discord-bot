@@ -184,6 +184,16 @@ class Event:
             return None
         return {f.id for f in bout.fighters[:2]} == fighters
 
+    @property
+    def has_anyone_named(self) -> bool:
+        """Whether a single fighter on the card is known yet.
+
+        ESPN posts a card months out as a date and a row of empty slots. Until
+        one name lands there is nothing to put on a calendar or announce, and a
+        "TBA vs. TBA" event only has to be rewritten once the card is real.
+        """
+        return any(bout.fighters for bout in self.bouts)
+
     def bouts_by_segment(self) -> list[tuple[str, list[Bout]]]:
         groups: dict[str, list[Bout]] = {}
         for bout in self.ordered_bouts():

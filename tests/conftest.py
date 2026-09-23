@@ -12,8 +12,9 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from ufcbot.models import Bout, Event, Fighter
+from ufcbot.records import PickemRecord
 from ufcbot.stats.prediction import Prediction
-from ufcbot.storage import PickemRecord, Storage
+from ufcbot.storage import Storage
 
 
 @pytest.fixture
