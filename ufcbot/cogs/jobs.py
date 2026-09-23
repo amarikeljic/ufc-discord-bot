@@ -1,9 +1,13 @@
 """The background jobs: what the bot does when nobody has asked it anything.
 
-Three loops. ``live_loop`` every fifteen seconds, which is cheap when no card is
-on and is the only thing that runs during one. ``channels_loop`` on the hour,
-which is the whole housekeeping pass in the order the steps depend on each
-other. ``sync_loop`` nightly, which mirrors cards onto the calendar.
+Two loops. ``live_loop`` every fifteen seconds, which is cheap when no card is on
+and is the only thing that runs during one. ``channels_loop`` on the hour, which
+is the whole housekeeping pass in the order the steps depend on each other, and
+which mirrors the calendar on the one pass a day that lands at midnight Central.
+
+Anything that happens once a day belongs in that pass rather than in a loop of
+its own: a loop whose whole job is to wake up, notice nothing has changed and go
+back to sleep is a loop that only exists to be forgotten about.
 
 Kept apart from the slash commands because the two answer to different things:
 a command answers a person and returns, a job answers a clock and must survive
@@ -23,6 +27,7 @@ from discord.ext import commands, tasks
 from ..embeds import api_outage_embed, api_restored_embed, stale_data_embed
 from ..features.cardwatch import announcement_channel, news_channel
 from ..features.sync import MissingPermissions
+from ..stats.service import in_dataset
 from ..util import central_time
 
 if TYPE_CHECKING:
@@ -38,10 +43,10 @@ LIVE_HISTORY = timedelta(days=14)
 # "last updated" means the same thing whenever the bot was last restarted.
 ON_THE_HOUR = [time_of_day(hour=hour) for hour in range(24)]
 
-# Scheduled events are mirrored once a night, on Central time. A card being added
-# to the calendar is days-ahead news, so the only thing the hour decides is that
-# it does not arrive in the middle of a card.
-MIDNIGHT_CENTRAL = [time_of_day(hour=0, tzinfo=central_time())]
+# Scheduled events are mirrored once a night, on the hourly pass that lands at
+# midnight Central. A card being added to the calendar is days-ahead news, so the
+# only thing the hour decides is that it does not arrive in the middle of a card.
+SYNC_HOUR_CENTRAL = 0
 
 # How long the newest card can be missing upstream before the bot says so. Two
 # days is ordinary lateness; beyond that something is wrong worth knowing about.
@@ -76,18 +81,23 @@ class JobsCog(commands.Cog):
         self._outage_hours = 0.0
 
     async def cog_load(self) -> None:
-        self.sync_loop.start()
         self.channels_loop.start()
         self.live_loop.start()
 
     async def cog_unload(self) -> None:
-        self.sync_loop.cancel()
         self.channels_loop.cancel()
         self.live_loop.cancel()
 
-    @tasks.loop(time=MIDNIGHT_CENTRAL)
-    async def sync_loop(self) -> None:
-        """Mirror upcoming cards into this server's scheduled events."""
+    async def _sync_calendar(self) -> None:
+        """Mirror upcoming cards into each server's scheduled events, once a night.
+
+        A step of the hourly pass rather than a loop of its own. All it does is
+        notice cards that are new and put them on the calendar, which is
+        days-ahead news; running it on the one pass a day that lands at midnight
+        Central costs a comparison and saves a whole loop.
+        """
+        if datetime.now(central_time()).hour != SYNC_HOUR_CENTRAL:
+            return
         for settings in await self.bot.storage.guilds_with_sync_enabled():
             guild = self.bot.get_guild(settings.guild_id)
             if guild is None:
@@ -102,17 +112,16 @@ class JobsCog(commands.Cog):
             except Exception:  # one guild must not stop the rest
                 log.exception("Background sync failed for guild %s", guild.id)
 
-    @sync_loop.before_loop
-    async def before_sync_loop(self) -> None:
-        await self.bot.wait_until_ready()
-
     async def _refresh_stats(self) -> None:
         """Keep the dataset and model current.
 
         The most recent completed card on ESPN tells the service which event it
-        should expect to find upstream. While that card is missing the service
-        checks on every pass instead of waiting: the maintainer publishes once a
-        day, in one go, and the check itself costs four conditional requests.
+        should expect to find upstream, counting only the cards upstream carries.
+        A Contender Series card is never coming, so waiting for one would have
+        the bot call itself behind every Tuesday. While a card it does expect is
+        missing the service checks on every pass instead of waiting: the
+        maintainer publishes once a day, in one go, and the check itself costs
+        four conditional requests.
 
         This runs first in the hourly pass so that a retrain's new ratings are
         announced and drawn by the rest of it, rather than a pass later.
@@ -121,9 +130,10 @@ class JobsCog(commands.Cog):
             return
         stats = self.bot.stats
         try:
-            recent = await self.bot.data.recent_events(days=21, limit=1)
-            if recent:
-                stats.expected_newest = recent[0].start.date()
+            recent = await self.bot.data.recent_events(days=21, limit=8)
+            expected = next((event for event in recent if in_dataset(event.name)), None)
+            if expected is not None:
+                stats.expected_newest = expected.start.date()
         except Exception as exc:  # freshness hint is optional
             log.debug("Could not determine the latest completed card: %r", exc)
 
@@ -139,11 +149,16 @@ class JobsCog(commands.Cog):
 
         New data first, so everything below it describes the same fights: grade
         what has finished, tidy up, then say what changed and redraw the boards.
+        One pass a day, the one at midnight Central, also mirrors the calendar.
         """
         try:
             await self._refresh_stats()
         except Exception:  # the rest of the pass still has work to do
             log.exception("Refreshing the fight dataset failed")
+        try:
+            await self._sync_calendar()
+        except Exception:  # the boards do not depend on the calendar
+            log.exception("Mirroring cards onto the calendar failed")
         try:
             graded = await self.bot.tracker.grade_due()
             if graded:

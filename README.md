@@ -147,11 +147,13 @@ All settings live in `.env`; see `.env.example` for descriptions.
 | Moves on the ratings boards | On the hour |
 | Fight dataset and model | On the hour, and acted on only when it is due |
 | Odds and fight card data | Cached for 10 and 15 minutes |
-| Discord scheduled events | Nightly at midnight Central; ended on the card's last result |
+| Discord scheduled events | On the midnight Central pass; ended on the card's last result |
 
-The three loops live in `cogs/jobs.py`, apart from the slash commands, because the two
+The two loops live in `cogs/jobs.py`, apart from the slash commands, because the two
 answer to different things: a command answers a person and returns, a job answers a clock
-and has to survive whatever it finds.
+and has to survive whatever it finds. Anything that happens once a day is a step of the
+hourly pass rather than a loop of its own — mirroring the calendar runs on the one pass a
+day that lands at midnight Central.
 
 Everything but live coverage and the nightly sync happens in one pass on the hour, in the
 order the steps depend on each other: check for new fight data, grade what has finished,
@@ -525,7 +527,7 @@ ufcbot/
   util.py               Small helpers
   cogs/
     ufc.py              Slash commands
-    jobs.py             The three background loops
+    jobs.py             The two background loops
   sources/
     http.py             HTTP client with caching and retries
     espn.py             ESPN schedules, cards, fighters, odds and live data

@@ -26,6 +26,7 @@ from functools import partial
 from pathlib import Path
 
 from ..models import Event
+from ..util import normalise
 from .career import FighterInfo, Ledger
 from .features import fighter_features
 from .names import NameIndex
@@ -48,6 +49,23 @@ BEHIND_INTERVAL = timedelta(minutes=50)
 
 # Cards whose picks are remembered before the oldest are dropped.
 PICK_CACHE_CARDS = 64
+
+
+def in_dataset(event_name: str) -> bool:
+    """Whether upstream will ever publish this card.
+
+    The dataset is ufcstats.com, which covers UFC events: numbered cards, Fight
+    Nights, Noche, Ultimate Fighter finales. Dana White's Contender Series is a
+    UFC production but not a UFC event, and has never appeared there -- not once
+    in the whole file.
+
+    That matters because Contender Series runs on Tuesdays. Without this the
+    most recent completed card is a Contender Series card for half of every
+    week, and the bot spends that half waiting for something that is never
+    coming, polling upstream every fifty minutes and calling its own ratings
+    behind the entire time.
+    """
+    return "contender series" not in normalise(event_name)
 
 
 @dataclass(slots=True)
