@@ -21,15 +21,14 @@ from ufcbot.features import channels as channels_module
 from ufcbot.features.channels import (
     BOARD_KEY,
     KIND_PICKEM,
+    KIND_PICKEM_CARD_LEADERBOARD,
     KIND_PICKEM_LEADERBOARD,
     KIND_PICKS,
-    PICKEM_OPENS,
-    STAGE_BOARD,
-    STAGE_LAST_CARD,
-    STAGE_THIS_CARD,
+    LAST_CARD_TITLE,
+    THIS_CARD_TITLE,
     ChannelPublisher,
     PublishResult,
-    pickem_stage,
+    card_leaderboard_title,
 )
 from ufcbot.features.pickem import ready_to_open
 
@@ -333,68 +332,65 @@ async def test_a_card_nobody_has_a_settled_pick_on_is_not_the_one_shown(storage,
     assert await storage.pickem_last_scored_card(1) is None
 
 
-def test_the_channel_shows_the_last_card_until_the_game_opens(soon):
-    """Between cards there is nothing to pick, so the channel reads as the last
-    card's result rather than a board nobody can use."""
+def test_the_board_goes_up_as_soon_as_the_card_is_priced(soon):
+    """Whenever that is. A card priced the day the last one ended opens then;
+    nothing is gained by making people wait for it."""
+    priced = bout("B1", ALLEN, PICO)
+    priced.odds = {ALLEN.id: -150, PICO.id: 130}
+    event = card(priced, start=soon)
+
+    assert ready_to_open(event, soon - timedelta(days=30))
+    assert ready_to_open(event, soon - timedelta(hours=1))
+
+
+def test_the_board_stays_shut_on_a_card_with_no_prices(soon):
+    """There is nothing to stake points against yet."""
+    event = card(bout("B1", ALLEN, PICO), start=soon)
+
+    assert not ready_to_open(event, soon - timedelta(hours=1))
+
+
+def test_the_card_leaderboard_title_follows_the_card_being_fought(soon):
+    """It shows whichever card was scored most recently, so the title turns
+    over on its own as one card ends and the next opens."""
     current = an_event("NEW", soon)
-    now = soon - PICKEM_OPENS - timedelta(hours=1)
 
-    assert pickem_stage(current, "OLD", now, priced=True) == (STAGE_LAST_CARD, "OLD")
-
-
-def test_the_board_opens_two_days_out_once_the_card_is_priced(soon):
-    current = an_event("NEW", soon)
-    now = soon - timedelta(hours=47)
-
-    assert pickem_stage(current, "OLD", now, priced=True) == (STAGE_BOARD, "NEW")
-    # Close enough, but nothing to stake points at yet.
-    assert pickem_stage(current, "OLD", now, priced=False) == (STAGE_LAST_CARD, "OLD")
+    assert card_leaderboard_title("NEW", current) == THIS_CARD_TITLE
+    assert card_leaderboard_title("OLD", current) == LAST_CARD_TITLE
+    assert card_leaderboard_title("OLD", None) == LAST_CARD_TITLE
+    assert card_leaderboard_title(None, current) == LAST_CARD_TITLE
 
 
-def test_the_card_being_fought_takes_over_at_the_first_bell(soon):
-    current = an_event("NEW", soon)
-
-    assert pickem_stage(current, "OLD", soon, priced=True) == (STAGE_THIS_CARD, "NEW")
-    assert pickem_stage(current, "OLD", soon + timedelta(hours=3), priced=True) == (STAGE_THIS_CARD, "NEW")
-
-
-def test_once_the_card_is_over_it_becomes_the_last_card(soon):
-    """The card that just finished is no longer what pick'em runs on, and the
-    next one is weeks out, so the same message goes back to being a result."""
-    next_card = an_event("NEXT", soon + timedelta(days=21))
-
-    assert pickem_stage(next_card, "NEW", soon + timedelta(hours=13), priced=True) == (
-        STAGE_LAST_CARD,
-        "NEW",
-    )
-
-
-def test_with_no_card_and_nothing_scored_there_is_nothing_to_show(soon):
-    assert pickem_stage(None, None, soon, priced=False) == (STAGE_LAST_CARD, None)
-
-
-async def test_the_all_time_leaderboard_survives_the_card_turning_over(storage):
-    """It is the one message with a permanent place in the channel; everything
-    below it is deleted and reposted as the card moves on."""
+async def test_neither_leaderboard_is_ever_deleted(storage):
+    """They are the two messages with a permanent place in the channel. Only
+    the card's board comes and goes beneath them."""
     pub, guild, channel, result = publisher(storage), FakeGuild(), FakeChannel(), PublishResult()
 
-    await pub._upsert(guild, channel, KIND_PICKEM_LEADERBOARD, BOARD_KEY, an_embed("all time"), result)
-    all_time = channel.sent[0]
+    for kind in (KIND_PICKEM_LEADERBOARD, KIND_PICKEM_CARD_LEADERBOARD):
+        await pub._upsert(guild, channel, kind, BOARD_KEY, an_embed("standings"), result)
+    leaderboards = list(channel.sent)
 
-    for key in (f"{STAGE_LAST_CARD}:OLD", f"{STAGE_BOARD}:NEW", f"{STAGE_THIS_CARD}:NEW"):
-        await pub._upsert(guild, channel, KIND_PICKEM, key, an_embed(key), result)
+    # A card opens, then ends and is replaced by the next one.
+    await pub._upsert(guild, channel, KIND_PICKEM, "OLD", an_embed("old card"), result)
+    await pub._remove_post(guild, channel, KIND_PICKEM, "OLD", result)
+    await pub._upsert(guild, channel, KIND_PICKEM, "NEW", an_embed("new card"), result)
 
-    assert all_time not in channel.deleted
+    assert all(message_id not in channel.deleted for message_id in leaderboards)
+    assert len(channel.deleted) == 1, "only the card's board went"
 
 
-async def test_each_stage_is_its_own_message(storage):
-    """Moving between stages deletes and reposts rather than editing, so a card
-    opening or closing reads as something happening in the channel."""
+async def test_a_leaderboard_is_edited_where_a_new_card_gets_a_new_message(storage):
+    """The leaderboards keep their place in the scrollback; a card turning over
+    should read as something happening in the channel."""
     pub, guild, channel, result = publisher(storage), FakeGuild(), FakeChannel(), PublishResult()
 
-    await pub._upsert(guild, channel, KIND_PICKEM, f"{STAGE_LAST_CARD}:OLD", an_embed("last"), result)
-    await pub._remove_post(guild, channel, KIND_PICKEM, f"{STAGE_LAST_CARD}:OLD", result)
-    await pub._upsert(guild, channel, KIND_PICKEM, f"{STAGE_BOARD}:NEW", an_embed("board"), result)
+    await pub._upsert(guild, channel, KIND_PICKEM_CARD_LEADERBOARD, BOARD_KEY, an_embed("last card"), result)
+    await pub._upsert(guild, channel, KIND_PICKEM_CARD_LEADERBOARD, BOARD_KEY, an_embed("this card"), result)
 
-    assert len(channel.sent) == 2 and channel.deleted == [channel.sent[0]]
-    assert channel.edited == [], "a new stage is never an edit of the last one"
+    assert len(channel.sent) == 1 and len(channel.edited) == 1
+
+    await pub._upsert(guild, channel, KIND_PICKEM, "OLD", an_embed("old"), result)
+    await pub._remove_post(guild, channel, KIND_PICKEM, "OLD", result)
+    await pub._upsert(guild, channel, KIND_PICKEM, "NEW", an_embed("new"), result)
+
+    assert len(channel.sent) == 3, "a different card is never an edit of the last one"

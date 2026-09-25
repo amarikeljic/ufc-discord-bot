@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -31,6 +32,12 @@ from .ui.pickem import PICKEM_BUTTONS
 log = logging.getLogger(__name__)
 
 EXTENSIONS = ("ufcbot.cogs.ufc", "ufcbot.cogs.jobs")
+
+# How long the picking has to stop before the board is redrawn. A member working
+# down a twelve-fight card makes a dozen picks in a minute, and a board that
+# redrew on each one would edit itself a dozen times to move the same
+# percentages a little at a time.
+PICKEM_SETTLE = 8.0
 
 
 class UFCBot(commands.Bot):
@@ -81,9 +88,37 @@ class UFCBot(commands.Bot):
             ledger_provider=self.ledgers,
         )
         self.images = MatchupImages(self.http_client)
+        # Pending board redraws, one per guild, replaced as each new pick lands.
+        self._pickem_redraws: dict[int, asyncio.Task] = {}
         self.live = LiveCoverage(
             self.data, self.storage, images=self.images, career_provider=self.stats.career
         )
+
+    def touch_pickem(self, guild_id: int) -> None:
+        """Redraw this guild's pick'em board once the picking has settled.
+
+        Called on every pick. Each call replaces the last, so the board is drawn
+        once after the picking stops rather than once per pick.
+        """
+        pending = self._pickem_redraws.pop(guild_id, None)
+        if pending is not None:
+            pending.cancel()
+        self._pickem_redraws[guild_id] = asyncio.create_task(self._redraw_pickem(guild_id))
+
+    async def _redraw_pickem(self, guild_id: int) -> None:
+        try:
+            await asyncio.sleep(PICKEM_SETTLE)
+            guild = self.get_guild(guild_id)
+            if guild is None:
+                return
+            settings = await self.storage.get_settings(guild_id, self.default_settings())
+            await self.publisher.publish_pickem(guild, settings)
+        except asyncio.CancelledError:
+            raise  # another pick landed; that one will draw the board
+        except Exception:
+            log.exception("Redrawing the pick'em board failed in guild %s", guild_id)
+        finally:
+            self._pickem_redraws.pop(guild_id, None)
 
     @property
     def predictions_available(self) -> bool:

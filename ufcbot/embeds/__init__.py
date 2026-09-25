@@ -27,6 +27,7 @@ from .live import (
     live_round_embed,
 )
 from .pickem import (
+    fight_day_embed,
     pickem_board_embed,
     pickem_card_embed,
     pickem_leaderboard_embed,
@@ -50,6 +51,7 @@ __all__ = [
     "api_restored_embed",
     "card_changes_embed",
     "event_embed",
+    "fight_day_embed",
     "fighter_embed",
     "live_open_embed",
     "live_result_embed",

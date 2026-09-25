@@ -319,3 +319,26 @@ def test_the_card_scores_only_appear_once_something_has_been_graded(soon):
     # The winner leads, and both totals carry their sign.
     assert scores.value.index("<@11>") < scores.value.index("<@22>")
     assert "+44" in scores.value and "-100" in scores.value
+
+
+def test_the_picks_board_names_the_fights_it_cannot_call():
+    """A debut has no UFC history to predict from. Dropping the fight silently
+    leaves a board missing a bout with no hint it was ever on the card."""
+    embed = picks_board_embed(
+        "UFC 333", START, [record("B1", ALLEN, PICO)], locked=False,
+        unpicked=[(1, "Mehemmedeli Osmanli vs. Ilimbek Akylbek Uulu")],
+    )
+    text = embed.description + " ".join(f"{f.name} {f.value}" for f in embed.fields)
+
+    assert "Picks for 1 of 2 fights" in text
+    assert "Mehemmedeli Osmanli vs. Ilimbek Akylbek Uulu" in text
+    assert "UFC debut" in text
+    names = [f.name for f in embed.fields]
+    assert names.index("Mehemmedeli Osmanli vs. Ilimbek Akylbek Uulu") == 1, "in its place on the card"
+
+
+def test_a_fully_picked_card_says_nothing_about_missing_fights():
+    embed = picks_board_embed("UFC 333", START, [record("B1", ALLEN, PICO)], locked=False)
+    text = embed.description + " ".join(f.value for f in embed.fields)
+
+    assert "No pick" not in text and "of 1 fights" not in text

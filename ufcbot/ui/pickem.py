@@ -148,6 +148,10 @@ class BoutSelect(discord.ui.Select):
         picker.notice = ("✅ " if outcome.ok else "⚠️ ") + outcome.message
         embed = await picker.refresh()
         await interaction.edit_original_response(embed=embed, view=picker)
+        if outcome.ok:
+            # The board shows how the room is split, so a pick has just made it
+            # wrong. Redrawn once the picking settles rather than on every pick.
+            interaction.client.touch_pickem(picker.guild_id)
 
 
 # -- persistent buttons on the card's board ------------------------------------------------

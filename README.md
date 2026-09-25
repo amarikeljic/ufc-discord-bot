@@ -15,8 +15,10 @@ have done.
 - **Predictions.** Win probability for any matchup, plus how the fight is likely to end:
   KO/TKO, submission, unanimous or split decision, with the likeliest finishing technique.
 - **Picks board.** One auto-updating message per upcoming card with every pick and the
-  method it is likely to come by. Picks lock when the card starts and are graded
-  afterwards. No betting lines: those belong in pick'em.
+  method it is likely to come by. Fights the model cannot call — a debut has no UFC history
+  to predict from — are named rather than dropped, so the card reads as complete. Picks
+  lock when the card starts and are graded afterwards. No betting lines: those belong in
+  pick'em.
 - **Scorecard.** A running record of the model's accuracy, split by confidence, with the
   betting favourites' record over the same fights as a benchmark.
 - **Live coverage.** During a card: a preview as fighters walk out, with both fighters'
@@ -145,6 +147,8 @@ All settings live in `.env`; see `.env.example` for descriptions.
 | Picks, schedule and scorecard boards | On the hour, and the moment a live post goes out |
 | Changes to upcoming cards | On the hour |
 | Moves on the ratings boards | On the hour |
+| Pick'em board shares | Eight seconds after the last pick |
+| Fight day reminder | Once, twelve hours before the main card |
 | Fight dataset and model | On the hour, and acted on only when it is due |
 | Odds and fight card data | Cached for 10 and 15 minutes |
 | Discord scheduled events | On the midnight Central pass; ended on the card's last result |
@@ -191,10 +195,12 @@ points, favourite or underdog.
 | +235 underdog | +235 | -100 |
 
 Points are locked in with the odds at the moment you pick; changing a pick uses the
-new odds. The game runs on the next UFC card only, and opens 48 hours before the first
-bell once every fight on that card has been priced — or, if some fight never gets a line,
-on whatever prices exist by then, so one prelim cannot keep the whole server from playing.
-Each pick locks when that part of the card starts. Draws, no contests and
+new odds. The game runs on the next UFC card only, and opens as soon as that card has
+prices — usually within a day of the last one ending. Every fight has to be priced before
+the board goes up, so nobody opens a card they cannot finish; if one prelim still has no
+line 48 hours out the board opens anyway on whatever prices exist, because one fight
+should not keep the whole server from playing. Each pick locks when that part of the card
+starts. Draws, no contests and
 cancelled fights are void, and so is a pick on a fighter who was replaced before the
 bell: that fight never happened, so the pick scores nothing either way rather than
 counting as a loss. A fight coming off the card is voided as soon as the bot sees it
@@ -202,26 +208,50 @@ go, rather than sitting in your picks as pending until the card is over.
 Other members' picks stay hidden until the fight locks,
 though the board shows the overall split. `/ufc pickem picks <event>` lays out a whole
 card fight by fight afterwards: who backed whom, at what price, and what it scored them.
-The channel holds two messages. **All Time Pick'em Leaderboard** is never deleted, only
-edited. Below it sits one message that turns over with the card, and it is only ever in
-one of three states:
+The channel holds two leaderboards that are never deleted, only edited, and beneath them
+the current card's board:
 
-| State | When | Buttons |
+| Message | What it is | Buttons |
 | --- | --- | --- |
-| **Last Card's Pick'em Leaderboard** | between cards | My picks |
-| The card's pick'em board | from 48 hours before the first bell | Make your picks, My picks |
-| **This Card's Pick'em Leaderboard** | from the first bell until the last result | My picks |
+| **All Time Pick'em Leaderboard** | every card the bot has scored | — |
+| **This / Last Card's Pick'em Leaderboard** | the card scored most recently | My picks |
+| The card's pick'em board | posted as soon as the next card is priced | Make your picks, My picks |
 
-Moving between the three deletes that message and posts a new one, rather than editing it
-in place. A card opening for picks, or a card ending, should read as something happening in
-the channel; a message quietly changing under everyone reads as nothing at all. It also
-puts the new state at the bottom, under the all-time board.
+The leaderboards keep their place in the scrollback, because they are what the channel is
+for between cards and a message people scroll back to should not move. The board is the
+part that turns over: one per card, deleted and reposted as the card changes, so a card
+ending and the next opening read as things happening rather than as a message quietly
+changing under everyone.
 
-The third state ends on the last result rather than on the clock. When live coverage posts
-a result it checks whether every fight on the card now has one, and if it does, the
-leaderboard goes back to **Last Card's** and the Discord event for that card is ended
-there and then — within about a minute of the last fight, instead of running on to the end
-time it was given days earlier.
+The board also redraws as people vote, so the share behind each fighter is current rather
+than an hour old. A redraw is scheduled eight seconds after a pick and replaced by the next
+one, so a member working down a twelve-fight card produces one edit once they stop, not
+twelve along the way.
+
+The card leaderboard is always about whichever card was scored most recently, so its title
+turns over on its own. It reads **This Card's** from the moment the first fight of the card
+being fought is graded, and goes back to **Last Card's** once the next card's board goes up
+with nothing scored on it yet.
+
+The turn happens on the last result rather than on the clock. When live coverage posts a
+result it checks whether every fight on the card now has one, and if it does, the Discord
+event for that card is ended there and then — within about a minute of the last fight,
+instead of running on to the end time it was given days earlier. The next card's board
+follows as soon as that card has prices.
+
+### Fight day
+
+Twelve hours before the **main card** — not the first bell, which can be four hours earlier
+and would put the reminder at dawn — the pick'em channel says so once, with what is still
+to come and how many people are playing.
+
+Two groups get pinged by name and nobody else: members playing this card who have no pick
+on a fight that **changed** since the board went up, because their pick was made against a
+fighter who may not be in the bout any more; and members who have played pick'em here
+before but have not opened this card at all. People who have never played are left alone,
+since there is no way to tell them from everyone else in the server. At most twenty are
+named and the rest are counted. It is the one message where the bot allows a mention to
+notify, because reaching someone is the whole point of it.
 
 Both leaderboards carry two extra lines under the standings: what the model scored on the
 same fights, and what backing every favourite would have scored. Neither is ranked among
@@ -582,7 +612,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-252 tests, a few seconds, no network and no Discord: they run against a real SQLite
+256 tests, a few seconds, no network and no Discord: they run against a real SQLite
 database in a temporary directory and fight cards built by hand. Most of them are about
 what happens when a card changes underneath the bot, because that is where the awkward
 cases live -- a fighter replaced, a fight cancelled, a card that only half-loaded -- and
@@ -620,10 +650,12 @@ time. Stop the other one first.
 **"The model is still downloading data and training."** First start takes a minute or
 two. Run `python train.py` beforehand to skip the wait.
 
-**A fighter has no pick or stats.** Fighters appear once they have a UFC fight in the
-dataset, so debuts and Contender Series bouts have no pick. The same goes for a
-short-notice replacement: the fight stays on the card and loses its pick until the new
-fighter has UFC history.
+**A fighter has no pick or stats.** Every input the model has is built from a fighter's
+UFC record, so a debutant leaves it nothing to work from — not a low confidence, no opinion
+at all. Those fights still appear on the picks board, in their place on the card, reading
+"UFC debut, no fight data yet" instead of a pick. The same goes for a short-notice
+replacement: the fight keeps its place and loses its pick until the new fighter has UFC
+history.
 
 **A card still shows a fight that was changed.** Fight cards come from ESPN, which can be
 a day or more behind on withdrawals and replacements. The boards follow within about an

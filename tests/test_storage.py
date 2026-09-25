@@ -262,3 +262,60 @@ async def test_replacements_come_back_shortest_notice_first(storage):
 
 async def test_a_card_with_no_replacements_has_none(storage):
     assert await storage.short_notice_for("EV1") == []
+
+
+# -- who to nudge on fight day ------------------------------------------------------
+
+
+async def pick_on(storage, *, user: int, event: str, bout: str) -> None:
+    from ufcbot.records import PickemRecord
+
+    await storage.save_pickem_pick(
+        PickemRecord(
+            guild_id=1, user_id=user, espn_event_id=event, bout_id=bout, event_name="UFC 333",
+            event_start=NOW, athlete_id="A", athlete_name="A", opponent_id="B", opponent_name="B",
+            odds=-150, points_if_right=67, locks_at=NOW, picked_at=NOW,
+        )
+    )
+
+
+async def test_players_missing_one_fight_are_the_ones_it_changed_under(storage):
+    """A pick made last week was made against a fighter who may not be in the
+    bout any more, so the people to tell are the ones with no pick on it."""
+    await pick_on(storage, user=10, event="EV1", bout="B1")
+    await pick_on(storage, user=10, event="EV1", bout="B2")
+    await pick_on(storage, user=20, event="EV1", bout="B1")
+
+    missing = await storage.pickem_players_missing_bout(1, "EV1", "B2")
+
+    assert missing == [20], "10 already picked that fight"
+
+
+async def test_somebody_who_never_touched_the_card_is_nudged_about_it(storage):
+    await pick_on(storage, user=10, event="OLD", bout="B1")
+    await pick_on(storage, user=20, event="EV1", bout="B1")
+
+    assert await storage.pickem_players_missing_card(1, "EV1") == [10]
+
+
+async def test_somebody_who_has_never_played_is_left_alone(storage):
+    """There is no way to tell them from everyone else in the server."""
+    await pick_on(storage, user=10, event="EV1", bout="B1")
+
+    assert await storage.pickem_players_missing_card(1, "EV1") == []
+    assert await storage.pickem_players_missing_bout(1, "EV1", "B1") == []
+
+
+async def test_another_server_is_never_pinged(storage):
+    from ufcbot.records import PickemRecord
+
+    await storage.save_pickem_pick(
+        PickemRecord(
+            guild_id=2, user_id=99, espn_event_id="OLD", bout_id="B1", event_name="x",
+            event_start=NOW, athlete_id="A", athlete_name="A", opponent_id="B", opponent_name="B",
+            odds=-150, points_if_right=67, locks_at=NOW, picked_at=NOW,
+        )
+    )
+    await pick_on(storage, user=10, event="EV1", bout="B1")
+
+    assert await storage.pickem_players_missing_card(1, "EV1") == []

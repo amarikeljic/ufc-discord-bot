@@ -310,3 +310,28 @@ def pickem_picks_embed(event_name: str, picks: list[PickemRecord], *, hidden: in
     if scores and len(embed) + sum(len(line) for line in scores) < EMBED_BUDGET:
         add_chunked_fields(embed, "Card scores", scores)
     return stamp(embed)
+
+
+def fight_day_embed(event: Event, *, changed: list[tuple[str, str]], players: int) -> discord.Embed:
+    """Twelve hours before the main card: it is today, and this is what moved.
+
+    ``changed`` is (matchup, what happened) for fights that were replaced or
+    added after the board went up. Those are the ones worth a nudge: a pick made
+    last week was made against a fighter who is no longer in the bout.
+    """
+    embed = discord.Embed(title=truncate(f"🥊 Fight day: {event.name}", 256), colour=PICKEM_TEAL)
+
+    lines = [f"Main card {discord.utils.format_dt(event.main_card_start or event.start, 'R')}"]
+    if event.main_card_start and event.main_card_start != event.start:
+        lines.append(f"Prelims {discord.utils.format_dt(event.start, 't')}")
+    lines.append(f"👥 {plural(players, 'player')} so far")
+    lines += ["", "Last call: picks lock as each part of the card starts."]
+    embed.description = "\n".join(lines)
+
+    if changed:
+        embed.add_field(
+            name="Changed since picks opened",
+            value="\n".join(f"🔁 **{keep(matchup)}** · {note}" for matchup, note in changed),
+            inline=False,
+        )
+    return stamp(embed)

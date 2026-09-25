@@ -1076,6 +1076,52 @@ class Storage:
             rows = await cursor.fetchall()
         return [row["event_name"] for row in rows]
 
+    async def pickem_players_missing_card(self, guild_id: int, espn_event_id: str) -> list[int]:
+        """Members who have played pick'em here but have no pick on this card.
+
+        Anyone who has played before is someone the game is for; a card they
+        have not opened is the one worth a nudge on the day. People who have
+        never played are not pinged, because there is no way to tell them apart
+        from everyone else in the server.
+        """
+        async with self.db.execute(
+            """
+            SELECT DISTINCT user_id FROM pickem_picks
+            WHERE guild_id = ? AND espn_event_id != ?
+              AND user_id NOT IN (
+                  SELECT user_id FROM pickem_picks
+                  WHERE guild_id = ? AND espn_event_id = ?
+              )
+            ORDER BY user_id
+            """,
+            (guild_id, espn_event_id, guild_id, espn_event_id),
+        ) as cursor:
+            return [row["user_id"] for row in await cursor.fetchall()]
+
+    async def pickem_players_missing_bout(
+        self, guild_id: int, espn_event_id: str, bout_id: str
+    ) -> list[int]:
+        """Members playing this card who have no pick on this fight.
+
+        Scoped to people who already picked something on the card: a fight being
+        added or a fighter being replaced is news to them, where pinging the
+        whole server over it is not.
+        """
+        async with self.db.execute(
+            """
+            SELECT DISTINCT user_id FROM pickem_picks
+            WHERE guild_id = ? AND espn_event_id = ?
+              AND user_id NOT IN (
+                  SELECT user_id FROM pickem_picks
+                  WHERE guild_id = ? AND espn_event_id = ? AND bout_id = ?
+                    AND (result IS NULL OR result != 'void')
+              )
+            ORDER BY user_id
+            """,
+            (guild_id, espn_event_id, guild_id, espn_event_id, bout_id),
+        ) as cursor:
+            return [row["user_id"] for row in await cursor.fetchall()]
+
     async def pickem_event_name(self, guild_id: int, espn_event_id: str) -> str | None:
         """What a card was called, from the picks made on it.
 

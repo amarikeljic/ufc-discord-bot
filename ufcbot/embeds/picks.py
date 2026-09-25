@@ -43,6 +43,11 @@ if TYPE_CHECKING:
     from ..stats.scorer import CompiledModel
     from ..stats.service import FighterCareer
 
+# Shown in place of a pick for a fight the model cannot call. Every input it has
+# is built from a fighter's UFC record, so a debutant leaves it nothing to work
+# from -- not a low confidence, no opinion at all.
+NO_DATA = "🆕 No pick · UFC debut, no fight data yet"
+
 
 def pick_value(
     *,
@@ -97,8 +102,15 @@ def picks_board_embed(
     *,
     locked: bool,
     espn_url: str | None = None,
+    unpicked: list[tuple[int, str]] = (),
 ) -> discord.Embed:
-    """The on-record picks for one card, as posted in the picks channel."""
+    """The on-record picks for one card, as posted in the picks channel.
+
+    ``unpicked`` are (position, matchup) for fights the model has nothing to say
+    about, listed in their place on the card rather than dropped. A debutant has
+    no UFC record to predict from, and leaving the fight out gives a board that
+    is missing a bout with no hint it was ever there.
+    """
 
     def build(compact: bool) -> discord.Embed:
         embed = discord.Embed(title=truncate(event_name, 256), url=espn_url, colour=PICKS_PURPLE)
@@ -115,22 +127,35 @@ def picks_board_embed(
             header.append("🔒 Picks locked at first bell")
         else:
             header.append(f"⏱️ {discord.utils.format_dt(start, 'R')} · {plural(len(records), 'pick')}")
+        if unpicked:
+            header.append(f"🤖 Picks for {len(records)} of {len(records) + len(unpicked)} fights")
         embed.description = "\n".join(header)
 
-        for record in records[:25]:
-            prediction = Prediction.from_dict(record.name_a, record.name_b, record.detail) if record.detail else None
-            embed.add_field(
-                name=truncate(f"{record.name_a} vs. {record.name_b}", 256),
-                value=pick_value(
+        # Picked and unpicked together, in the order the card is fought.
+        entries: list[tuple[int, str, str]] = [
+            (
+                record.position,
+                f"{record.name_a} vs. {record.name_b}",
+                pick_value(
                     favourite=record.favourite,
                     confidence=record.confidence,
-                    prediction=prediction,
+                    prediction=(
+                        Prediction.from_dict(record.name_a, record.name_b, record.detail)
+                        if record.detail
+                        else None
+                    ),
                     extra_lines=result_lines(record),
                     compact=compact,
                 ),
-                inline=False,
             )
-        if not records:
+            for record in records
+        ]
+        entries += [(position, matchup, NO_DATA) for position, matchup in unpicked]
+        entries.sort(key=lambda entry: entry[0])
+
+        for _position, name, value in entries[:25]:
+            embed.add_field(name=truncate(name, 256), value=value, inline=False)
+        if not entries:
             embed.add_field(name="Picks", value="No picks yet.", inline=False)
 
         return stamp(embed)
