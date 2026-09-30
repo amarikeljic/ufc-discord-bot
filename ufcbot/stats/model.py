@@ -237,9 +237,9 @@ def _design_matrix(
             "weight_class": snap.weight_class,
         }
 
-        rows.append(matchup_row(fa, fb, **ctx))
+        rows.append(matchup_row(fa, fb, **ctx, rematch=snap.rematch))
         labels.append(y)
-        rows.append(matchup_row(fb, fa, **ctx))
+        rows.append(matchup_row(fb, fa, **ctx, rematch=snap.rematch.swapped()))
         labels.append(1 - y)
         dates.extend([snap.on, snap.on])
 
@@ -284,8 +284,8 @@ def _method_rows(history: History, fighters: dict[str, FighterInfo]) -> _MethodR
             "scheduled_rounds": snap.scheduled_rounds,
             "weight_class": snap.weight_class,
         }
-        row_ab = matchup_row(fa, fb, **ctx)
-        row_ba = matchup_row(fb, fa, **ctx)
+        row_ab = matchup_row(fa, fb, **ctx, rematch=snap.rematch)
+        row_ba = matchup_row(fb, fa, **ctx, rematch=snap.rematch.swapped())
         winner_first.append(row_ab if snap.winner == "a" else row_ba)
         a_first.append(row_ab)
         b_first.append(row_ba)

@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
 
-from .career import Ledger
+from .career import NO_REMATCH, Ledger, Rematch
 from .features import FEATURE_NAMES, matchup_row
 from .prediction import (
     DEFAULT_DRAW_RATES,
@@ -30,7 +30,7 @@ from .prediction import (
 )
 from .techniques import FINISHES, METHODS
 
-MODEL_VERSION = 4
+MODEL_VERSION = 5
 MODEL_FILE = "ufc_model.pkl"
 
 
@@ -208,6 +208,7 @@ class CompiledModel:
         ledger_a: Ledger | None = None,
         ledger_b: Ledger | None = None,
         weight_class: str | None = None,
+        rematch: Rematch = NO_REMATCH,
     ) -> Prediction:
         """Probability that A beats B, and how.
 
@@ -219,8 +220,8 @@ class CompiledModel:
             "scheduled_rounds": scheduled_rounds,
             "weight_class": weight_class,
         }
-        row_ab = matchup_row(a, b, **context)
-        row_ba = matchup_row(b, a, **context)
+        row_ab = matchup_row(a, b, **context, rematch=rematch)
+        row_ba = matchup_row(b, a, **context, rematch=rematch.swapped())
         forward = self.winner.probabilities(row_ab)[1]
         reverse = self.winner.probabilities(row_ba)[1]
         prob_a = (forward + (1 - reverse)) / 2

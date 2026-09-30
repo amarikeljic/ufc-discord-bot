@@ -9,6 +9,8 @@ Neither source separates KO from TKO, so they stay one method.
 
 from __future__ import annotations
 
+import re
+
 METHODS = ("ko", "sub", "dec_u", "dec_s")
 
 METHOD_LABELS = {
@@ -18,6 +20,7 @@ METHOD_LABELS = {
     "dec_s": "Split decision",
     "draw": "Draw",
     "nc": "No contest",
+    "dq": "Disqualification",
 }
 
 METHOD_SHORT = {
@@ -27,10 +30,17 @@ METHOD_SHORT = {
     "dec_s": "S-Dec",
     "draw": "Draw",
     "nc": "NC",
+    "dq": "DQ",
 }
 
 # Methods that end with a specific technique.
 FINISHES = ("ko", "sub")
+"""The two the model predicts a finishing technique for. Do not add to this."""
+
+# Methods that end a fight before the final bell, so a round and a clock are
+# worth printing beside them. Wider than FINISHES because a disqualification
+# stops a fight without being something anyone can be said to have done well.
+STOPPAGES = (*FINISHES, "dq")
 
 _GROUND = ("ground", "mount", "guard", "back control", "side control", "north-south", "crucifix")
 
@@ -127,6 +137,8 @@ def method_from_espn(result_name: str | None, display_name: str | None = None) -
         return "dec_u"
     if "submission" in text:
         return "sub"
+    if "disqualif" in text or "dq" in re.split(r"[^a-z]+", text):
+        return "dq"
     if "ko" in text or "doctor" in text:
         return "ko"
     return None

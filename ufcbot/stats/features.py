@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 from datetime import date
 
-from .career import FighterInfo, Ledger, division_weight
+from .career import NO_REMATCH, FighterInfo, Ledger, Rematch, division_weight
 
 NAN = float("nan")
 
@@ -137,6 +137,13 @@ def _matchup_value(kind: str, attack: float, defence: float) -> float:
 
 CONTEXT = ["title_fight", "scheduled_rounds", "division"]
 
+# What these two have already done to each other. Last because two of the four
+# swap when the row is mirrored and two do not: a meeting count and how long ago
+# it was read the same from either corner, where the wins and losses change
+# hands. Kept out of the per-fighter block because none of it describes a
+# fighter on their own.
+REMATCH = ["prior_meetings", "prior_wins", "prior_losses", "days_since_meeting"]
+
 FEATURE_NAMES = (
     [f"a_{name}" for name in PER_FIGHTER]
     + [f"b_{name}" for name in PER_FIGHTER]
@@ -144,6 +151,7 @@ FEATURE_NAMES = (
     + [f"m_a_{name}" for name, _a, _d, _k in MATCHUPS]
     + [f"m_b_{name}" for name, _a, _d, _k in MATCHUPS]
     + CONTEXT
+    + REMATCH
 )
 
 
@@ -199,6 +207,10 @@ FEATURE_LABELS = {
     "best_win_elo": "best win",
     "elo_over_opponents": "rating above their opposition",
     "finish_elo": "finishing rating",
+    "prior_meetings": "times they have met",
+    "prior_wins": "wins over this opponent",
+    "prior_losses": "losses to this opponent",
+    "days_since_meeting": "time since they last met",
 }
 
 
@@ -215,8 +227,13 @@ def matchup_row(
     title_fight: bool,
     scheduled_rounds: int,
     weight_class: str | None = None,
+    rematch: Rematch = NO_REMATCH,
 ) -> list[float]:
-    """Both sides plus their differences, in FEATURE_NAMES order."""
+    """Both sides plus their differences, in FEATURE_NAMES order.
+
+    ``rematch`` is read from ``a``'s side, so a mirrored row is built with
+    ``rematch.swapped()`` exactly as it swaps ``a`` and ``b``.
+    """
     row: list[float] = []
     row.extend(a[name] for name in PER_FIGHTER)
     row.extend(b[name] for name in PER_FIGHTER)
@@ -226,4 +243,8 @@ def matchup_row(
     row.append(1.0 if title_fight else 0.0)
     row.append(float(scheduled_rounds))
     row.append(division_weight(weight_class))
+    row.append(float(rematch.meetings))
+    row.append(float(rematch.wins))
+    row.append(float(rematch.losses))
+    row.append(rematch.days_since)
     return row

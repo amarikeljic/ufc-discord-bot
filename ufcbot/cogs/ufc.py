@@ -20,7 +20,6 @@ from ..embeds import (
     UFC_RED,
     event_embed,
     fighter_embed,
-    model_status_embed,
     pickem_picks_embed,
     pickem_stats_embed,
     prediction_embed,
@@ -200,7 +199,12 @@ class UFCCog(commands.Cog):
             return
 
         await interaction.response.defer()
-        embed = prediction_embed(prediction, career_a, career_b)
+        embed = prediction_embed(
+            prediction,
+            career_a,
+            career_b,
+            rematch=self.bot.stats.meetings_between(career_a.name, career_b.name),
+        )
         image = await self._matchup_image(career_a.name, career_b.name)
         if image:
             embed.set_image(url="attachment://matchup.jpg")
@@ -337,7 +341,14 @@ class UFCCog(commands.Cog):
             inline=True,
         )
 
-        health = [f"Memory **{memory:,.0f} MB**" if memory is not None else "Memory \u2014"]
+        # Broken down, because "129 MB" on its own says nothing about whether a
+        # cache has misbehaved or the heap has simply not been handed back.
+        http = self.bot.http_client
+        health = [
+            f"Memory **{memory:,.0f} MB**" if memory is not None else "Memory \u2014",
+            f"Cache {http._held / 1024 / 1024:.1f} MB \u00b7 {len(http._cache)} docs",
+            f"Faces {self.bot.images._held / 1024 / 1024:.1f} MB \u00b7 {len(self.bot.data._athletes)} fighters",
+        ]
         stats = self.bot.stats
         if self.bot.config.enable_predictions:
             newest = stats.careers.newest_event if stats.careers else None
@@ -482,21 +493,6 @@ class UFCCog(commands.Cog):
 
     # -- model administration -------------------------------------------------
 
-    @model.command(name="status", description="Dataset freshness and model accuracy")
-    async def model_status(self, interaction: discord.Interaction) -> None:
-        if not self.bot.config.enable_predictions:
-            await interaction.response.send_message("Predictions are disabled in this bot's config.", ephemeral=True)
-            return
-        stats = self.bot.stats
-        embed = model_status_embed(
-            fight_count=stats.careers.fight_count if stats.careers else 0,
-            newest_event=stats.careers.newest_event if stats.careers else None,
-            behind=stats.expected_newest if stats.is_behind else None,
-            model=stats.model,
-            last_check=stats.last_check,
-            last_error=stats.last_error,
-        )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @model.command(name="refresh", description="Pull the latest fight data and retrain (bot owner only)")
     async def model_refresh(self, interaction: discord.Interaction) -> None:

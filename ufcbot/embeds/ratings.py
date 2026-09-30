@@ -5,7 +5,7 @@ from __future__ import annotations
 import discord
 
 from ..util import truncate
-from .common import DASH, MEDALS, UFC_RED, add_chunked_fields, join, keep, stamp
+from .common import DASH, UFC_RED, add_chunked_fields, join, keep, stamp
 
 ARROWS = {"entered": "🆕", "left": "🚪", "up": "🔼", "down": "🔽"}
 
@@ -31,7 +31,11 @@ def rankings_embed(
     for entry in entries:
         # A shared rank keeps its number but loses the medal: a joint first is
         # not a winner, and two of the same medal reads as a mistake.
-        badge = f"`={entry.rank:>2}`" if entry.tied else MEDALS.get(entry.rank, f"`{entry.rank:>2}`")
+        # Every badge is the same three characters wide, so every name starts in
+        # the same column. A medal is a different width from a number and a
+        # shared rank is a character wider again, which is what pushed the
+        # names out of line.
+        badge = f"`{'=' if entry.tied else ' '}{entry.rank:>2}`"
         facts = [f"**{entry.rating}**", entry.record]
         if pound_for_pound and entry.division:
             facts.append(entry.division)

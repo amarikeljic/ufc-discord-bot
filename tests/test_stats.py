@@ -7,7 +7,16 @@ from datetime import date, timedelta
 
 import pytest
 
-from ufcbot.stats.career import Ledger, division_name, division_weight
+from ufcbot.stats.career import (
+    NO_REMATCH,
+    Ledger,
+    Meeting,
+    Rematch,
+    division_name,
+    division_weight,
+    pair_key,
+    rematch_between,
+)
 from ufcbot.stats.features import FEATURE_NAMES, _matchup_value, matchup_row
 from ufcbot.stats.names import NameIndex
 from ufcbot.stats.rankings import (
@@ -331,3 +340,76 @@ def test_a_board_comes_back_the_same_way_twice():
     again = [entry.name for entry in rank_division(dict(reversed(ledgers.items())), "Lightweight", on=TODAY)]
 
     assert once == again == ["Adam", "Zoe"]
+
+
+# -- what has passed between these two ----------------------------------------------
+
+
+def test_two_strangers_have_no_history():
+    assert rematch_between({}, "a", "b", TODAY) is NO_REMATCH
+
+
+def test_the_record_reads_the_same_whichever_way_the_pair_is_named():
+    """It is stored once per pair, under the sorted names, so the answer cannot
+    depend on which corner happens to be listed first."""
+    meetings = {pair_key("zoe", "adam"): Meeting(fights=3, first_wins=2, second_wins=1, last_on=date(2025, 1, 1))}
+
+    adam = rematch_between(meetings, "adam", "zoe", TODAY)
+    zoe = rematch_between(meetings, "zoe", "adam", TODAY)
+
+    assert (adam.wins, adam.losses) == (2, 1), "adam sorts first and won two"
+    assert (zoe.wins, zoe.losses) == (1, 2)
+    assert adam.meetings == zoe.meetings == 3
+    assert adam.days_since == zoe.days_since
+
+
+def test_swapping_a_rematch_turns_it_round():
+    original = Rematch(meetings=2, wins=2, losses=0, days_since=400.0)
+    other = original.swapped()
+
+    assert (other.wins, other.losses) == (0, 2)
+    assert other.meetings == 2 and other.days_since == 400.0
+    assert other.swapped() == original
+
+
+def test_how_long_ago_they_met_is_measured_to_the_fight_being_predicted():
+    meetings = {pair_key("a", "b"): Meeting(fights=1, first_wins=1, last_on=TODAY - timedelta(days=500))}
+
+    assert rematch_between(meetings, "a", "b", TODAY).days_since == 500.0
+
+
+def test_a_pair_that_drew_has_met_without_either_winning():
+    meetings = {pair_key("a", "b"): Meeting(fights=1, last_on=TODAY)}
+    met = rematch_between(meetings, "a", "b", TODAY)
+
+    assert met.meetings == 1 and met.wins == 0 and met.losses == 0
+
+
+def test_the_rematch_lands_in_the_row_and_mirrors_with_it():
+    """A mirrored row swaps the fighters, so it has to swap their history too,
+    or the model learns that the first corner tends to have beaten the second."""
+    from ufcbot.stats.features import fighter_features
+
+    side = fighter_features(Ledger(name="_"), None, TODAY)
+    met = Rematch(meetings=2, wins=2, losses=0, days_since=400.0)
+    ctx = {"title_fight": False, "scheduled_rounds": 3, "weight_class": "Lightweight"}
+
+    forward = matchup_row(side, side, **ctx, rematch=met)
+    mirrored = matchup_row(side, side, **ctx, rematch=met.swapped())
+
+    assert len(forward) == len(FEATURE_NAMES)
+    tail = dict(zip(FEATURE_NAMES[-4:], forward[-4:]))
+    assert tail == {"prior_meetings": 2.0, "prior_wins": 2.0, "prior_losses": 0.0, "days_since_meeting": 400.0}
+    assert mirrored[-3:-1] == [0.0, 2.0], "wins and losses change hands"
+
+
+def test_a_first_meeting_is_zeros_rather_than_missing():
+    """Most fights are first meetings, so this is the common row: a count of
+    nothing, not an absent value the model has to interpret."""
+    from ufcbot.stats.features import fighter_features
+
+    side = fighter_features(Ledger(name="_"), None, TODAY)
+    row = matchup_row(side, side, title_fight=False, scheduled_rounds=3, weight_class="Lightweight")
+
+    assert row[-4:-1] == [0.0, 0.0, 0.0]
+    assert row[-1] != row[-1], "never met, so there is no time since"

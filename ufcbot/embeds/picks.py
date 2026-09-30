@@ -8,9 +8,10 @@ from typing import TYPE_CHECKING
 import discord
 
 from ..models import Event
+from ..stats.career import NO_REMATCH, Rematch
 from ..stats.features import describe_feature
 from ..stats.prediction import Prediction
-from ..stats.techniques import FINISHES, METHOD_LABELS, METHOD_SHORT
+from ..stats.techniques import FINISHES, METHOD_LABELS, METHOD_SHORT, STOPPAGES
 from ..util import truncate
 from .common import (
     DASH,
@@ -84,7 +85,7 @@ def result_lines(record: PredictionRecord) -> list[str]:
         return [f"Result: {METHOD_LABELS.get(record.result_method or '', 'no result')} · void"]
     how = outcome_label(record.result_method, record.result_technique)
     when = ""
-    if record.result_round and record.result_method in FINISHES:
+    if record.result_round and record.result_method in STOPPAGES:
         when = f" · R{record.result_round} {record.result_time or ''}".rstrip()
     marks = ["Pick ✅" if record.correct else "Pick ❌"]
     if record.method_correct is not None:
@@ -207,14 +208,42 @@ def _how_breakdown(prediction: Prediction, side: str) -> str:
     return "\n".join(lines) or DASH
 
 
+def series_line(name_a: str, name_b: str, rematch: Rematch) -> str | None:
+    """"Met twice · Volkanovski leads 2-0" — or nothing at all.
+
+    Most fights are first meetings, and saying so on every one of them is a line
+    that never varies, so this returns None and the caller adds nothing.
+    """
+    if rematch.meetings == 0:
+        return None
+    times = "once" if rematch.meetings == 1 else plural(rematch.meetings, "time")
+    if rematch.wins > rematch.losses:
+        standing = f"{keep(surname(name_a))} leads {rematch.wins}-{rematch.losses}"
+    elif rematch.losses > rematch.wins:
+        standing = f"{keep(surname(name_b))} leads {rematch.losses}-{rematch.wins}"
+    else:
+        standing = "all square" if rematch.wins else "neither has won"
+    ago = ""
+    if rematch.days_since == rematch.days_since:  # not NaN
+        years = rematch.days_since / 365.25
+        ago = f" · last met {years:.0f}y ago" if years >= 1 else " · last met this year"
+    return f"🔁 Met {times} · {standing}{ago}"
+
+
 def prediction_embed(
     prediction: Prediction,
     career_a: FighterCareer,
     career_b: FighterCareer,
     *,
     on: date | None = None,
+    rematch: Rematch = NO_REMATCH,
 ) -> discord.Embed:
-    """Head-to-head with win probability, how it ends, and a tale-of-the-tape table."""
+    """Head-to-head with win probability, how it ends, and a tale-of-the-tape table.
+
+    ``rematch`` is read from A's side. Whether these two have met before is the
+    question a matchup raises ahead of any of the numbers, and a series already
+    half-decided reads very differently from two strangers.
+    """
     a, b = career_a.ledger, career_b.ledger
     ia, ib = career_a.info, career_b.info
 
@@ -229,6 +258,9 @@ def prediction_embed(
         lines.append(f"Likeliest: {keep(outcome_label(method, technique))} {prob:.0%}")
     if prediction.draw >= 0.005:
         lines.append(f"Draw: about {prediction.draw:.0%}")
+    series = series_line(a.name, b.name, rematch)
+    if series:
+        lines.append(series)
     embed.description = "\n".join(lines)
 
     if prediction.has_methods:

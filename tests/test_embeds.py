@@ -168,7 +168,8 @@ def test_every_live_post_names_the_card():
         live_result_embed(event_name=name, bout=fight, winner=ALLEN, method="ko", technique="punches",
                           round_number=2, clock="3:41", totals=stats, scorecards={}, record=None, odds={}),
     ):
-        assert embed.footer.text == name
+        assert embed.author.name == name, "the card is named in the post, not in the footer"
+        assert embed.footer.text is None
         assert embed.timestamp is not None
 
 
@@ -208,17 +209,20 @@ def test_the_fighter_card_calls_a_shared_rank_joint():
     assert "joint 1st at Middleweight" in fields["Bot Rating"].replace("\xa0", " ")
 
 
-def test_the_board_marks_a_shared_rank_and_does_not_hand_out_two_of_a_medal():
+def test_every_name_on_a_ratings_board_starts_in_the_same_column():
+    """A medal is a different width from a number, and a shared rank is a
+    character wider again. Mixing the three pushed the names out of line."""
     entries = [
         Ranked(rank=1, name="A", rating=1200, record="10-0-0", division="Lightweight"),
-        Ranked(rank=2, name="B", rating=1171, record="9-1-0", division="Lightweight", tied=True),
-        Ranked(rank=2, name="C", rating=1171, record="9-1-0", division="Lightweight", tied=True),
+        Ranked(rank=3, name="B", rating=1171, record="9-1-0", division="Lightweight", tied=True),
+        Ranked(rank=3, name="C", rating=1171, record="9-1-0", division="Lightweight", tied=True),
+        Ranked(rank=15, name="D", rating=1100, record="8-2-0", division="Lightweight"),
     ]
-    text = rankings_embed("Lightweight", entries).fields[0].value
+    lines = rankings_embed("Lightweight", entries).fields[0].value.split("\n")
 
-    assert "\U0001f947" in text, "the outright leader keeps the gold"
-    assert text.count("\U0001f948") == 0, "a shared second is not a silver medal"
-    assert text.count("=") == 2
+    badges = [line[: line.index("`", 1) + 1] for line in lines]
+    assert {len(badge) for badge in badges} == {5}, f"badges differ in width: {badges}"
+    assert badges == ["`  1`", "`= 3`", "`= 3`", "` 15`"]
 
 
 def test_the_model_status_card_reads_without_repeating_itself():
@@ -342,3 +346,42 @@ def test_a_fully_picked_card_says_nothing_about_missing_fights():
     text = embed.description + " ".join(f.value for f in embed.fields)
 
     assert "No pick" not in text and "of 1 fights" not in text
+
+
+# -- have these two met before? -----------------------------------------------------
+
+
+def test_a_first_meeting_says_nothing_about_a_series():
+    """Most fights are first meetings, and a line saying so on every one of them
+    is a line that never varies."""
+    from ufcbot.embeds.picks import series_line
+    from ufcbot.stats.career import NO_REMATCH
+
+    assert series_line("A", "B", NO_REMATCH) is None
+
+
+def test_the_series_names_whoever_is_ahead():
+    from ufcbot.embeds.picks import series_line
+    from ufcbot.stats.career import Rematch
+
+    ahead = series_line("Alexander Volkanovski", "Max Holloway", Rematch(meetings=2, wins=2, losses=0))
+    behind = series_line("Alexander Volkanovski", "Max Holloway", Rematch(meetings=3, wins=1, losses=2))
+
+    assert "Volkanovski leads 2-0" in ahead.replace("\xa0", " ")
+    assert "Holloway leads 2-1" in behind.replace("\xa0", " "), "named from the other corner"
+
+
+def test_a_split_series_is_called_square_rather_than_led():
+    from ufcbot.embeds.picks import series_line
+    from ufcbot.stats.career import Rematch
+
+    assert "all square" in series_line("A", "B", Rematch(meetings=2, wins=1, losses=1))
+    assert "neither has won" in series_line("A", "B", Rematch(meetings=1, wins=0, losses=0))
+
+
+def test_how_long_ago_is_only_said_when_it_is_known():
+    from ufcbot.embeds.picks import series_line
+    from ufcbot.stats.career import Rematch
+
+    assert "last met" not in series_line("A", "B", Rematch(meetings=1, wins=1))
+    assert "3y ago" in series_line("A", "B", Rematch(meetings=1, wins=1, days_since=1200.0))

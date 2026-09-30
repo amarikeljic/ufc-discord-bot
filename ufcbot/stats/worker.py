@@ -22,13 +22,13 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from pathlib import Path
 
-from .career import FighterInfo, Ledger
+from .career import FighterInfo, Ledger, Meeting
 from .scorer import MODEL_FILE
 
 log = logging.getLogger(__name__)
 
 CAREER_FILE = "career.pkl"
-CAREER_VERSION = 5
+CAREER_VERSION = 6
 
 # How far back the honest evaluation window reaches when training.
 HOLDOUT_MONTHS = 18
@@ -47,6 +47,8 @@ class CareerData:
     """Final career totals keyed by normalised name."""
     fighters: dict[str, FighterInfo] = field(default_factory=dict)
     """Tale of the tape keyed by normalised name."""
+    meetings: dict[tuple[str, str], Meeting] = field(default_factory=dict)
+    """Who has fought whom, keyed by the sorted pair of normalised names."""
     fight_count: int = 0
     newest_event: date | None = None
     fingerprint: str = ""
@@ -90,6 +92,14 @@ class CareerData:
         for info in self.fighters.values():
             info.name = shared(info.name)
             info.stance = shared(info.stance)
+
+        # Every pair key is two names that are already dictionary keys here, so
+        # they are pointed at those rather than stored a second time.
+        for key in self.ledgers:
+            pool.setdefault(key, key)
+        self.meetings = {
+            (shared(first), shared(second)): met for (first, second), met in self.meetings.items()
+        }
 
     @classmethod
     def load(cls, path: Path) -> CareerData:
@@ -248,6 +258,7 @@ def refresh(data_dir: str, model_dir: str, *, force_retrain: bool = False, downl
         # ledger, so without one they can never be reached; they only make the
         # file, and the memory the bot holds it in, bigger.
         fighters={key: info for key, info in dataset.fighters.items() if key in history.ledgers},
+        meetings=history.meetings,
         fight_count=dataset.fight_count,
         newest_event=newest,
         fingerprint=digest,

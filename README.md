@@ -20,7 +20,9 @@ have done.
   lock when the card starts and are graded afterwards. No betting lines: those belong in
   pick'em.
 - **Scorecard.** A running record of the model's accuracy, split by confidence, with the
-  betting favourites' record over the same fights as a benchmark.
+  betting favourites' record over the same fights as a benchmark. It sits at the foot of
+  the picks channel, because "should I believe any of this" is a question asked while
+  reading the picks.
 - **Live coverage.** During a card: a preview as fighters walk out, with both fighters'
   tale of the tape and career stats, then stats after every round, and the official
   result with judges' scores. Previews and results include a side-by-side headshot
@@ -60,7 +62,6 @@ have done.
 | `/ufc channels set` | Choose channels for picks, accuracy, schedule, live coverage, pick'em and ratings |
 | `/ufc channels status` / `refresh` / `clear` | Manage those channels |
 | `/ufc sync enable` / `disable` / `now` / `status` / `settings` | Discord scheduled events |
-| `/ufc model status` | Dataset freshness and model accuracy |
 | `/ufc model refresh` | Download new data and retrain (bot owner only) |
 
 The `channels` commands need **Manage Server**, and the `sync` commands need **Manage Events**.
@@ -117,6 +118,21 @@ python bot.py
 /ufc channels set predictions:#fight-picks accuracy:#scorecard schedule:#fight-calendar live:#fight-night pickem:#pickem
 /ufc sync enable
 ```
+
+### Deploying
+
+Pushing to `main` builds the image and restarts the container on a self-hosted runner; see
+`.github/workflows/deploy.yml`. The container keeps nothing of its own, so two settings in
+the server's `.env` have to point inside the mounted volume or a deploy throws them away
+with the old container:
+
+```
+DATABASE_PATH=/app/data/ufcbot.sqlite3
+MODEL_DIR=/app/data/models
+```
+
+The database is the only thing here that cannot be rebuilt — every member's picks, points
+and leaderboard history — and it defaults to a path that is *not* on the volume.
 
 ## Configuration
 
@@ -245,16 +261,22 @@ Twelve hours before the **main card** — not the first bell, which can be four 
 and would put the reminder at dawn — the pick'em channel says so once, with what is still
 to come and how many people are playing.
 
-Two groups get pinged by name and nobody else: members playing this card who have no pick
-on a fight that **changed** since the board went up, because their pick was made against a
-fighter who may not be in the bout any more; and members who have played pick'em here
-before but have not opened this card at all. People who have never played are left alone,
-since there is no way to tell them from everyone else in the server. At most twenty are
-named and the rest are counted. It is the one message where the bot allows a mention to
-notify, because reaching someone is the whole point of it.
+It pings `@everyone`, and it is the one message where the bot allows a mention to notify,
+because reaching the room is the whole point of it. Any fight that **changed** since the
+board went up is named, since a pick made last week was made against a fighter who may not
+be in the bout any more.
 
-Both leaderboards carry two extra lines under the standings: what the model scored on the
-same fights, and what backing every favourite would have scored. Neither is ranked among
+It is taken down again the moment the first fight starts. By then it is no longer a
+reminder, it is a message telling people to do something they can no longer do, sitting
+above the board that matters.
+
+Each leaderboard ranks the same players twice, **by points** and **by fights called
+right**. They are not the same table: backing every favourite wins often and loses points,
+and backing underdogs does the reverse, so a single ranking hides whichever half of the
+game a player is good at.
+
+Both leaderboards also carry two extra lines: what the model scored on the same fights,
+and what backing every favourite would have scored. Neither is ranked among
 the players. They pick every fight where a member picks the ones they like, and neither is
 playing for anything, so ranking them would be scoring two different games together. They
 are there to answer the only question a leaderboard cannot: not who is top, but whether
@@ -309,6 +331,20 @@ A second rating is fitted only on how fights ended, scoring a stoppage as a win,
 stopped as a loss and a decision as half each, so the method model can see finishing power
 against the durability it met.
 
+It also knows whether these two have met before. Every other input describes a fighter, or
+the gap between two of them, and reads a rematch exactly like two strangers — but the one
+who won last time wins again **63% of the time**, measured across the 204 rematches in the
+dataset where one fighter led the series. The previous meetings are stored once per pair
+rather than once per fighter, and read as they stood before the fight in question, so a
+snapshot never sees a meeting that had not happened yet.
+
+Rematches are only 2.7% of fights, so this was never going to move the headline, and it
+did not: on the holdout it is worth −0.06 percentage points of accuracy, which is half a
+fight in 796. Measured on the rematches alone it improves log loss from 0.609 to 0.593,
+and on first meetings it changes the answer by 0.0000 — inert where it does not apply,
+better calibrated where it does. Twenty-nine rematches is far too small to call it proven;
+it earns its place by costing nothing everywhere else.
+
 It is given the matchup as well as the two fighters. Every other input measures a fighter
 alone, or the gap between them, which says who is the better wrestler but never whether
 this wrestler can take this opponent down. So striking volume is set against the
@@ -323,10 +359,10 @@ Accuracy on the most recent 18 months of fights, held out from training:
 
 | Prediction | Model | Simple baseline |
 | --- | --- | --- |
-| Winner | 66.0% | 59.0% (better record wins) |
-| Method, when the winner is known | 51.9% | 39.9% (always unanimous decision) |
-| Winner and method together | 34.8% | |
-| Technique, when the finish type is known | 74.1% | 73.6% (most common technique) |
+| Winner | 65.3% | 58.9% (better record wins) |
+| Method, when the winner is known | 50.4% | 38.9% (always unanimous decision) |
+| Winner and method together | 33.6% | |
+| Technique, when the finish type is known | 74.9% | 74.4% (most common technique) |
 
 Every fight is trained on twice, once from each corner, so which corner a fighter is in
 carries no information. This matters when comparing with other UFC models: ufcstats lists
@@ -339,6 +375,11 @@ Win probabilities are close to calibrated as they come out of the blend, and are
 they come. Isotonic and Platt calibration were both tried and both made log loss worse on
 cross-validation: the model is mildly under-confident, but by an amount that moves from
 one period to the next, so a correction fitted on past fights misleads on future ones.
+
+A disqualification is read as its own result rather than as nothing. It is shown with the
+round it happened in, like any stoppage, but it is not a finish: the model predicts a
+technique for knockouts and submissions only, and nobody finishes anybody by being
+disqualified.
 
 The finishing technique barely beats the base rate, because most knockouts are punches and
 most submissions are rear-naked chokes. It is never counted towards the model's record: the
@@ -525,9 +566,9 @@ The walkout preview pairs ESPN's bio (record, age, height, weight, reach, stance
 country) with the ufcstats.com career numbers for both fighters. A fighter who is not in
 the dataset yet, such as a debutant, still gets the ESPN rows.
 
-Every live post names its card in the footer, alongside the time it was built. Channel
-boards label their footer "Last updated" instead, because the bot edits those messages in
-place.
+Every live post names its card above the title, where it reads as which night this is
+rather than as a note about the message. Channel boards label their footer "Last updated"
+instead, because the bot edits those messages in place.
 
 ## Data sources
 
@@ -576,7 +617,7 @@ ufcbot/
     common.py           Colours, limits and text helpers
     cards.py            Fight cards, the schedule and card changes
     fighters.py         The fighter profile card
-    picks.py            Picks, prediction, recap, scorecard and model status
+    picks.py            Picks, prediction, recap and scorecard embeds
     ratings.py          Ratings boards and their moves
     health.py           What the bot says when something it depends on breaks
     events.py           Text for Discord scheduled events
@@ -612,7 +653,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-256 tests, a few seconds, no network and no Discord: they run against a real SQLite
+267 tests, a few seconds, no network and no Discord: they run against a real SQLite
 database in a temporary directory and fight cards built by hand. Most of them are about
 what happens when a card changes underneath the bot, because that is where the awkward
 cases live -- a fighter replaced, a fight cancelled, a card that only half-loaded -- and

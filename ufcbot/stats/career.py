@@ -463,6 +463,58 @@ class Ledger:
         self.finish_elo += ELO_K * (score - expected)
 
 
+@dataclass(frozen=True, slots=True)
+class Rematch:
+    """What has passed between two fighters, from the first one's side.
+
+    A rematch is not a fresh fight. Whoever won last time tends to win again,
+    and the one avenging a loss usually does it by a different route, so the
+    model is handed the previous meetings rather than being left to read two
+    records that look like strangers meeting.
+    """
+
+    meetings: int = 0
+    wins: int = 0
+    losses: int = 0
+    days_since: float = float("nan")
+
+    def swapped(self) -> Rematch:
+        """The same history read from the other fighter's side."""
+        return Rematch(self.meetings, self.losses, self.wins, self.days_since)
+
+
+NO_REMATCH = Rematch()
+
+
+@dataclass(slots=True)
+class Meeting:
+    """Every time one pair of fighters has met, keyed by their sorted names."""
+
+    fights: int = 0
+    first_wins: int = 0
+    """Won by whichever key sorts first, so the record reads the same either way."""
+    second_wins: int = 0
+    last_on: date | None = None
+
+
+def pair_key(key_a: str, key_b: str) -> tuple[str, str]:
+    return (key_a, key_b) if key_a <= key_b else (key_b, key_a)
+
+
+def rematch_between(
+    meetings: dict[tuple[str, str], Meeting], key_a: str, key_b: str, on: date
+) -> Rematch:
+    """What A and B have already done to each other, from A's side."""
+    met = meetings.get(pair_key(key_a, key_b))
+    if met is None or met.fights == 0:
+        return NO_REMATCH
+    a_first = key_a <= key_b
+    wins = met.first_wins if a_first else met.second_wins
+    losses = met.second_wins if a_first else met.first_wins
+    days = float((on - met.last_on).days) if met.last_on else float("nan")
+    return Rematch(meetings=met.fights, wins=wins, losses=losses, days_since=days)
+
+
 @dataclass(slots=True)
 class FightSnapshot:
     """Both fighters' histories as they stood going into one fight."""
@@ -479,6 +531,8 @@ class FightSnapshot:
     weight_class: str
     method_detail: str = "other"
     technique: str | None = None
+    rematch: Rematch = NO_REMATCH
+    """Their previous meetings as they stood walking in, from A's side."""
 
 
 @dataclass(slots=True)
@@ -488,6 +542,13 @@ class History:
 
     snapshots: list[FightSnapshot] = field(default_factory=list)
     """Pre-fight state for every fight with a decided winner, oldest first."""
+
+    meetings: dict[tuple[str, str], Meeting] = field(default_factory=dict)
+    """Who has fought whom, keyed by the sorted pair.
+
+    Held once per pair rather than once per fighter: the question is only ever
+    asked about two names at a time, and a pair costs half what two opponent
+    lists would."""
 
 
 def build_history(dataset: Dataset, *, keep_snapshots: bool = True) -> History:
@@ -506,6 +567,9 @@ def build_history(dataset: Dataset, *, keep_snapshots: bool = True) -> History:
         on = fight.date.date()
         # Missing techniques come back from pandas as NaN, not None.
         technique = fight.technique if isinstance(fight.technique, str) else None
+        # Read before this fight is added, so a snapshot only ever sees meetings
+        # that had already happened.
+        rematch = rematch_between(history.meetings, key_a, key_b, on)
 
         if keep_snapshots and fight.winner in ("a", "b"):
             history.snapshots.append(
@@ -522,6 +586,7 @@ def build_history(dataset: Dataset, *, keep_snapshots: bool = True) -> History:
                     weight_class=str(fight.weight_class),
                     method_detail=str(fight.method_detail),
                     technique=technique,
+                    rematch=rematch,
                 )
             )
 
@@ -554,5 +619,15 @@ def build_history(dataset: Dataset, *, keep_snapshots: bool = True) -> History:
         ledger_b.record_fight(
             result=result_b, own=own_b, opp=own_a, opponent_elo=elo_a, opponent_finish_elo=finish_a, **common
         )
+
+        met = history.meetings.setdefault(pair_key(key_a, key_b), Meeting())
+        met.fights += 1
+        met.last_on = on
+        if fight.winner in ("a", "b"):
+            a_first = key_a <= key_b
+            if (fight.winner == "a") == a_first:
+                met.first_wins += 1
+            else:
+                met.second_wins += 1
 
     return history

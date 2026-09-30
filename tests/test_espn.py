@@ -186,3 +186,20 @@ def test_the_finishing_technique_is_read_where_espn_gives_one():
     assert technique_from_espn("ko", "Punches", "Head") == "punches"
     # A decision has no technique to read.
     assert technique_from_espn("dec_u", "Decision", None) is None
+
+
+def test_a_disqualification_is_a_result_like_any_other():
+    """It ended the fight and somebody won it. Reading it as nothing left the
+    result post with a winner, a stat table and no way it was won."""
+    for slug in ("disqualification", "dq---illegal-knee", "dq---illegal-upkick", "DQ"):
+        assert method_from_espn(slug) == "dq", slug
+
+
+def test_a_disqualification_is_shown_with_the_round_it_happened_in():
+    """It stops a fight early, so a round and a clock belong beside it -- but it
+    is not a finish, because nobody finished anybody."""
+    from ufcbot.stats.techniques import FINISHES, METHOD_LABELS, METHOD_SHORT, STOPPAGES
+
+    assert "dq" in STOPPAGES and "dq" not in FINISHES
+    assert METHOD_LABELS["dq"] == "Disqualification"
+    assert METHOD_SHORT["dq"] == "DQ"

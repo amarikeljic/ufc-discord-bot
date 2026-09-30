@@ -53,6 +53,7 @@ KIND_SCORECARD = "scorecard"
 KIND_PICKEM = "pickem"
 KIND_PICKEM_LEADERBOARD = "pickem_leaderboard"
 KIND_PICKEM_CARD_LEADERBOARD = "pickem_card_leaderboard"
+KIND_FIGHT_DAY = "fight_day"
 KIND_RANKINGS = "rankings"
 BOARD_KEY = "board"
 
@@ -65,9 +66,6 @@ LAST_CARD_TITLE = "🏆 Last Card's Pick'em Leaderboard"
 
 # Twelve hours before the main card, the pick'em channel says it is fight day.
 FIGHT_DAY_NOTICE = timedelta(hours=12)
-# At most this many people are pinged by name; the rest are counted.
-PING_LIMIT = 20
-
 
 
 def card_leaderboard_title(scored_card_id: str | None, current: Event | None) -> str:
@@ -225,6 +223,7 @@ class ChannelPublisher:
     ) -> None:
         now = datetime.now(UTC)
         upcoming = await self._upcoming(settings)
+        created = False
 
         for summary in upcoming:
             # Without the full card there is nothing to re-record against, so the
@@ -259,7 +258,10 @@ class ChannelPublisher:
                     if bout.has_opponents and bout.id not in picked
                 ],
             )
-            await self._upsert(guild, channel, KIND_PICKS, event.id, embed, result, force=force)
+            created = (
+                await self._upsert(guild, channel, KIND_PICKS, event.id, embed, result, force=force)
+                or created
+            )
             result.picks_boards += 1
 
         # Cards that recently happened are no longer "upcoming" but their boards
@@ -284,6 +286,38 @@ class ChannelPublisher:
             )
             await self._upsert(guild, channel, KIND_PICKS, event_id, embed, result, force=force)
             result.picks_boards += 1
+
+        await self._publish_scorecard(guild, channel, settings, result, force or created)
+
+    async def _publish_scorecard(
+        self,
+        guild: discord.Guild,
+        channel: discord.TextChannel,
+        settings: GuildSettings,
+        result: PublishResult,
+        moved: bool,
+    ) -> None:
+        """The model's running record, kept at the foot of the picks channel.
+
+        It belongs under the picks rather than in a channel of its own: it is the
+        answer to "should I believe any of this", and that question is asked
+        while reading the picks. ``moved`` re-sends it so a newly posted card's
+        board never leaves it stranded halfway up the channel.
+        """
+        since = settings.tracking_since
+        await self._upsert(
+            guild,
+            channel,
+            KIND_SCORECARD,
+            BOARD_KEY,
+            scorecard_embed(
+                build_scorecard(since, await self.tracker.graded_events(since)),
+                evaluation=self.evaluation_provider(),
+            ),
+            result,
+            force=moved,
+            resend=moved,
+        )
 
     async def _publish_rankings(
         self,
@@ -337,7 +371,6 @@ class ChannelPublisher:
         since = settings.tracking_since
         events = await self.tracker.graded_events(since)  # oldest first
 
-        posted = False
         for event in events:
             if await self.storage.recap_posted(guild.id, event.espn_event_id):
                 continue
@@ -345,22 +378,10 @@ class ChannelPublisher:
             partial = build_scorecard(since, [e for e in events if e.start <= event.start])
             await channel.send(embed=recap_embed(event, partial))
             await self.storage.mark_recap_posted(guild.id, event.espn_event_id)
-            posted = True
             result.recaps += 1
             result.updated += 1
             await asyncio.sleep(WRITE_SPACING)
 
-        await self._upsert(
-            guild,
-            channel,
-            KIND_SCORECARD,
-            BOARD_KEY,
-            scorecard_embed(build_scorecard(since, events), evaluation=self.evaluation_provider()),
-            result,
-            force=force,
-            # Move the scorecard below a new recap so it stays the latest message.
-            resend=posted,
-        )
 
     async def _publish_pickem(
         self,
@@ -415,59 +436,65 @@ class ChannelPublisher:
         if removed or created or force:
             await self._sweep_pickem(guild, channel, result)
         if current is not None:
-            await self._fight_day_reminder(guild, channel, current, now)
+            await self._fight_day_reminder(guild, channel, current, now, result)
 
     async def _fight_day_reminder(
-        self, guild: discord.Guild, channel: discord.TextChannel, event: Event, now: datetime
+        self,
+        guild: discord.Guild,
+        channel: discord.TextChannel,
+        event: Event,
+        now: datetime,
+        result: PublishResult,
     ) -> None:
-        """Once, twelve hours before the main card: it is today, go and pick.
+        """Twelve hours before the main card: it is today, go and pick.
 
         Timed off the main card rather than the first bell, because the early
         prelims can start four hours earlier and a reminder that lands at dawn
         is a reminder nobody reads.
 
-        Two groups are pinged, and nobody else. Members playing this card who
-        have no pick on a fight that changed since the board went up -- their
-        pick was made against a fighter who may not be in the bout any more --
-        and members who have played pick'em here before but have not opened this
-        card at all. People who have never played are left alone, because there
-        is no way to tell them from everyone else in the server.
+        Taken down again the moment the first fight starts. By then it is no
+        longer a reminder, it is a message telling people to do something they
+        can no longer do, sitting above the board that matters.
         """
+        key = str(event.id)
         main_card = event.main_card_start or event.start
+
+        if event.start <= now:
+            # The card has begun; picks on the early prelims are already closed.
+            await self._remove_post(guild, channel, KIND_FIGHT_DAY, key, result)
+            return
         if not timedelta(0) < main_card - now <= FIGHT_DAY_NOTICE:
             return
-        if not await self.storage.notice_due("fight_day", f"{guild.id}:{event.id}"):
+        if await self.storage.get_post(guild.id, KIND_FIGHT_DAY, key) is not None:
             return
 
         changed: list[tuple[str, str]] = []
-        to_ping: set[int] = set()
         for row in await self.storage.short_notice_for(event.id):
             bout = next((b for b in event.fights if b.id == row.bout_id), None)
             if bout is None:
                 continue  # the fight came off the card after the swap
             changed.append((bout.matchup, f"{row.arrived} replaced {row.departed}"))
-            to_ping.update(await self.storage.pickem_players_missing_bout(guild.id, event.id, bout.id))
-        to_ping.update(await self.storage.pickem_players_missing_card(guild.id, event.id))
 
         embed = fight_day_embed(
             event,
             changed=changed,
             players=await self.storage.pickem_player_count(guild.id, event.id),
         )
-        mentions = sorted(to_ping)[:PING_LIMIT]
-        content = " ".join(f"<@{user_id}>" for user_id in mentions)
-        if len(to_ping) > PING_LIMIT:
-            content += f" and {len(to_ping) - PING_LIMIT} more"
         try:
-            await channel.send(
-                content=content or None,
+            message = await channel.send(
+                content="@everyone",
                 embed=embed,
-                # The bot silences mentions everywhere else; this is the one
-                # message whose whole point is to reach someone.
-                allowed_mentions=discord.AllowedMentions(users=True),
+                # The bot silences mentions everywhere else. This is the one
+                # message whose whole point is to reach the room.
+                allowed_mentions=discord.AllowedMentions(everyone=True),
             )
         except discord.HTTPException as exc:
             log.warning("Fight day reminder failed in #%s: %r", channel.name, exc)
+            return
+        # Remembered so it can be taken down when the first fight starts.
+        await self.storage.save_post(
+            guild.id, KIND_FIGHT_DAY, key, channel.id, message.id, signature="fight-day"
+        )
 
     async def _pickem_card_leaderboard(
         self,

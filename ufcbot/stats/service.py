@@ -27,7 +27,7 @@ from pathlib import Path
 
 from ..models import Event
 from ..util import normalise
-from .career import FighterInfo, Ledger
+from .career import NO_REMATCH, FighterInfo, Ledger, Rematch, rematch_between
 from .features import fighter_features
 from .names import NameIndex
 from .prediction import Prediction
@@ -277,6 +277,13 @@ class StatsService:
             return None
         return FighterCareer(ledger=ledger, info=self.careers.fighters.get(key))
 
+    def meetings_between(self, name_a: str, name_b: str, on: date | None = None) -> Rematch:
+        """What these two have already done to each other, from A's side."""
+        key_a, key_b = self.resolve(name_a), self.resolve(name_b)
+        if self.careers is None or key_a is None or key_b is None:
+            return NO_REMATCH
+        return rematch_between(self.careers.meetings, key_a, key_b, on or date.today())
+
     def predict(
         self,
         name_a: str,
@@ -295,6 +302,12 @@ class StatsService:
         if a is None or b is None:
             return None
         on = on or date.today()
+        key_a, key_b = self.resolve(name_a), self.resolve(name_b)
+        rematch = (
+            rematch_between(self.careers.meetings, key_a, key_b, on)
+            if self.careers and key_a and key_b
+            else NO_REMATCH
+        )
         return self.model.predict(
             fighter_features(a.ledger, a.info, on),
             fighter_features(b.ledger, b.info, on),
@@ -305,6 +318,7 @@ class StatsService:
             ledger_a=a.ledger,
             ledger_b=b.ledger,
             weight_class=weight_class,
+            rematch=rematch,
         )
 
     def predict_event(self, event: Event) -> dict[str, Prediction]:

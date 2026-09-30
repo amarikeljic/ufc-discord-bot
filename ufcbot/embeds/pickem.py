@@ -47,10 +47,37 @@ def _lock_lines(event: Event, now: datetime) -> list[str]:
     return lines
 
 
-def _standing_line(rank: int, standing: PickemStanding) -> str:
+def _standing_line(rank: int, standing: PickemStanding, *, lead: str) -> str:
+    """One row. ``lead`` is whichever of the two numbers this table is ordered by,
+    so the column being ranked on reads first and in bold."""
     badge = MEDALS.get(rank, f"`{rank:>2}`")
     record = f"{standing.wins}-{standing.losses} ({standing.win_rate:.0%})"
-    return f"{badge} <@{standing.user_id}> · **{standing.points:,}** pts · {keep(record)}"
+    if lead == "points":
+        facts = [f"**{standing.points:,}** pts", keep(record)]
+    else:
+        facts = [f"**{keep(record)}**", f"{standing.points:,} pts"]
+    return f"{badge} <@{standing.user_id}> · " + " · ".join(facts)
+
+
+def _ranked_lines(
+    standings: list[PickemStanding], *, lead: str, viewer_id: int | None, limit: int
+) -> list[str]:
+    lines = [_standing_line(rank, s, lead=lead) for rank, s in enumerate(standings[:limit], 1)]
+    if viewer_id is not None:
+        rank = next((i for i, s in enumerate(standings, 1) if s.user_id == viewer_id), None)
+        if rank and rank > limit:
+            lines += ["…", _standing_line(rank, standings[rank - 1], lead=lead)]
+    return lines
+
+
+def by_record(standings: list[PickemStanding]) -> list[PickemStanding]:
+    """The same players ordered by fights called right rather than points staked.
+
+    They are not the same table. Backing every favourite gets a good record and
+    loses points; backing underdogs does the reverse. Showing only one of the two
+    hides whichever half of the game a player is good at.
+    """
+    return sorted(standings, key=lambda s: (-s.wins, s.losses, -s.points, s.user_id))
 
 
 # -- the card board in the pick'em channel -------------------------------------------
@@ -159,18 +186,26 @@ def pickem_leaderboard_embed(
     """
     embed = discord.Embed(title=truncate(title, 256), colour=PICKEM_TEAL)
 
-    if standings:
-        lines = [_standing_line(rank, s) for rank, s in enumerate(standings[:limit], 1)]
-        if viewer_id is not None:
-            rank = next((i for i, s in enumerate(standings, 1) if s.user_id == viewer_id), None)
-            if rank and rank > limit:
-                lines += ["…", _standing_line(rank, standings[rank - 1])]
-    else:
+    if not standings:
         lines = [empty]
+        if benchmarks:
+            lines += ["", *_benchmark_lines(benchmarks)]
+        embed.description = "\n".join([subtitle, "", *lines] if subtitle else lines)
+        return stamp(embed)
 
+    embed.description = subtitle or None
+    add_chunked_fields(
+        embed,
+        "💰 By points",
+        _ranked_lines(standings, lead="points", viewer_id=viewer_id, limit=limit),
+    )
+    add_chunked_fields(
+        embed,
+        "🎯 By fights called right",
+        _ranked_lines(by_record(standings), lead="record", viewer_id=viewer_id, limit=limit),
+    )
     if benchmarks:
-        lines += ["", *_benchmark_lines(benchmarks)]
-    embed.description = "\n".join([subtitle, "", *lines] if subtitle else lines)
+        add_chunked_fields(embed, "Not playing", _benchmark_lines(benchmarks))
     return stamp(embed)
 
 

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import discord
 
 from ..models import Bout, Fighter
-from ..stats.techniques import FINISHES, METHOD_LABELS, describe
+from ..stats.techniques import METHOD_LABELS, STOPPAGES, describe
 from ..util import truncate
 from .common import (
     DASH,
@@ -161,7 +161,7 @@ def live_open_embed(
         tape = _tape_table(a, b, careers or {}, odds)
         if tape:
             embed.add_field(name="Tale of the tape", value=tape, inline=False)
-    embed.set_footer(text=truncate(event_name, 2048))
+    embed.set_author(name=truncate(event_name, 256))
     return stamp(embed)
 
 
@@ -184,7 +184,7 @@ def live_round_embed(
     table = _stats_table(bout, stats)
     if table:
         embed.add_field(name=f"Round {round_number} stats", value=table, inline=False)
-    embed.set_footer(text=truncate(event_name, 2048))
+    embed.set_author(name=truncate(event_name, 256))
     return stamp(embed)
 
 
@@ -215,7 +215,7 @@ def live_result_embed(
     lines = []
     if method in METHOD_LABELS and winner:
         text = f"By **{keep(describe(method, technique))}**"
-        if method in FINISHES and round_number:
+        if method in STOPPAGES and round_number:
             text += " · " + keep(f"R{round_number} {clock or ''}".strip())
         lines.append(text)
 
@@ -243,5 +243,5 @@ def live_result_embed(
     table = _stats_table(bout, totals)
     if table:
         embed.add_field(name="Fight totals", value=table, inline=False)
-    embed.set_footer(text=truncate(event_name, 2048))
+    embed.set_author(name=truncate(event_name, 256))
     return stamp(embed)

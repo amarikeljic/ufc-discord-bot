@@ -220,3 +220,29 @@ def test_a_fight_nobody_could_have_picked_is_not_scored():
 
 def test_nothing_is_claimed_before_a_card_is_graded():
     assert benchmarks([]) == []
+
+
+# -- the two ways of being good at this ------------------------------------------
+
+
+def test_the_leaderboard_by_record_is_not_the_leaderboard_by_points():
+    """Backing every favourite wins often and loses points; backing underdogs
+    does the reverse. One table hides whichever half a player is good at."""
+    from ufcbot.embeds.pickem import by_record
+    from ufcbot.records import PickemStanding
+
+    safe = PickemStanding(user_id=1, points=120, wins=12, losses=5, cards=2)
+    bold = PickemStanding(user_id=2, points=1774, wins=6, losses=6, cards=2)
+
+    assert by_record([bold, safe])[0] is safe, "most fights called right"
+    assert sorted([safe, bold], key=lambda s: -s.points)[0] is bold, "most points"
+
+
+def test_a_tie_on_record_is_broken_by_the_fewest_losses_then_points():
+    from ufcbot.embeds.pickem import by_record
+    from ufcbot.records import PickemStanding
+
+    fewer_losses = PickemStanding(user_id=1, points=10, wins=8, losses=1, cards=1)
+    more_losses = PickemStanding(user_id=2, points=900, wins=8, losses=6, cards=1)
+
+    assert by_record([more_losses, fewer_losses])[0] is fewer_losses
