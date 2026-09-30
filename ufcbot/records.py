@@ -24,7 +24,6 @@ class GuildSettings:
     include_contender_series: bool = False
     announce_channel_id: int | None = None
     predictions_channel_id: int | None = None
-    accuracy_channel_id: int | None = None
     schedule_channel_id: int | None = None
     tracking_since: date | None = None
     live_channel_id: int | None = None
@@ -37,7 +36,6 @@ class GuildSettings:
         return any(
             (
                 self.predictions_channel_id,
-                self.accuracy_channel_id,
                 self.schedule_channel_id,
                 self.live_channel_id,
                 self.pickem_channel_id,

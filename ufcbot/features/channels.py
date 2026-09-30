@@ -1,4 +1,4 @@
-"""Maintains the bot's channel boards: picks, schedule, accuracy and pick'em.
+"""Maintains the bot's channel boards: picks, schedule, ratings and pick'em.
 
 Each board is one message the bot edits in place, so a channel stays tidy. A hash
 of each board's content is stored with its message id and a board is only edited
@@ -41,7 +41,6 @@ from .pickem import (
     PickemService,
     benchmarks,
     bout_status,
-    ready_to_open,
 )
 from .tracking import PredictionTracker, build_scorecard
 
@@ -165,7 +164,6 @@ class ChannelPublisher:
         jobs = (
             ("schedule", settings.schedule_channel_id, self._publish_schedule),
             ("picks", settings.predictions_channel_id, self._publish_picks),
-            ("accuracy", settings.accuracy_channel_id, self._publish_accuracy),
             ("pickem", settings.pickem_channel_id, self._publish_pickem),
             ("rankings", settings.rankings_channel_id, self._publish_rankings),
         )
@@ -287,7 +285,36 @@ class ChannelPublisher:
             await self._upsert(guild, channel, KIND_PICKS, event_id, embed, result, force=force)
             result.picks_boards += 1
 
-        await self._publish_scorecard(guild, channel, settings, result, force or created)
+        recapped = await self._publish_recaps(guild, channel, settings, result)
+        await self._publish_scorecard(guild, channel, settings, result, force or created or recapped)
+
+    async def _publish_recaps(
+        self,
+        guild: discord.Guild,
+        channel: discord.TextChannel,
+        settings: GuildSettings,
+        result: PublishResult,
+    ) -> bool:
+        """How the model did on each card, once that card is fully graded.
+
+        One post per card, kept forever, under the picks it is grading. Returns
+        whether anything went up, so the scorecard can follow it down.
+        """
+        since = settings.tracking_since
+        events = await self.tracker.graded_events(since)  # oldest first
+        posted = False
+        for event in events:
+            if await self.storage.recap_posted(guild.id, event.espn_event_id):
+                continue
+            # The scorecard shown with a recap only counts cards up to that one.
+            partial = build_scorecard(since, [e for e in events if e.start <= event.start])
+            await channel.send(embed=recap_embed(event, partial))
+            await self.storage.mark_recap_posted(guild.id, event.espn_event_id)
+            result.recaps += 1
+            result.updated += 1
+            posted = True
+            await asyncio.sleep(WRITE_SPACING)
+        return posted
 
     async def _publish_scorecard(
         self,
@@ -360,29 +387,6 @@ class ChannelPublisher:
             if key not in keep:
                 await self._remove_post(guild, channel, KIND_RANKINGS, key, result)
 
-    async def _publish_accuracy(
-        self,
-        guild: discord.Guild,
-        channel: discord.TextChannel,
-        settings: GuildSettings,
-        result: PublishResult,
-        force: bool,
-    ) -> None:
-        since = settings.tracking_since
-        events = await self.tracker.graded_events(since)  # oldest first
-
-        for event in events:
-            if await self.storage.recap_posted(guild.id, event.espn_event_id):
-                continue
-            # The scorecard shown with a recap only counts cards up to that one.
-            partial = build_scorecard(since, [e for e in events if e.start <= event.start])
-            await channel.send(embed=recap_embed(event, partial))
-            await self.storage.mark_recap_posted(guild.id, event.espn_event_id)
-            result.recaps += 1
-            result.updated += 1
-            await asyncio.sleep(WRITE_SPACING)
-
-
     async def _publish_pickem(
         self,
         guild: discord.Guild,
@@ -421,19 +425,20 @@ class ChannelPublisher:
         )
         await self._pickem_card_leaderboard(guild, channel, current, last, result, force)
 
-        # The next card's board goes up the moment that card has prices, which is
-        # usually as soon as the last one is over. Nothing is gained by making
-        # people wait for it: the fight-day ping is what gets them back.
-        open_now = current is not None and ready_to_open(current, now)
-        wanted = current.id if open_now else None
-        removed = created = False
-        for event_id in await self.storage.posts_of_kind(guild.id, KIND_PICKEM):
-            if event_id != wanted:
-                await self._remove_post(guild, channel, KIND_PICKEM, event_id, result)
+        # One permanent board, following whichever card pick'em is on. It is
+        # posted whatever the odds are doing: a fight with no price shows as
+        # such and cannot be picked until it has one, which is a better answer
+        # than an empty channel and a card nobody knew was open.
+        removed = False
+        for key in await self.storage.posts_of_kind(guild.id, KIND_PICKEM):
+            # Earlier versions keyed the board by card. One left over from then
+            # would otherwise sit below the new one for good.
+            if key != BOARD_KEY:
+                await self._remove_post(guild, channel, KIND_PICKEM, key, result)
                 removed = True
-        if wanted is not None:
-            created = await self._pickem_board(guild, channel, current, result, force, now)
-        if removed or created or force:
+        if current is not None:
+            await self._pickem_board(guild, channel, current, result, force, now)
+        if removed or force:
             await self._sweep_pickem(guild, channel, result)
         if current is not None:
             await self._fight_day_reminder(guild, channel, current, now, result)
@@ -549,26 +554,29 @@ class ChannelPublisher:
         result: PublishResult,
         force: bool,
         now: datetime,
-    ) -> bool:
+    ) -> None:
         """The card's board, with the picker and the button showing your picks.
 
-        Returns True when a new message was sent, which is what tells the
-        channel sweep a card has turned over.
+        One message for good, edited as the card turns over rather than deleted
+        and reposted, so it keeps its place under the two leaderboards. The card
+        id rides in the signature because a new card has to force the edit even
+        where the text happens to look the same -- the buttons carry the card
+        they belong to.
         """
         counts = await self.storage.pickem_counts(guild.id, event.id)
         players = await self.storage.pickem_player_count(guild.id, event.id)
         accepting = any(bout_status(event, bout, now) == OPEN for bout in event.fights)
         result.pickem_boards += 1
-        return await self._upsert(
+        await self._upsert(
             guild,
             channel,
             KIND_PICKEM,
-            event.id,
+            BOARD_KEY,
             pickem_board_embed(event, counts, players, now=now),
             result,
             force=force,
             view=board_view(event.id, accepting=accepting),
-            extra=f"accepting={accepting}",
+            extra=f"{event.id}:accepting={accepting}",
         )
 
     async def _remove_post(

@@ -35,8 +35,8 @@ have done.
   watching, so it is a model input next season that cannot be bought today.
 - **Ratings moves.** When a division's board changes, the move is announced with the
   reason: in, out, up or down, after a win, a loss, a long layoff, or results around them.
-- **Pick'em.** Members pick winners for the next UFC card from a private menu once odds
-  are posted. A right pick scores what a 100-point bet would win at those odds, so
+- **Pick'em.** Members pick winners for the next UFC card from a private menu. A right
+  pick scores what a 100-point bet would win at those odds, so
   underdogs pay more; a wrong pick costs 100 points. The channel keeps an all-time
   leaderboard and one for the card being fought, and both show what the model and the
   favourites scored on the same fights, so you can see whether you beat them.
@@ -59,8 +59,8 @@ have done.
 | `/ufc pickem stats [member]` | Points, rank, win rate and card history |
 | `/ufc pickem picks <event>` | Everyone's picks for one card, fight by fight |
 | `/ufc server` | Latency, uptime, memory and how current the data is |
-| `/ufc channels set` | Choose channels for picks, accuracy, schedule, live coverage, pick'em and ratings |
-| `/ufc channels status` / `refresh` / `clear` | Manage those channels |
+| `/ufc channels set` | Choose channels for picks, schedule, live coverage, pick'em and ratings |
+| `/ufc channels refresh` / `clear` | Update every board now, or stop maintaining them |
 | `/ufc sync enable` / `disable` / `now` / `status` / `settings` | Discord scheduled events |
 | `/ufc model refresh` | Download new data and retrain (bot owner only) |
 
@@ -115,7 +115,7 @@ python bot.py
 **6. Set up channels** in your server, for example:
 
 ```
-/ufc channels set predictions:#fight-picks accuracy:#scorecard schedule:#fight-calendar live:#fight-night pickem:#pickem
+/ufc channels set predictions:#fight-picks schedule:#fight-calendar live:#fight-night pickem:#pickem rankings:#bot-rankings
 /ufc sync enable
 ```
 
@@ -211,12 +211,11 @@ points, favourite or underdog.
 | +235 underdog | +235 | -100 |
 
 Points are locked in with the odds at the moment you pick; changing a pick uses the
-new odds. The game runs on the next UFC card only, and opens as soon as that card has
-prices — usually within a day of the last one ending. Every fight has to be priced before
-the board goes up, so nobody opens a card they cannot finish; if one prelim still has no
-line 48 hours out the board opens anyway on whatever prices exist, because one fight
-should not keep the whole server from playing. Each pick locks when that part of the card
-starts. Draws, no contests and
+new odds. The game runs on the next UFC card only, and the board turns over to it the
+moment the last one ends — usually days before anyone has priced it. A fight with no line
+yet is listed and says so, and cannot be picked until it has one; the rest of the card is
+playable in the meantime. Each pick locks when that part of the card starts. Draws, no
+contests and
 cancelled fights are void, and so is a pick on a fighter who was replaced before the
 bell: that fight never happened, so the pick scores nothing either way rather than
 counting as a loss. A fight coming off the card is voided as soon as the bot sees it
@@ -224,20 +223,20 @@ go, rather than sitting in your picks as pending until the card is over.
 Other members' picks stay hidden until the fight locks,
 though the board shows the overall split. `/ufc pickem picks <event>` lays out a whole
 card fight by fight afterwards: who backed whom, at what price, and what it scored them.
-The channel holds two leaderboards that are never deleted, only edited, and beneath them
-the current card's board:
+The channel holds three messages. None of them is ever deleted; they are edited in place,
+and they keep their order:
 
 | Message | What it is | Buttons |
 | --- | --- | --- |
 | **All Time Pick'em Leaderboard** | every card the bot has scored | — |
 | **This / Last Card's Pick'em Leaderboard** | the card scored most recently | My picks |
-| The card's pick'em board | posted as soon as the next card is priced | Make your picks, My picks |
+| The card's pick'em board | whichever card is open now | Make your picks, My picks |
 
-The leaderboards keep their place in the scrollback, because they are what the channel is
-for between cards and a message people scroll back to should not move. The board is the
-part that turns over: one per card, deleted and reposted as the card changes, so a card
-ending and the next opening read as things happening rather than as a message quietly
-changing under everyone.
+All three keep their place in the scrollback, because a message people scroll back to
+should not move. The board is the part whose contents turn over, and a card ending is an
+edit rather than a delete and a repost: the announcement that it happened is the fight-day
+reminder and the results, which are posts of their own, so the board does not also need to
+jump to the bottom to be noticed.
 
 The board also redraws as people vote, so the share behind each fighter is current rather
 than an hour old. A redraw is scheduled eight seconds after a pick and replaced by the next
@@ -252,8 +251,8 @@ with nothing scored on it yet.
 The turn happens on the last result rather than on the clock. When live coverage posts a
 result it checks whether every fight on the card now has one, and if it does, the Discord
 event for that card is ended there and then — within about a minute of the last fight,
-instead of running on to the end time it was given days earlier. The next card's board
-follows as soon as that card has prices.
+instead of running on to the end time it was given days earlier. The pick'em board moves
+on to the next card in the same pass.
 
 ### Fight day
 

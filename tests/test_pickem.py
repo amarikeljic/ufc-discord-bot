@@ -12,10 +12,12 @@ import pytest
 from conftest import bout, card, fighter, pickem_record, unnamed_bout
 
 from ufcbot.features.pickem import (
+    NO_ODDS,
+    OPEN,
     WRONG_PICK_POINTS,
     PickemService,
     benchmarks,
-    fully_priced,
+    bout_status,
     points_for,
 )
 from ufcbot.records import PredictionRecord
@@ -155,28 +157,35 @@ async def test_void_picks_are_left_out_of_the_crowd_split(storage, soon):
     assert counts.get("M1") == {"21": 1}
 
 
-# -- opening the board ---------------------------------------------------------
+# -- which fights can be picked -------------------------------------------------
 
 
-def test_the_game_opens_only_once_every_fight_is_priced(soon):
+def test_a_fight_with_no_price_is_the_only_thing_held_back(soon):
+    """The board no longer waits for the whole card to be priced. An unpriced
+    fight is shown and cannot be picked; its neighbours are unaffected."""
     a, b, c, d = (fighter(f"F{i}", f"Fighter {i}") for i in range(4))
     one, two = bout("B1", a, b), bout("B2", c, d)
     event = card(one, two, start=soon)
+    now = soon - timedelta(days=10)
 
-    assert not fully_priced(event), "no odds at all"
+    assert [bout_status(event, f, now) for f in event.fights] == [NO_ODDS, NO_ODDS]
 
     one.odds = {a.id: -150, b.id: 130}
-    assert not fully_priced(event), "half the card priced is half a game"
+    assert [bout_status(event, f, now) for f in event.fights] == [OPEN, NO_ODDS]
 
     two.odds = {c.id: -110}
-    assert not fully_priced(event), "one corner priced is not a fight anyone can pick"
+    assert bout_status(event, two, now) == NO_ODDS, "one corner priced is not a fight anyone can pick"
 
     two.odds[d.id] = -110
-    assert fully_priced(event)
+    assert [bout_status(event, f, now) for f in event.fights] == [OPEN, OPEN]
 
 
-def test_a_card_with_no_named_fights_is_not_priced(soon):
-    assert not fully_priced(card(unnamed_bout("B1"), start=soon))
+def test_a_fight_with_no_second_name_is_not_on_the_board_at_all(soon):
+    """It is a line on ESPN's card with nobody in it yet, so there is nothing to
+    show and nothing to pick."""
+    event = card(unnamed_bout("B1"), start=soon)
+    assert event.fights == []
+    assert bout_status(event, event.bouts[0], soon - timedelta(days=1)) == NO_ODDS
 
 
 # -- what the model and the market scored on the same fights ---------------------

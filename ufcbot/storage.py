@@ -130,7 +130,7 @@ CREATE TABLE IF NOT EXISTS channel_posts (
     PRIMARY KEY (guild_id, kind, key)
 );
 
--- Cards whose recap has already been posted to a guild's accuracy channel.
+-- Cards whose recap has already been posted to a guild's picks channel.
 CREATE TABLE IF NOT EXISTS recaps_posted (
     guild_id      INTEGER NOT NULL,
     espn_event_id TEXT    NOT NULL,
@@ -190,7 +190,6 @@ MIGRATIONS = {
     "channel_posts": (("signature", "TEXT"),),
     "guild_config": (
         ("predictions_channel_id", "INTEGER"),
-        ("accuracy_channel_id", "INTEGER"),
         ("schedule_channel_id", "INTEGER"),
         ("tracking_since", "TEXT"),
         ("live_channel_id", "INTEGER"),
@@ -285,10 +284,10 @@ class Storage:
             INSERT INTO guild_config (
                 guild_id, sync_enabled, days_ahead, duration_minutes,
                 start_anchor, include_contender_series, announce_channel_id,
-                predictions_channel_id, accuracy_channel_id, schedule_channel_id,
+                predictions_channel_id, schedule_channel_id,
                 tracking_since, live_channel_id, pickem_channel_id, rankings_channel_id,
                 rankings_include_women, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(guild_id) DO UPDATE SET
                 sync_enabled             = excluded.sync_enabled,
                 days_ahead               = excluded.days_ahead,
@@ -297,7 +296,6 @@ class Storage:
                 include_contender_series = excluded.include_contender_series,
                 announce_channel_id      = excluded.announce_channel_id,
                 predictions_channel_id   = excluded.predictions_channel_id,
-                accuracy_channel_id      = excluded.accuracy_channel_id,
                 schedule_channel_id      = excluded.schedule_channel_id,
                 tracking_since           = excluded.tracking_since,
                 live_channel_id          = excluded.live_channel_id,
@@ -315,7 +313,6 @@ class Storage:
                 int(settings.include_contender_series),
                 settings.announce_channel_id,
                 settings.predictions_channel_id,
-                settings.accuracy_channel_id,
                 settings.schedule_channel_id,
                 settings.tracking_since.isoformat() if settings.tracking_since else None,
                 settings.live_channel_id,
@@ -337,8 +334,8 @@ class Storage:
 
     async def guilds_with_channels(self) -> list[GuildSettings]:
         return await self._guilds_where(
-            "predictions_channel_id IS NOT NULL OR accuracy_channel_id IS NOT NULL "
-            "OR schedule_channel_id IS NOT NULL OR pickem_channel_id IS NOT NULL "
+            "predictions_channel_id IS NOT NULL OR schedule_channel_id IS NOT NULL "
+            "OR pickem_channel_id IS NOT NULL "
             "OR rankings_channel_id IS NOT NULL"
         )
 
@@ -1185,7 +1182,6 @@ def _settings_from_row(row: aiosqlite.Row) -> GuildSettings:
         include_contender_series=bool(row["include_contender_series"]),
         announce_channel_id=row["announce_channel_id"],
         predictions_channel_id=row["predictions_channel_id"],
-        accuracy_channel_id=row["accuracy_channel_id"],
         schedule_channel_id=row["schedule_channel_id"],
         tracking_since=_parse_date(row["tracking_since"]),
         live_channel_id=row["live_channel_id"],

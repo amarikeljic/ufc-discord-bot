@@ -374,10 +374,9 @@ class UFCCog(commands.Cog):
 
     # -- channel boards ---------------------------------------------------------
 
-    @channels.command(name="set", description="Choose channels for picks, accuracy, schedule and live fight coverage")
+    @channels.command(name="set", description="Choose channels for picks, schedule, live coverage, pick'em and ratings")
     @app_commands.describe(
         predictions="Channel for the picks board (one message per upcoming card)",
-        accuracy="Channel for results recaps and the running scorecard",
         schedule="Channel for the upcoming-cards board",
         live="Channel for live coverage: fight previews, round stats and results",
         pickem="Channel for the pick'em game: the next card's board and the leaderboard",
@@ -389,7 +388,6 @@ class UFCCog(commands.Cog):
         self,
         interaction: discord.Interaction,
         predictions: discord.TextChannel | None = None,
-        accuracy: discord.TextChannel | None = None,
         schedule: discord.TextChannel | None = None,
         live: discord.TextChannel | None = None,
         pickem: discord.TextChannel | None = None,
@@ -397,9 +395,9 @@ class UFCCog(commands.Cog):
         womens_divisions: bool | None = None,
         since: str | None = None,
     ) -> None:
-        if not any((predictions, accuracy, schedule, live, pickem, rankings, since)) and womens_divisions is None:
+        if not any((predictions, schedule, live, pickem, rankings, since)) and womens_divisions is None:
             await interaction.response.send_message(
-                "Pass at least one of predictions, accuracy, schedule, live, pickem, rankings or since.",
+                "Pass at least one of predictions, schedule, live, pickem, rankings or since.",
                 ephemeral=True,
             )
             return
@@ -417,8 +415,6 @@ class UFCCog(commands.Cog):
         settings = await self._settings(interaction.guild_id)
         if predictions is not None:
             settings.predictions_channel_id = predictions.id
-        if accuracy is not None:
-            settings.accuracy_channel_id = accuracy.id
         if schedule is not None:
             settings.schedule_channel_id = schedule.id
         if live is not None:
@@ -431,7 +427,7 @@ class UFCCog(commands.Cog):
             settings.rankings_include_women = womens_divisions
         if tracking_since is not None:
             settings.tracking_since = tracking_since
-        elif accuracy is not None and settings.tracking_since is None:
+        elif predictions is not None and settings.tracking_since is None:
             # Start counting from now, so old cards never pollute the scorecard.
             settings.tracking_since = date.today()
         await self.bot.storage.save_settings(settings)
@@ -446,7 +442,6 @@ class UFCCog(commands.Cog):
     async def channels_clear(self, interaction: discord.Interaction) -> None:
         settings = await self._settings(interaction.guild_id)
         settings.predictions_channel_id = None
-        settings.accuracy_channel_id = None
         settings.schedule_channel_id = None
         settings.live_channel_id = None
         settings.pickem_channel_id = None
@@ -455,11 +450,6 @@ class UFCCog(commands.Cog):
         await interaction.response.send_message(
             "Boards cleared. Existing messages were left in place.", ephemeral=True
         )
-
-    @channels.command(name="status", description="Which channels the boards post to")
-    async def channels_status(self, interaction: discord.Interaction) -> None:
-        settings = await self._settings(interaction.guild_id)
-        await interaction.response.send_message(self._channels_summary(settings), ephemeral=True)
 
     @channels.command(name="refresh", description="Update every board in this server now")
     async def channels_refresh(self, interaction: discord.Interaction) -> None:
@@ -480,7 +470,6 @@ class UFCCog(commands.Cog):
 
         lines = [
             f"Picks board: {chan(settings.predictions_channel_id)}",
-            f"Accuracy: {chan(settings.accuracy_channel_id)}",
             f"Schedule: {chan(settings.schedule_channel_id)}",
             f"Live fights: {chan(settings.live_channel_id)}",
             f"Pick'em: {chan(settings.pickem_channel_id)}",

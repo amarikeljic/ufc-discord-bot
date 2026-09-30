@@ -29,8 +29,6 @@ STAKE = 100
 WRONG_PICK_POINTS = -STAKE
 # A card counts as over this long after it starts, even if a result never posts.
 CARD_LENGTH = timedelta(hours=12)
-# How close to the first bell the board stops waiting for a complete set of odds.
-LAST_CALL = timedelta(hours=48)
 
 OPEN = "open"
 LOCKED = "locked"
@@ -84,32 +82,6 @@ def benchmarks(records: list[PredictionRecord]) -> list[Benchmark]:
                 side.points += WRONG_PICK_POINTS
 
     return [side for side in (model, market) if side.settled]
-
-
-def fully_priced(event: Event) -> bool:
-    """Whether every fight still on the card has a price on both corners."""
-    fights = event.fights
-    return bool(fights) and all(len(bout.odds) == 2 for bout in fights)
-
-
-def ready_to_open(event: Event, now: datetime) -> bool:
-    """Whether the pick'em board should go up for this card.
-
-    Normally it waits for a full card of prices: a board posted half-priced is
-    one most of the server cannot finish, and the fights still missing lines are
-    exactly the ones nobody would get to pick.
-
-    That wait cannot be open-ended, though. One prelim that never gets a line
-    would otherwise keep the whole server from playing the card at all, so
-    inside the last two days the board opens on whatever prices exist. The
-    fights still unpriced show as such and cannot be picked until they are.
-    """
-    fights = event.fights
-    if not fights:
-        return False
-    if fully_priced(event):
-        return True
-    return event.start - now <= LAST_CALL and any(len(bout.odds) == 2 for bout in fights)
 
 
 def points_for(odds: int) -> int:

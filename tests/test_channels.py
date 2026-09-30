@@ -17,6 +17,7 @@ import discord
 import pytest
 from conftest import bout, card, fighter, pickem_record
 
+from ufcbot.embeds import pickem_board_embed
 from ufcbot.features import channels as channels_module
 from ufcbot.features.channels import (
     BOARD_KEY,
@@ -30,7 +31,6 @@ from ufcbot.features.channels import (
     PublishResult,
     card_leaderboard_title,
 )
-from ufcbot.features.pickem import ready_to_open
 
 ALLEN = fighter("1", "Arnold Allen")
 PICO = fighter("2", "Aaron Pico")
@@ -255,7 +255,7 @@ async def test_one_board_blowing_up_does_not_stop_the_others(storage):
     settings = type("S", (), dict.fromkeys(
         ("schedule_channel_id", "predictions_channel_id"), 500
     ) | dict.fromkeys(
-        ("accuracy_channel_id", "pickem_channel_id", "rankings_channel_id"), None
+        ("pickem_channel_id", "rankings_channel_id"), None
     ))()
 
     result = await pub.publish(guild, settings)
@@ -263,38 +263,6 @@ async def test_one_board_blowing_up_does_not_stop_the_others(storage):
     assert calls == ["boom", "ok"], "it carried on after the failure"
     assert result.schedule is True
     assert len(result.errors) == 1 and "card would not load" in result.errors[0]
-
-
-# -- when the pick'em board is allowed to open --------------------------------------
-
-
-def test_a_priced_card_opens_and_an_unpriced_one_waits(soon):
-    a, b = bout("B1", ALLEN, PICO), bout("B2", ALLEN, PICO, match=2)
-    event = card(a, b, start=soon)
-    now = soon - timedelta(days=10)
-
-    a.odds = {ALLEN.id: -150, PICO.id: 130}
-    assert not ready_to_open(event, now), "half a card, and ten days to wait for the rest"
-
-    b.odds = {ALLEN.id: -110, PICO.id: -110}
-    assert ready_to_open(event, now)
-
-
-def test_a_card_two_days_out_opens_on_whatever_prices_exist(soon):
-    """One prelim that never gets a line must not keep the whole server from
-    playing the card."""
-    priced, unpriced = bout("B1", ALLEN, PICO), bout("B2", ALLEN, PICO, match=2)
-    priced.odds = {ALLEN.id: -150, PICO.id: 130}
-    event = card(priced, unpriced, start=soon)
-
-    assert not ready_to_open(event, soon - timedelta(days=3))
-    assert ready_to_open(event, soon - timedelta(hours=47))
-
-
-def test_a_card_with_no_prices_at_all_never_opens(soon):
-    event = card(bout("B1", ALLEN, PICO), start=soon)
-    assert not ready_to_open(event, soon - timedelta(minutes=5))
-    assert not ready_to_open(card(start=soon), soon)
 
 
 # -- the two leaderboards ----------------------------------------------------------
@@ -332,22 +300,6 @@ async def test_a_card_nobody_has_a_settled_pick_on_is_not_the_one_shown(storage,
     assert await storage.pickem_last_scored_card(1) is None
 
 
-def test_the_board_goes_up_as_soon_as_the_card_is_priced(soon):
-    """Whenever that is. A card priced the day the last one ended opens then;
-    nothing is gained by making people wait for it."""
-    priced = bout("B1", ALLEN, PICO)
-    priced.odds = {ALLEN.id: -150, PICO.id: 130}
-    event = card(priced, start=soon)
-
-    assert ready_to_open(event, soon - timedelta(days=30))
-    assert ready_to_open(event, soon - timedelta(hours=1))
-
-
-def test_the_board_stays_shut_on_a_card_with_no_prices(soon):
-    """There is nothing to stake points against yet."""
-    event = card(bout("B1", ALLEN, PICO), start=soon)
-
-    assert not ready_to_open(event, soon - timedelta(hours=1))
 
 
 def test_the_card_leaderboard_title_follows_the_card_being_fought(soon):
@@ -362,15 +314,15 @@ def test_the_card_leaderboard_title_follows_the_card_being_fought(soon):
 
 
 async def test_neither_leaderboard_is_ever_deleted(storage):
-    """They are the two messages with a permanent place in the channel. Only
-    the card's board comes and goes beneath them."""
+    """All three pick'em messages have a permanent place in the channel now, so
+    a delete here would mean something had gone wrong with the keying."""
     pub, guild, channel, result = publisher(storage), FakeGuild(), FakeChannel(), PublishResult()
 
     for kind in (KIND_PICKEM_LEADERBOARD, KIND_PICKEM_CARD_LEADERBOARD):
         await pub._upsert(guild, channel, kind, BOARD_KEY, an_embed("standings"), result)
     leaderboards = list(channel.sent)
 
-    # A card opens, then ends and is replaced by the next one.
+    # A board left over from the version that keyed by card is swept once.
     await pub._upsert(guild, channel, KIND_PICKEM, "OLD", an_embed("old card"), result)
     await pub._remove_post(guild, channel, KIND_PICKEM, "OLD", result)
     await pub._upsert(guild, channel, KIND_PICKEM, "NEW", an_embed("new card"), result)
@@ -394,3 +346,24 @@ async def test_a_leaderboard_is_edited_where_a_new_card_gets_a_new_message(stora
     await pub._upsert(guild, channel, KIND_PICKEM, "NEW", an_embed("new"), result)
 
     assert len(channel.sent) == 3, "a different card is never an edit of the last one"
+
+
+async def test_the_board_is_edited_as_the_card_turns_over_not_reposted(storage):
+    """All three pick'em messages keep their place now. A card changing is an
+    edit, so nobody has to scroll to find where the board went."""
+    pub, guild, channel, result = publisher(storage), FakeGuild(), FakeChannel(), PublishResult()
+
+    await pub._upsert(guild, channel, KIND_PICKEM, BOARD_KEY, an_embed("UFC 332"), result, extra="332")
+    await pub._upsert(guild, channel, KIND_PICKEM, BOARD_KEY, an_embed("UFC 333"), result, extra="333")
+
+    assert len(channel.sent) == 1 and len(channel.edited) == 1
+    assert channel.deleted == []
+
+
+def test_a_card_with_no_prices_still_gets_a_board(soon):
+    """The board says which fights have no line yet and will not take a pick on
+    them. An empty channel says nothing at all."""
+    event = card(bout("B1", ALLEN, PICO), start=soon)
+    embed = pickem_board_embed(event, {}, 0, now=soon - timedelta(days=3))
+
+    assert "Odds not posted yet" in embed.fields[0].value
