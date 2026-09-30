@@ -269,14 +269,20 @@ It is taken down again the moment the first fight starts. By then it is no longe
 reminder, it is a message telling people to do something they can no longer do, sitting
 above the board that matters.
 
-Each leaderboard ranks the same players twice, **by points** and **by fights called
-right**. They are not the same table: backing every favourite wins often and loses points,
-and backing underdogs does the reverse, so a single ranking hides whichever half of the
-game a player is good at.
+Each leaderboard ranks the same players three ways: **by points**, **by score** and **by
+win rate**. They are not the same table. Backing every favourite wins often and loses
+points and backing underdogs does the reverse, so points and score disagree; score and win
+rate disagree because calling nine of twelve is a better share than calling twelve of
+twenty-three. A single ranking hides whichever part of the game a player is good at.
 
-Both leaderboards also carry two extra lines: what the model scored on the same fights,
-and what backing every favourite would have scored. Neither is ranked among
-the players. They pick every fight where a member picks the ones they like, and neither is
+The win rate table makes a player play before it ranks them: qualifying takes half as many
+settled picks as the busiest player on the board, so one settled pick at 100% sits below
+the line rather than on top of it. Half of the busiest rather than a fixed number, because
+the same rule then means something on a card board and on the all-time one.
+
+Both leaderboards also carry two extra lines at the foot, under no heading: what the model
+scored on the same fights, and what backing every favourite would have scored. Neither is
+ranked among the players. They pick every fight where a member picks the ones they like, and neither is
 playing for anything, so ranking them would be scoring two different games together. They
 are there to answer the only question a leaderboard cannot: not who is top, but whether
 anyone is actually beating the bot. Only fights that were graded, ended with a winner and
@@ -593,6 +599,7 @@ ufcbot/
   instance.py           Prevents two copies running at once
   models.py             Event, Bout and Fighter
   records.py            The shapes stored and passed around: settings, picks, results
+  schema.py             Every table, index and added column
   storage.py            SQLite database
   util.py               Small helpers
   cogs/
@@ -605,7 +612,7 @@ ufcbot/
   features/
     sync.py             Discord scheduled events
     tracking.py         Records picks before a card and grades them after
-    channels.py         Picks, schedule and scorecard boards
+    channels.py         Every auto-updating board, and what it takes to move one
     live.py             Live fight coverage
     cardwatch.py        Spots and announces changes to upcoming cards
     ratings.py          Spots and announces moves on the ratings boards
@@ -643,7 +650,9 @@ scikit-learn, and only `worker.py` imports them. See
 
 `records.py` holds the dataclasses and `storage.py` the database that reads and
 writes them, so the embeds and the buttons can name a shape without importing a
-SQLite driver and the schema behind it.
+SQLite driver and the schema behind it. `schema.py` is the declaration on its own
+-- what is stored, and the columns added since the first release -- because that
+is read to add a column, not to follow a query.
 
 ## Tests
 
@@ -652,7 +661,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-267 tests, a few seconds, no network and no Discord: they run against a real SQLite
+271 tests, a few seconds, no network and no Discord. One file per module it covers: they run against a real SQLite
 database in a temporary directory and fight cards built by hand. Most of them are about
 what happens when a card changes underneath the bot, because that is where the awkward
 cases live -- a fighter replaced, a fight cancelled, a card that only half-loaded -- and
@@ -665,15 +674,17 @@ picks over one bad response.
 | `test_pickem.py` | Scoring, and voiding picks on fights that come off the card |
 | `test_cardwatch.py` | Telling a real card change from a card that did not load |
 | `test_stats.py` | Divisions, ratings, rankings, the compiled scorer's arithmetic, name matching |
-| `test_live_and_storage.py` | Which fights live coverage polls; database upgrades and pruning |
+| `test_live.py` | Which fights live coverage polls while a card is on |
 | `test_embeds.py` | Every board builds, stays inside Discord's limits and says the right thing |
 | `test_channels.py` | What the publisher edits, re-sends and deletes; the leaderboards' lifecycle |
 | `test_ratings.py` | How a ratings board is read as having moved |
 | `test_espn.py` | Reading ESPN's feed, and the shapes where a field is missing |
-| `test_storage.py` | The bookkeeping the rest of the bot trusts without checking |
+| `test_storage.py` | The bookkeeping the rest of the bot trusts without checking; upgrades and pruning |
 | `test_polymarket.py` | Reading a price, and the many markets that are not one |
 | `test_cogs.py` | That the cogs only reach for helpers that exist |
-| `test_outage.py` | Telling an ESPN outage from a bad afternoon |
+| `test_http.py` | What the response cache keeps, and telling an outage from a bad afternoon |
+| `test_images.py` | The headshot cache, the only thing the bot holds in megabytes |
+| `test_util.py` | The small shared helpers |
 
 The model is not retrained here -- that takes a minute and needs the dataset. Training
 checks itself instead: it scores real fights through both the fitted model and the

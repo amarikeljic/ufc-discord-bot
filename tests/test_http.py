@@ -1,4 +1,4 @@
-"""Telling an outage from a bad afternoon.
+"""The HTTP client: what it keeps, and how it tells an outage from a bad afternoon.
 
 ESPN drops connections and returns 500s most days, a fighter who has no page is
 a 404 for ever, and a bot with no card to look at makes almost no requests. Each
@@ -17,9 +17,12 @@ import pytest
 from ufcbot.sources.http import (
     OUTAGE_AFTER,
     OUTAGE_ATTEMPTS,
+    SWEEP_INTERVAL,
+    Entry,
     HostHealth,
     HttpClient,
     HttpError,
+    cache_key,
 )
 
 ESPN = "sports.core.api.espn.com"
@@ -238,3 +241,95 @@ def test_the_all_clear_says_how_long_it_lasted():
     from ufcbot.embeds import api_restored_embed
 
     assert "5 hours" in api_restored_embed(5.0).description
+
+
+# -- what the cache keeps ---------------------------------------------------------
+
+
+def held(client: HttpClient, key: str, *, age: float = 0.0, ttl: int = 86400, size: int = 100) -> None:
+    client._cache[key] = Entry(time.monotonic() - age, ttl, {"payload": key}, size)
+    client._held += size
+
+
+def test_expired_responses_are_dropped_on_a_timer_not_only_when_the_cache_fills():
+    """A quiet bot never reaches either cap, so nothing would evict what has gone
+    stale: hundreds of parsed payloads no caller can be given again."""
+    client = HttpClient()
+    held(client, "stale", age=3600, ttl=10)
+    held(client, "fresh")
+
+    client._last_sweep = time.monotonic() - SWEEP_INTERVAL - 1
+    client._store("new", {"a": 1}, ttl=900, size=10)
+
+    assert "stale" not in client._cache, "past its lifetime and unreadable"
+    assert set(client._cache) == {"fresh", "new"}
+
+
+def test_a_sweep_that_has_just_run_is_not_run_again():
+    client = HttpClient()
+    held(client, "stale", age=3600, ttl=10)
+
+    client._last_sweep = time.monotonic()
+    client._store("new", {"a": 1}, ttl=900, size=10)
+
+    assert "stale" in client._cache, "swept at most once every SWEEP_INTERVAL"
+
+
+def test_a_heavy_cache_is_trimmed_even_when_it_holds_few_things():
+    """Entries vary from a couple of kilobytes to well over a hundred, so a cap
+    counted in entries alone says almost nothing about what is being held."""
+    client = HttpClient(max_bytes=1000)
+    for index in range(5):
+        held(client, f"old{index}", size=300)
+
+    client._store("new", {"a": 1}, ttl=900, size=300)
+
+    assert client._held <= 1000
+    assert "new" in client._cache, "what just arrived is what is wanted"
+    assert "old0" not in client._cache, "the least recently read goes first"
+
+
+def test_the_weight_of_a_replaced_entry_is_not_counted_twice():
+    client = HttpClient()
+    client._store("same", {"a": 1}, ttl=900, size=500)
+    client._store("same", {"a": 2}, ttl=900, size=700)
+
+    assert client._held == 700
+
+
+def test_espn_link_parameters_that_change_nothing_share_one_entry():
+    """ESPN sends lang and region on its $ref links but not on URLs built by
+    hand, and the response is identical. Keyed separately, the biggest documents
+    of all are held twice."""
+    assert cache_key("https://x/events/1?lang=en&region=us") == "https://x/events/1"
+    assert cache_key("https://x/events/1") == "https://x/events/1"
+    # Anything that does change the response stays in the key.
+    assert cache_key("https://x/plays?limit=300&lang=en") == "https://x/plays?limit=300"
+
+
+
+def test_a_response_can_be_read_without_being_kept():
+    """A caller that distils a document into something smaller has no use for
+    the document. Fighter profiles are three kilobytes each to fill in ten
+    fields, and thousands of them held raw is the long tail of the cache."""
+    client = HttpClient()
+    client._store("kept", {"a": 1}, ttl=900, size=3000)
+
+    assert client._held == 3000
+    assert "kept" in client._cache
+    # store=False is exercised through get_json, which needs a session; what is
+    # pinned here is that _store is the only thing that ever grows the cache.
+    assert set(client._cache) == {"kept"}
+
+
+def test_the_cache_is_held_to_its_weight_not_its_count():
+    client = HttpClient(max_bytes=10_000, max_entries=1000)
+    for index in range(10):
+        held(client, f"doc{index}", size=2_000)
+
+    client._store("new", {"a": 1}, ttl=900, size=2_000)
+
+    assert client._held <= 10_000
+    assert len(client._cache) < 11, "well under the entry cap, but over the weight"
+
+

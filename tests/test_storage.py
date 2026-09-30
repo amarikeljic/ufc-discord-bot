@@ -8,9 +8,11 @@ two, and that rows meant to be swept are the only ones swept.
 
 from __future__ import annotations
 
+import sqlite3
 from datetime import UTC, date, datetime, timedelta
 
 from ufcbot.records import CardBout, PredictionRecord, RankedState, ShortNotice
+from ufcbot.storage import Storage
 
 NOW = datetime(2026, 9, 21, 20, 0, tzinfo=UTC)
 
@@ -262,3 +264,62 @@ async def test_replacements_come_back_shortest_notice_first(storage):
 
 async def test_a_card_with_no_replacements_has_none(storage):
     assert await storage.short_notice_for("EV1") == []
+
+
+# -- housekeeping ----------------------------------------------------------------
+
+
+async def test_old_live_coverage_rows_are_pruned(storage):
+    await storage.mark_live_posted("OLD", "result")
+    await storage.save_live_snapshot("OLD", 1, {"1": {"kd": 1.0}})
+
+    removed = await storage.prune_live_data(datetime.now(UTC) + timedelta(days=1))
+
+    assert removed == 1
+    assert await storage.live_posted("OLD") == set()
+    assert await storage.live_snapshot("OLD", 1) is None
+
+
+async def test_recent_live_coverage_rows_are_kept(storage):
+    await storage.mark_live_posted("NEW", "result")
+    await storage.prune_live_data(datetime.now(UTC) - timedelta(days=1))
+    assert await storage.live_posted("NEW") == {"result"}
+
+
+async def test_an_older_database_is_upgraded_in_place(tmp_path):
+    """Columns, indexes and tables are added to a database that has rows in it."""
+    path = tmp_path / "old.sqlite3"
+    connection = sqlite3.connect(path)
+    connection.executescript(
+        """
+        CREATE TABLE predictions (
+            espn_event_id TEXT NOT NULL, bout_id TEXT NOT NULL, event_name TEXT NOT NULL,
+            event_start TEXT NOT NULL, athlete_a TEXT NOT NULL, name_a TEXT NOT NULL,
+            athlete_b TEXT NOT NULL, name_b TEXT NOT NULL, prob_a REAL NOT NULL,
+            weight_class TEXT, position INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL,
+            winner_athlete TEXT, correct INTEGER, graded_at TEXT,
+            PRIMARY KEY (espn_event_id, bout_id));
+        INSERT INTO predictions VALUES
+            ('E','B','UFC 1','2026-01-01T00:00+00:00','1','A','2','B',0.6,'LW',0,
+             '2026-01-01T00:00+00:00',NULL,NULL,NULL);
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    store = Storage(str(path))
+    await store.connect()
+    try:
+        records = await store.predictions_for_event("E")
+        assert len(records) == 1 and records[0].name_a == "A", "the row survived"
+        assert records[0].odds_a is None, "and reads through the columns added since"
+
+        async with store.db.execute("SELECT name FROM sqlite_master WHERE type='table'") as cursor:
+            tables = {row[0] for row in await cursor.fetchall()}
+        assert "card_bouts" in tables
+
+        settings = await store.get_settings(1)
+        assert settings.rankings_include_women is True, "the default for a server that never chose"
+    finally:
+        await store.close()
+
