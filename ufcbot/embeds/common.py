@@ -75,6 +75,17 @@ def inches(value: float | None) -> str:
     return f"{feet}'{rem}\"" if feet else f"{rem}\""
 
 
+def reach(value: float | None) -> str:
+    """84 -> 84\".
+
+    Reach is quoted in plain inches wherever the sport reports it, and a fighter
+    with an 84-inch reach is said to have an 84-inch reach, never a seven-foot
+    one. Rendering it in feet made the one number on the tape that decides a
+    matchup the one nobody could compare at a glance.
+    """
+    return DASH if is_nan(value) else f'{int(value)}"'
+
+
 def fmt_odds(line: int | None) -> str:
     return DASH if line is None else format_odds(line)
 

@@ -30,6 +30,9 @@ from .common import (
     streak,
     surname,
 )
+from .common import (
+    reach as reach_of,
+)
 
 if TYPE_CHECKING:
     from ..records import PredictionRecord
@@ -94,7 +97,7 @@ def _tape_table(a: Fighter, b: Fighter, careers: dict[str, FighterCareer], odds:
     add("Age", *both(lambda f, i, _l: age(i.dob) if i and i.dob else (str(f.age) if f.age else None)))
     add("Height", *both(lambda f, i, _l: inches(i.height_in) if i else f.height))
     add("Weight", *both(lambda _f, i, _l: f"{i.weight_lb:.0f} lb" if i and not is_nan(i.weight_lb) else None))
-    add("Reach", *both(lambda f, i, _l: inches(i.reach_in) if i else f.reach))
+    add("Reach", *both(lambda f, i, _l: reach_of(i.reach_in) if i else f.reach))
     add(
         "Stance",
         *both(

@@ -20,6 +20,9 @@ from .common import (
     stamp,
     streak,
 )
+from .common import (
+    reach as reach_of,
+)
 
 if TYPE_CHECKING:
     from ..stats.rankings import Ranked
@@ -88,13 +91,13 @@ def fighter_embed(
 
     tape = []
     height = inches(info.height_in) if info else (profile.height if profile else None)
-    reach = inches(info.reach_in) if info else (profile.reach if profile else None)
+    span = reach_of(info.reach_in) if info else (profile.reach if profile else None)
     stance = (info.stance if info else None) or (profile.stance if profile else None)
     years = age(info.dob) if info and info.dob else (str(profile.age) if profile and profile.age else None)
     if height and height != DASH:
         tape.append(f"Height {height}")
-    if reach and reach != DASH:
-        tape.append(f"Reach {reach}")
+    if span and span != DASH:
+        tape.append(f"Reach {span}")
     if stance:
         tape.append(f"Stance {stance}")
     if years and years != DASH:

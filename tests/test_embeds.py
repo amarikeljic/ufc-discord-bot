@@ -225,56 +225,6 @@ def test_every_name_on_a_ratings_board_starts_in_the_same_column():
     assert badges == ["`  1`", "`= 3`", "`= 3`", "` 15`"]
 
 
-def test_the_model_status_card_reads_without_repeating_itself():
-    from datetime import date as _date
-
-    from ufcbot.embeds import model_status_embed
-    from ufcbot.stats.prediction import Evaluation
-    from ufcbot.stats.scorer import Blend, Boost, CompiledModel, Linear
-
-    empty = Blend(
-        0.35,
-        Boost([0.0], [], [0, 1]),
-        Linear([0.0], [0.0], [1.0], [[0.0]], [0.0], [0, 1]),
-        2,
-    )
-    model = CompiledModel(
-        winner=empty, feature_names=[], trained_at=datetime(2026, 9, 18, 4, 33),
-        training_fights=8754, dataset_newest=_date(2026, 9, 12),
-        evaluation=Evaluation(
-            holdout_from=_date(2025, 3, 1), fights=796, accuracy=0.659, log_loss=0.632,
-            baseline_accuracy=0.590, method_accuracy=0.519, method_baseline=0.399,
-            exact_accuracy=0.349, technique_accuracy=0.741, technique_baseline=0.736,
-        ),
-        importances=[("d_elo", 0.01), ("d_td_def", 0.005)],
-    )
-
-    embed = model_status_embed(
-        fight_count=8911, newest_event=_date(2026, 9, 12), behind=_date(2026, 9, 15),
-        model=model, last_check=datetime(2026, 9, 19, 4, 32), last_error=None,
-    )
-    fields = {f.name: f.value for f in embed.fields}
-
-    assert "8,911" in embed.description and "Behind" in embed.description
-    assert "65.9%" in fields["Picks the winner"] and "59.0%" in fields["Picks the winner"]
-    assert "accuracy accuracy" not in embed.description, "the old wording said it twice"
-    # Column names are for the model; a reader gets the English.
-    decides = fields["What decides a fight"].replace(" ", " ")
-    assert "takedown defence" in decides and "d_td_def" not in decides
-    assert "8,754" in embed.footer.text
-    assert within_limits(embed)
-
-
-def test_the_status_card_says_so_when_there_is_no_model():
-    from ufcbot.embeds import model_status_embed
-
-    embed = model_status_embed(
-        fight_count=0, newest_event=None, behind=None, model=None, last_check=None, last_error=None
-    )
-    assert "No fight data yet" in embed.description
-    assert any("Not trained yet" in f.value for f in embed.fields)
-
-
 # -- everyone's picks for a card -------------------------------------------------
 
 

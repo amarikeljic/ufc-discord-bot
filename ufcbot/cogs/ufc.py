@@ -84,7 +84,7 @@ class UFCCog(commands.Cog):
     )
     channels = app_commands.Group(
         name="channels",
-        description="Auto-updating boards: picks, schedule and model accuracy",
+        description="Auto-updating boards: picks, schedule, live coverage, pick'em and ratings",
         parent=ufc,
         guild_only=True,
         default_permissions=discord.Permissions(manage_guild=True),
@@ -594,7 +594,8 @@ class UFCCog(commands.Cog):
             value=f"<#{settings.announce_channel_id}>" if settings.announce_channel_id else "Off",
             inline=True,
         )
-        embed.add_field(name="Runs", value="Nightly at midnight Central", inline=True)
+        # A step of the hourly pass, on the one pass a day that lands at midnight.
+        embed.add_field(name="Runs", value="On the midnight Central pass", inline=True)
         await interaction.response.send_message(embed=stamp(embed), ephemeral=True)
 
     @sync.command(name="settings", description="Change how cards are mirrored into this server")

@@ -566,18 +566,31 @@ class ChannelPublisher:
         counts = await self.storage.pickem_counts(guild.id, event.id)
         players = await self.storage.pickem_player_count(guild.id, event.id)
         accepting = any(bout_status(event, bout, now) == OPEN for bout in event.fights)
+        link = await self._picks_link(guild, event)
         result.pickem_boards += 1
         await self._upsert(
             guild,
             channel,
             KIND_PICKEM,
             BOARD_KEY,
-            pickem_board_embed(event, counts, players, now=now),
+            pickem_board_embed(event, counts, players, now=now, picks_link=link),
             result,
             force=force,
             view=board_view(event.id, accepting=accepting),
-            extra=f"{event.id}:accepting={accepting}",
+            extra=f"{event.id}:accepting={accepting}:{link}",
         )
+
+    async def _picks_link(self, guild: discord.Guild, event: Event) -> str | None:
+        """A jump link to this card's message on the picks board, if there is one.
+
+        The picks board is published earlier in the same pass, so by the time
+        pick'em is drawn the message it points at already exists. Where the picks
+        channel is not set up there is nothing to point at and this is None.
+        """
+        post = await self.storage.get_post(guild.id, KIND_PICKS, event.id)
+        if post is None:
+            return None
+        return f"https://discord.com/channels/{guild.id}/{post.channel_id}/{post.message_id}"
 
     async def _remove_post(
         self, guild: discord.Guild, channel: discord.TextChannel, kind: str, key: str, result: PublishResult

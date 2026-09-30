@@ -367,3 +367,31 @@ def test_a_card_with_no_prices_still_gets_a_board(soon):
     embed = pickem_board_embed(event, {}, 0, now=soon - timedelta(days=3))
 
     assert "Odds not posted yet" in embed.fields[0].value
+
+
+async def test_the_pickem_title_jumps_to_this_card_on_the_picks_board(storage, soon):
+    """Tapping the title should land on what the model said about the same
+    fights, not on ESPN. The picks board is published earlier in the same pass,
+    so the message it points at is already there."""
+    pub, guild, event = publisher(storage), FakeGuild(), card(bout("B1", ALLEN, PICO), start=soon)
+    await storage.save_post(guild.id, KIND_PICKS, event.id, channel_id=555, message_id=777)
+
+    link = await pub._picks_link(guild, event)
+
+    assert link == f"https://discord.com/channels/{guild.id}/555/777"
+
+
+async def test_the_pickem_title_falls_back_to_espn_with_no_picks_channel(storage, soon):
+    """A server that runs pick'em without the picks board has nothing to jump
+    to, and a title that links nowhere is worse than one that links out."""
+    pub, guild = publisher(storage), FakeGuild()
+    assert await pub._picks_link(guild, card(bout("B1", ALLEN, PICO), start=soon)) is None
+
+
+def test_the_board_uses_the_jump_link_when_it_has_one(soon):
+    event = card(bout("B1", ALLEN, PICO), start=soon, event_id="E9")
+    event.espn_url = "https://espn.com/mma/fightcenter"
+    jump = "https://discord.com/channels/1/2/3"
+
+    assert pickem_board_embed(event, {}, 0, now=soon, picks_link=jump).url == jump
+    assert pickem_board_embed(event, {}, 0, now=soon).url == event.espn_url

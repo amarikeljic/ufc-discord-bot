@@ -255,3 +255,32 @@ def test_a_tie_on_record_is_broken_by_the_fewest_losses_then_points():
     more_losses = PickemStanding(user_id=2, points=900, wins=8, losses=6, cards=1)
 
     assert by_record([more_losses, fewer_losses])[0] is fewer_losses
+
+
+def test_the_win_rate_board_makes_a_player_play_before_it_ranks_them():
+    """One settled pick at 100% is not the best record in the server. Qualifying
+    takes half as many settled picks as the busiest player on the board."""
+    from ufcbot.embeds.pickem import by_win_rate
+    from ufcbot.records import PickemStanding
+
+    busy = PickemStanding(user_id=1, points=400, wins=14, losses=9, cards=3)   # 61%
+    steady = PickemStanding(user_id=2, points=90, wins=8, losses=8, cards=2)   # 50%
+    lucky = PickemStanding(user_id=3, points=300, wins=2, losses=0, cards=1)   # 100%
+
+    order = by_win_rate([lucky, steady, busy])
+
+    assert order[0] is busy, "the best rate among players who have played"
+    assert order[-1] is lucky, "below the line, however good the percentage looks"
+
+
+def test_the_win_rate_board_ranks_a_better_percentage_above_a_bigger_record():
+    """This is the table that is not 'by score': fewer fights called right can
+    still be the better share of them."""
+    from ufcbot.embeds.pickem import by_record, by_win_rate
+    from ufcbot.records import PickemStanding
+
+    accurate = PickemStanding(user_id=1, points=50, wins=9, losses=3, cards=2)    # 75%
+    prolific = PickemStanding(user_id=2, points=50, wins=12, losses=11, cards=2)  # 52%
+
+    assert by_win_rate([prolific, accurate])[0] is accurate
+    assert by_record([accurate, prolific])[0] is prolific, "the two tables disagree, which is the point"

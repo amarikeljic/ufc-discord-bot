@@ -36,7 +36,6 @@ from .pickem import (
     pickem_stats_embed,
 )
 from .picks import (
-    model_status_embed,
     picks_board_embed,
     prediction_embed,
     predictions_embed,
@@ -56,7 +55,6 @@ __all__ = [
     "live_open_embed",
     "live_result_embed",
     "live_round_embed",
-    "model_status_embed",
     "pickem_board_embed",
     "pickem_card_embed",
     "pickem_leaderboard_embed",

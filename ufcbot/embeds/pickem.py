@@ -21,6 +21,7 @@ from .common import (
     EMBED_BUDGET,
     FIELD_LIMIT,
     MEDALS,
+    ZERO_WIDTH,
     add_chunked_fields,
     fmt_odds,
     join,
@@ -51,11 +52,13 @@ def _standing_line(rank: int, standing: PickemStanding, *, lead: str) -> str:
     """One row. ``lead`` is whichever of the two numbers this table is ordered by,
     so the column being ranked on reads first and in bold."""
     badge = MEDALS.get(rank, f"`{rank:>2}`")
-    record = f"{standing.wins}-{standing.losses} ({standing.win_rate:.0%})"
+    record = f"{standing.wins}-{standing.losses}"
     if lead == "points":
-        facts = [f"**{standing.points:,}** pts", keep(record)]
+        facts = [f"**{standing.points:,}** pts", keep(f"{record} ({standing.win_rate:.0%})")]
+    elif lead == "rate":
+        facts = [f"**{standing.win_rate:.0%}**", keep(record), f"{standing.points:,} pts"]
     else:
-        facts = [f"**{keep(record)}**", f"{standing.points:,} pts"]
+        facts = [f"**{keep(record)}**", f"{standing.win_rate:.0%}", f"{standing.points:,} pts"]
     return f"{badge} <@{standing.user_id}> · " + " · ".join(facts)
 
 
@@ -78,6 +81,29 @@ def by_record(standings: list[PickemStanding]) -> list[PickemStanding]:
     hides whichever half of the game a player is good at.
     """
     return sorted(standings, key=lambda s: (-s.wins, s.losses, -s.points, s.user_id))
+
+
+def by_win_rate(standings: list[PickemStanding]) -> list[PickemStanding]:
+    """Ordered by the share called right, among players who have played enough.
+
+    A percentage rewards picking little and picking safe, so one settled pick at
+    100% would sit above a season of work. Qualifying takes half as many settled
+    picks as the busiest player on the board, which needs no number chosen for a
+    particular server and means the same thing on a card board as on the all-time
+    one. Everyone else keeps their place below the line, in the same order.
+    """
+    busiest = max((s.wins + s.losses for s in standings), default=0)
+    floor = busiest / 2
+    return sorted(
+        standings,
+        key=lambda s: (
+            (s.wins + s.losses) < floor,
+            -s.win_rate,
+            -(s.wins + s.losses),
+            -s.points,
+            s.user_id,
+        ),
+    )
 
 
 # -- the card board in the pick'em channel -------------------------------------------
@@ -110,8 +136,26 @@ def _board_bout_value(event: Event, bout: Bout, counts: dict[str, int], now: dat
     return truncate("\n".join(lines), FIELD_LIMIT)
 
 
-def pickem_board_embed(event: Event, counts: dict[str, dict[str, int]], players: int, *, now: datetime) -> discord.Embed:
-    embed = discord.Embed(title=truncate(f"🎯 Pick'em: {event.name}", 256), url=event.espn_url, colour=PICKEM_TEAL)
+def pickem_board_embed(
+    event: Event,
+    counts: dict[str, dict[str, int]],
+    players: int,
+    *,
+    now: datetime,
+    picks_link: str | None = None,
+) -> discord.Embed:
+    """The card's board: every fight, its price, and who the room is behind.
+
+    The title links to this card's picks board when there is one, so tapping it
+    jumps to what the model said about the same fights rather than leaving
+    Discord for a page the reader did not ask for. It falls back to ESPN where
+    the picks channel is not set up.
+    """
+    embed = discord.Embed(
+        title=truncate(f"🎯 Pick'em: {event.name}", 256),
+        url=picks_link or event.espn_url,
+        colour=PICKEM_TEAL,
+    )
     lines = [f"🗓️ {discord.utils.format_dt(event.start, 'F')}", *_lock_lines(event, now)]
     lines.append(f"👥 {players} playing" if players else "👥 Be the first to pick")
     lines += ["", "Right pick: points from the odds", "Underdogs pay more · wrong pick: -100"]
@@ -201,11 +245,18 @@ def pickem_leaderboard_embed(
     )
     add_chunked_fields(
         embed,
-        "🎯 By fights called right",
+        "🎯 By score",
         _ranked_lines(by_record(standings), lead="record", viewer_id=viewer_id, limit=limit),
     )
+    add_chunked_fields(
+        embed,
+        "📈 By win rate",
+        _ranked_lines(by_win_rate(standings), lead="rate", viewer_id=viewer_id, limit=limit),
+    )
     if benchmarks:
-        add_chunked_fields(embed, "Not playing", _benchmark_lines(benchmarks))
+        # No heading: they are not in the running, and saying so twice -- once
+        # in the line itself and once above it -- reads as a third table.
+        add_chunked_fields(embed, ZERO_WIDTH, _benchmark_lines(benchmarks))
     return stamp(embed)
 
 
