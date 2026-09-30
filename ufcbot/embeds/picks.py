@@ -315,10 +315,14 @@ def recap_embed(event: GradedEvent, card: Scorecard) -> discord.Embed:
             fight_lines.append(f"➖ {join([record.matchup, label])}")
             continue
         mark = "✅" if record.correct else "❌"
+        # The winner is not always one of the two named here: a fighter who came
+        # in as a replacement wins a fight this record was never about. Naming
+        # nobody reads better than a line that begins with a space.
         winner = surname(record.winner_name or "")
+        how = outcome_label(record.result_method, record.result_technique)
         facts = [
             f"{surname(record.favourite)} {record.confidence:.0%}",
-            f"{winner} by {outcome_label(record.result_method, record.result_technique)}",
+            f"{winner} by {how}" if winner else how,
         ]
         if record.method_correct:
             facts.append("method ✅")

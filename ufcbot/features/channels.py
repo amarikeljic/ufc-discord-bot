@@ -42,7 +42,7 @@ from .pickem import (
     benchmarks,
     bout_status,
 )
-from .tracking import PredictionTracker, build_scorecard
+from .tracking import GradedEvent, PredictionTracker, build_scorecard
 
 log = logging.getLogger(__name__)
 
@@ -285,14 +285,21 @@ class ChannelPublisher:
             await self._upsert(guild, channel, KIND_PICKS, event_id, embed, result, force=force)
             result.picks_boards += 1
 
-        recapped = await self._publish_recaps(guild, channel, settings, result)
-        await self._publish_scorecard(guild, channel, settings, result, force or created or recapped)
+        # Read once and handed down: both boards below are about the same set of
+        # graded cards, and working it out means reading every graded pick the
+        # bot has ever made.
+        graded = await self.tracker.graded_events(settings.tracking_since)
+        recapped = await self._publish_recaps(guild, channel, settings, graded, result)
+        await self._publish_scorecard(
+            guild, channel, settings, graded, result, force or created or recapped
+        )
 
     async def _publish_recaps(
         self,
         guild: discord.Guild,
         channel: discord.TextChannel,
         settings: GuildSettings,
+        events: list[GradedEvent],
         result: PublishResult,
     ) -> bool:
         """How the model did on each card, once that card is fully graded.
@@ -301,14 +308,16 @@ class ChannelPublisher:
         whether anything went up, so the scorecard can follow it down.
         """
         since = settings.tracking_since
-        events = await self.tracker.graded_events(since)  # oldest first
+        already = await self.storage.recaps_posted(guild.id)
         posted = False
-        for event in events:
-            if await self.storage.recap_posted(guild.id, event.espn_event_id):
+        # The scorecard shown with a recap counts only the cards up to that one,
+        # so it is built by walking forward rather than re-filtering per card.
+        running: list[GradedEvent] = []
+        for event in events:  # oldest first
+            running.append(event)
+            if event.espn_event_id in already:
                 continue
-            # The scorecard shown with a recap only counts cards up to that one.
-            partial = build_scorecard(since, [e for e in events if e.start <= event.start])
-            await channel.send(embed=recap_embed(event, partial))
+            await channel.send(embed=recap_embed(event, build_scorecard(since, running)))
             await self.storage.mark_recap_posted(guild.id, event.espn_event_id)
             result.recaps += 1
             result.updated += 1
@@ -321,6 +330,7 @@ class ChannelPublisher:
         guild: discord.Guild,
         channel: discord.TextChannel,
         settings: GuildSettings,
+        graded: list[GradedEvent],
         result: PublishResult,
         moved: bool,
     ) -> None:
@@ -331,14 +341,13 @@ class ChannelPublisher:
         while reading the picks. ``moved`` re-sends it so a newly posted card's
         board never leaves it stranded halfway up the channel.
         """
-        since = settings.tracking_since
         await self._upsert(
             guild,
             channel,
             KIND_SCORECARD,
             BOARD_KEY,
             scorecard_embed(
-                build_scorecard(since, await self.tracker.graded_events(since)),
+                build_scorecard(settings.tracking_since, graded),
                 evaluation=self.evaluation_provider(),
             ),
             result,

@@ -267,7 +267,7 @@ def pickem_stats_embed(user: discord.abc.User, summary: PickemSummary, cards: li
     settled = summary.wins + summary.losses
     lines = []
     if summary.rank:
-        lines.append(f"Rank: **#{summary.rank}** of {summary.players}")
+        lines.append(f"Rank: **#{summary.rank}** of {summary.players} by points")
     lines.append(f"Points: **{summary.points:,}**")
     lines.append(f"Record: **{summary.wins}-{summary.losses}**" + (f" ({summary.win_rate:.0%})" if settled else ""))
     if summary.underdog_wins:

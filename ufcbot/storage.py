@@ -661,12 +661,18 @@ class Storage:
             rows = await cursor.fetchall()
         return {r["key"]: Post(r["channel_id"], r["message_id"], r["signature"]) for r in rows}
 
-    async def recap_posted(self, guild_id: int, espn_event_id: str) -> bool:
+    async def recaps_posted(self, guild_id: int) -> set[str]:
+        """Which cards this guild has already had a recap for.
+
+        The whole set rather than one card at a time: the caller checks every
+        graded card on every pass, and all but the newest are always already
+        posted, so asking one by one is one query per card per hour for the life
+        of the server to be told nothing happened.
+        """
         async with self.db.execute(
-            "SELECT 1 FROM recaps_posted WHERE guild_id = ? AND espn_event_id = ?",
-            (guild_id, espn_event_id),
+            "SELECT espn_event_id FROM recaps_posted WHERE guild_id = ?", (guild_id,)
         ) as cursor:
-            return await cursor.fetchone() is not None
+            return {row["espn_event_id"] for row in await cursor.fetchall()}
 
     async def mark_recap_posted(self, guild_id: int, espn_event_id: str) -> None:
         await self.db.execute(
