@@ -48,7 +48,15 @@ UPSTREAM_GRACE = timedelta(days=2)
 BEHIND_INTERVAL = timedelta(minutes=50)
 
 # Cards whose picks are remembered before the oldest are dropped.
+SPAWN_ATTEMPTS = 3
+"""Failed spawns in a row before the refresh stops trying for a worker process."""
+
 PICK_CACHE_CARDS = 64
+# How many looked-up names to remember. Every name a command is given lands here,
+# including ones that match nothing, so it is the one cache a person can grow by
+# typing. Comfortably more than a card's worth of fighters and everyone likely to
+# be asked about in a sitting.
+NAME_CACHE = 2048
 
 
 def in_dataset(event_name: str) -> bool:
@@ -111,8 +119,14 @@ class StatsService:
         self.last_error: str | None = None
         self.expected_newest: date | None = None
         self._lock = asyncio.Lock()
-        self._can_spawn = True
-        """Cleared once this environment turns out not to allow worker processes."""
+        self._spawn_failures = 0
+        """Consecutive refreshes that could not start a worker process.
+
+        Not a latch: one failed spawn can be a machine briefly out of handles,
+        and giving up on the strength of it would train in the bot's own process
+        for the life of the bot, holding the ~150 MB pandas and scikit-learn
+        bring with them. An environment that genuinely cannot spawn says so
+        every time, and costs one cheap exception a day to keep asking."""
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -220,7 +234,7 @@ class StatsService:
         than repeated here at the cost of another few minutes.
         """
         call = partial(run_refresh, str(self.data_dir), str(self.model_dir), force_retrain=force_retrain)
-        if not self._can_spawn:
+        if self._spawn_failures >= SPAWN_ATTEMPTS:
             return await asyncio.to_thread(call)
 
         loop = asyncio.get_running_loop()
@@ -233,7 +247,7 @@ class StatsService:
         except Exception as exc:
             if pool is not None:
                 pool.shutdown(wait=False)
-            self._can_spawn = False
+            self._spawn_failures += 1
             log.warning(
                 "The refresh cannot run in a separate process here (%r); running it in the bot's "
                 "instead, which will use noticeably more memory.",
@@ -242,10 +256,12 @@ class StatsService:
             return await asyncio.to_thread(call)
 
         try:
-            return await running
+            result = await running
         finally:
             # Waiting for shutdown is what actually returns the worker's memory.
             await asyncio.to_thread(pool.shutdown, True)
+        self._spawn_failures = 0
+        return result
 
     def _fight_count(self) -> int:
         return self.careers.fight_count if self.careers else 0
@@ -260,6 +276,8 @@ class StatsService:
         if self.names is None:
             return None
         if name not in self._resolved:
+            if len(self._resolved) >= NAME_CACHE:
+                self._resolved.clear()
             self._resolved[name] = self.names.resolve(name)
         return self._resolved[name]
 

@@ -413,3 +413,65 @@ def test_a_first_meeting_is_zeros_rather_than_missing():
 
     assert row[-4:-1] == [0.0, 0.0, 0.0]
     assert row[-1] != row[-1], "never met, so there is no time since"
+
+
+# -- what the service holds on to ------------------------------------------------
+
+
+def a_service(tmp_path):
+    from ufcbot.stats.names import NameIndex
+    from ufcbot.stats.service import StatsService
+
+    service = StatsService(tmp_path, tmp_path)
+    service.names = NameIndex(["Arnold Allen", "Aaron Pico"])
+    return service
+
+
+def test_the_name_cache_cannot_be_grown_without_limit(tmp_path):
+    """Every name a command is given is remembered, matched or not, and the only
+    thing that emptied it was a dataset refresh. A person typing is not a reason
+    for the bot to keep growing between them."""
+    from ufcbot.stats.service import NAME_CACHE
+
+    service = a_service(tmp_path)
+    for i in range(NAME_CACHE * 2 + 5):
+        service.resolve(f"nobody {i}")
+
+    assert len(service._resolved) <= NAME_CACHE
+    assert service.resolve("Arnold Allen") is not None, "still answering after the sweep"
+
+
+async def test_one_failed_spawn_does_not_condemn_the_bot_to_training_in_process(tmp_path, monkeypatch):
+    """Training in the bot's own process leaves pandas and scikit-learn resident
+    for good -- about 150 MB that only a restart gives back -- so a machine
+    briefly out of handles must not decide it for the life of the bot."""
+    from ufcbot.stats import service as service_module
+    from ufcbot.stats.service import SPAWN_ATTEMPTS
+
+    service = a_service(tmp_path)
+    attempts, in_process = [], []
+
+    def spawning(**kwargs):
+        attempts.append(1)
+        raise OSError("no handles")
+
+    monkeypatch.setattr(service_module, "ProcessPoolExecutor", spawning)
+    monkeypatch.setattr(
+        service_module.asyncio, "to_thread",
+        lambda call, *a, **k: _done(in_process.append(1)),
+    )
+
+    for _ in range(SPAWN_ATTEMPTS):
+        await service._run_refresh(force_retrain=False)
+
+    assert len(attempts) == SPAWN_ATTEMPTS, "it kept asking for a worker"
+    assert len(in_process) == SPAWN_ATTEMPTS, "and fell back each time"
+
+    # Only once it has failed this many times in a row does it stop trying.
+    await service._run_refresh(force_retrain=False)
+    assert len(attempts) == SPAWN_ATTEMPTS, "stopped asking after the third failure"
+    assert len(in_process) == SPAWN_ATTEMPTS + 1
+
+
+async def _done(value=None):
+    return value
