@@ -1,0 +1,35 @@
+name: Deploy
+
+# The server runs the self-hosted runner, so a push to main is the deploy.
+on:
+  push:
+    branches: [main]
+
+# Two pushes in quick succession would otherwise race over the same container
+# name, and whichever `docker rm` landed second would kill the new one.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the image
+        run: docker build -t ufc-discord-bot .
+
+      - name: Stop the running container
+        run: |
+          docker stop ufc-discord-bot || true
+          docker rm ufc-discord-bot || true
+
+      - name: Start the new container
+        run: |
+          docker run -d \
+            --name ufc-discord-bot \
+            --restart=always \
+            --env-file /home/amar/ufc-discord-bot/.env \
+            -v /home/amar/ufc-discord-bot/data:/app/data \
+            ufc-discord-bot
