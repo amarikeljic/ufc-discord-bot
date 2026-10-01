@@ -17,6 +17,7 @@ Fight time only counts fights that have statistics recorded, matching the site.
 from __future__ import annotations
 
 import math
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import TYPE_CHECKING
@@ -191,6 +192,12 @@ class Ledger:
     A catchweight leaves it alone: it says where the fight was made, not where
     the fighter belongs.
     """
+    home_division: str | None = None
+    """The division they fought in most, which is not always the last one.
+
+    St-Pierre finished at middleweight after twenty-one welterweight fights and
+    Jones at heavyweight after twenty-two at light heavyweight. For a board about
+    what someone did over a career, the last fight is the wrong one to ask."""
 
     # How fights were won and lost: method -> count, and "method:technique" -> count.
     win_methods: dict[str, int] = field(default_factory=dict)
@@ -559,6 +566,10 @@ def build_history(dataset: Dataset, *, keep_snapshots: bool = True) -> History:
     }
 
     history = History()
+    # Counted here rather than on the ledgers: it is only needed to decide one
+    # field, and a counter per fighter would outlive the build inside what the
+    # bot then holds in memory.
+    division_fights: dict[str, Counter[str]] = defaultdict(Counter)
 
     for fight in dataset.fights.itertuples(index=False):
         key_a, key_b = normalise(fight.fighter_a), normalise(fight.fighter_b)
@@ -620,6 +631,11 @@ def build_history(dataset: Dataset, *, keep_snapshots: bool = True) -> History:
             result=result_b, own=own_b, opp=own_a, opponent_elo=elo_a, opponent_finish_elo=finish_a, **common
         )
 
+        division = division_name(str(fight.weight_class))
+        if division:
+            division_fights[key_a][division] += 1
+            division_fights[key_b][division] += 1
+
         met = history.meetings.setdefault(pair_key(key_a, key_b), Meeting())
         met.fights += 1
         met.last_on = on
@@ -629,5 +645,8 @@ def build_history(dataset: Dataset, *, keep_snapshots: bool = True) -> History:
                 met.first_wins += 1
             else:
                 met.second_wins += 1
+
+    for key, counts in division_fights.items():
+        history.ledgers[key].home_division = counts.most_common(1)[0][0]
 
     return history

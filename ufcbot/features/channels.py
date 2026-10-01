@@ -32,7 +32,12 @@ from ..models import Event
 from ..records import GuildSettings
 from ..sources.espn import UFCData
 from ..stats.prediction import Evaluation, Prediction
-from ..stats.rankings import POUND_FOR_POUND, divisions_with_fighters, rank_division
+from ..stats.rankings import (
+    POUND_FOR_POUND,
+    all_time,
+    divisions_with_fighters,
+    rank_division,
+)
 from ..storage import Storage
 from ..ui.pickem import board_view, my_picks_view
 from ..util import normalise
@@ -384,7 +389,13 @@ class ChannelPublisher:
                 KIND_RANKINGS,
                 key,
                 # The last board carries the explanation, so the channel says it once.
-                rankings_embed(title, entries, pound_for_pound=p4p, note=p4p),
+                rankings_embed(
+                    title,
+                    entries,
+                    pound_for_pound=p4p,
+                    note=p4p,
+                    all_time=all_time(ledgers, None if p4p else key, include_women=women),
+                ),
                 result,
                 force=force,
             )

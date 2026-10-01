@@ -25,7 +25,7 @@ from ufcbot.embeds import (
     scheduled_event_description,
     scheduled_event_location,
 )
-from ufcbot.embeds.common import EMBED_BUDGET
+from ufcbot.embeds.common import EMBED_BUDGET, FIELD_LIMIT, ZERO_WIDTH
 from ufcbot.features.cardwatch import CardChange
 from ufcbot.records import PickemRecord, PredictionRecord
 from ufcbot.stats.rankings import Ranked
@@ -49,7 +49,16 @@ def record(bout_id: str, a, b) -> PredictionRecord:
 
 
 def within_limits(embed) -> bool:
-    return len(embed) <= EMBED_BUDGET and len(embed.fields) <= 25
+    """Every limit Discord enforces, including the per-field one.
+
+    A field over 1024 characters is rejected outright rather than truncated, and
+    it is the easy one to miss: the whole embed can be well inside its budget
+    while one block of prose inside it is not."""
+    return (
+        len(embed) <= EMBED_BUDGET
+        and len(embed.fields) <= 25
+        and all(len(field.value or "") <= FIELD_LIMIT for field in embed.fields)
+    )
 
 
 def test_the_picks_board_carries_no_betting_line():
@@ -335,3 +344,39 @@ def test_how_long_ago_is_only_said_when_it_is_known():
 
     assert "last met" not in series_line("A", "B", Rematch(meetings=1, wins=1))
     assert "3y ago" in series_line("A", "B", Rematch(meetings=1, wins=1, days_since=1200.0))
+
+
+def test_the_ratings_note_is_split_rather_than_rejected():
+    """It explains two boards now and is past what Discord allows in one field."""
+    from ufcbot.embeds import rankings_embed
+    from ufcbot.stats.rankings import Ranked
+
+    def entry(rank, name):
+        return Ranked(rank=rank, name=name, rating=1200 - rank, record="10-2-0",
+                      division="Lightweight", key=name)
+
+    top = [entry(i, f"Fighter {i}") for i in range(1, 16)]
+    embed = rankings_embed("Pound for pound", top, pound_for_pound=True, note=True, all_time=top)
+
+    note = " ".join(f.value for f in embed.fields if "rating" in (f.name or "").lower() or f.name == ZERO_WIDTH)
+    assert "All time" in note and "retiring does not unearn it" in note
+    assert within_limits(embed)
+
+
+def test_a_board_carries_the_all_time_list_under_the_current_one():
+    from ufcbot.embeds import rankings_embed
+    from ufcbot.stats.rankings import Ranked
+
+    now = [Ranked(rank=1, name="Active Fighter", rating=1100, record="9-1-0",
+                  division="Welterweight", key="a")]
+    ever = [Ranked(rank=1, name="Retired Great", rating=1260, record="20-2-0",
+                   division="Welterweight", key="b")]
+    embed = rankings_embed("Welterweight", now, all_time=ever)
+
+    names = [f.name for f in embed.fields]
+    plain = [f.value.replace(" ", " ") for f in embed.fields]
+
+    assert names[0] == "Ratings" and "All time" in names[1], "current first, all-time beneath"
+    assert "Retired Great" not in plain[0]
+    assert "Retired Great" in plain[1]
+    assert within_limits(embed)

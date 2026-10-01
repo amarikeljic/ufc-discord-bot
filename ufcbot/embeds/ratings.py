@@ -11,10 +11,37 @@ ARROWS = {"entered": "🆕", "left": "🚪", "up": "🔼", "down": "🔽"}
 
 
 
+def _rating_lines(entries: list, *, with_division: bool) -> list[str]:
+    lines = []
+    for entry in entries:
+        # A shared rank keeps its number but loses the medal: a joint first is
+        # not a winner, and two of the same medal reads as a mistake.
+        # Every badge is the same three characters wide, so every name starts in
+        # the same column. A medal is a different width from a number and a
+        # shared rank is a character wider again, which is what pushed the
+        # names out of line.
+        badge = f"`{'=' if entry.tied else ' '}{entry.rank:>2}`"
+        facts = [f"**{entry.rating}**", entry.record]
+        if with_division and entry.division:
+            facts.append(entry.division)
+        lines.append(f"{badge} {keep(entry.name)} · {join(facts)}")
+    return lines
+
+
 def rankings_embed(
-    division: str, entries: list, *, pound_for_pound: bool = False, note: bool = False
+    division: str,
+    entries: list,
+    *,
+    pound_for_pound: bool = False,
+    note: bool = False,
+    all_time: list | None = None,
 ) -> discord.Embed:
     """One division's ratings board. ``entries`` are ``Ranked`` records.
+
+    ``all_time`` is the same division judged over the whole history of the UFC,
+    printed beneath. The board above it is about who is best now, so it hides
+    anyone who has stopped fighting; this one is about who was ever best, so it
+    hides nobody. Most of the names people argue about are only on this one.
 
     ``note`` explains what the rating is. Only the last board posted carries it,
     so the channel says it once rather than a dozen times.
@@ -27,25 +54,23 @@ def rankings_embed(
         embed.description = "Nobody ranked here yet."
         return stamp(embed)
 
-    lines = []
-    for entry in entries:
-        # A shared rank keeps its number but loses the medal: a joint first is
-        # not a winner, and two of the same medal reads as a mistake.
-        # Every badge is the same three characters wide, so every name starts in
-        # the same column. A medal is a different width from a number and a
-        # shared rank is a character wider again, which is what pushed the
-        # names out of line.
-        badge = f"`{'=' if entry.tied else ' '}{entry.rank:>2}`"
-        facts = [f"**{entry.rating}**", entry.record]
-        if pound_for_pound and entry.division:
-            facts.append(entry.division)
-        lines.append(f"{badge} {keep(entry.name)} · {join(facts)}")
-
-    add_chunked_fields(embed, "Ratings", lines)
+    add_chunked_fields(
+        embed, "Ratings", _rating_lines(entries, with_division=pound_for_pound)
+    )
+    if all_time:
+        add_chunked_fields(
+            embed,
+            "🐐 All time" if not pound_for_pound else "🐐 All time, every division",
+            _rating_lines(all_time, with_division=pound_for_pound),
+        )
     if note:
-        embed.add_field(
-            name="About these ratings",
-            value=(
+        # Chunked rather than added whole: the explanation covers two boards now
+        # and is past the 1024 characters Discord allows in one field, which it
+        # rejects outright rather than truncating.
+        add_chunked_fields(
+            embed,
+            "About these ratings",
+            _paragraphs(
                 "The bot's own rating, not the UFC's ranking. Everyone starts level and a "
                 "win moves it by how good the fighter beaten was, so beating a contender is "
                 "worth more than beating a debutant. Nobody votes and a belt counts for "
@@ -57,12 +82,30 @@ def rankings_embed(
                 "months. After a year out a rating fades — halving what a fighter holds over "
                 "the starting rating for every further year — so a number nobody is "
                 "defending stops outranking the fighters competing for it.\n\n"
-                "Records are UFC fights only. A fighter's division is wherever they last "
-                "fought, and the rating travels with them."
+                "**🐐 All time** is the same rating with both of those taken away: five or "
+                "more fights, nothing faded, and nobody dropped for having retired. A rating "
+                "is what a fighter earned and retiring does not unearn it, so this is the "
+                "board the old names are on. There a fighter is listed in the division they "
+                "fought in most rather than the one they finished in, or St-Pierre is a "
+                "middleweight.\n\n"
+                "Records are UFC fights only. On the current boards a fighter's division is "
+                "wherever they last fought, and the rating travels with them."
             ),
-            inline=False,
         )
     return stamp(embed)
+
+
+def _paragraphs(text: str) -> list[str]:
+    """Blank-line-separated prose as lines, so a long note can be split in two.
+
+    ``add_chunked_fields`` joins with single newlines, so the blank lines have to
+    survive as entries of their own or the paragraphs run together.
+    """
+    paragraphs = text.split("\n\n")
+    # The blank line rides on the front of the paragraph it precedes rather than
+    # standing alone, or a split lands between them and leaves a field ending in
+    # whitespace.
+    return paragraphs[:1] + ["\n" + para for para in paragraphs[1:]]
 
 def ratings_changes_embed(division: str, changes: list) -> discord.Embed:
     """How one division's board moved. ``changes`` are ``RatingChange`` records."""

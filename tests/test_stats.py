@@ -475,3 +475,58 @@ async def test_one_failed_spawn_does_not_condemn_the_bot_to_training_in_process(
 
 async def _done(value=None):
     return value
+
+
+# -- the all-time boards -----------------------------------------------------------
+
+
+def test_a_retired_fighter_is_off_the_current_board_and_top_of_the_all_time_one():
+    """The whole difference between the two boards. A rating is what a fighter
+    earned, and retiring does not unearn it -- but a list of who is best now
+    should not be topped by someone who has stopped."""
+    from ufcbot.stats.rankings import all_time
+
+    retired = rated("Georges St-Pierre", 1260, fights=22, division="Welterweight", ago=3000)
+    active = rated("Kamaru Usman", 1171, fights=20, division="Welterweight", ago=60)
+    ledgers = {"gsp": retired, "usman": active}
+
+    now = [e.name for e in rank_division(ledgers, "Welterweight", on=TODAY)]
+    ever = [e.name for e in all_time(ledgers, "Welterweight")]
+
+    assert now == ["Kamaru Usman"], "nine years out, so not a current ranking"
+    assert ever[0] == "Georges St-Pierre"
+
+
+def test_the_all_time_board_does_not_fade_a_rating_for_a_layoff():
+    """The current board halves what an idle fighter holds over the starting
+    rating. Doing that here would rank the dead by how long they have been dead."""
+    from ufcbot.stats.rankings import all_time
+
+    led = rated("Khabib Nurmagomedov", 1207, fights=13, division="Lightweight", ago=2500)
+    entry = all_time({"khabib": led}, "Lightweight")[0]
+
+    assert entry.rating == 1207, "the number he retired with"
+    assert rating_on(led, TODAY) < 1207, "the current board does fade it"
+
+
+def test_an_all_time_board_lists_a_fighter_where_they_fought_most():
+    """St-Pierre finished at middleweight after twenty-one welterweight fights.
+    Asked what someone did over a career, the last fight is the wrong one."""
+    from ufcbot.stats.rankings import all_time
+
+    led = rated("Georges St-Pierre", 1260, fights=22, division="Middleweight", ago=3000)
+    led.home_division = "Welterweight"
+
+    assert [e.name for e in all_time({"gsp": led}, "Welterweight")] == ["Georges St-Pierre"]
+    assert all_time({"gsp": led}, "Middleweight") == [], "not where he belongs"
+    assert all_time({"gsp": led}, None)[0].division == "Welterweight", "named by it too"
+
+
+def test_the_all_time_board_asks_for_more_of_a_career_than_the_current_one():
+    from ufcbot.stats.rankings import ALL_TIME_MIN_FIGHTS, MIN_FIGHTS, all_time
+
+    assert ALL_TIME_MIN_FIGHTS > MIN_FIGHTS
+    brief = rated("Debutant", 1300, fights=MIN_FIGHTS, division="Lightweight", ago=30)
+
+    assert rank_division({"d": brief}, "Lightweight", on=TODAY), "enough for the current board"
+    assert all_time({"d": brief}, "Lightweight") == [], "not enough for an all-time one"

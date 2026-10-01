@@ -74,6 +74,10 @@ TIE_GAP = 5
 
 # Below this many UFC fights a rating is mostly where it started.
 MIN_FIGHTS = 3
+# All-time asks what someone did over a career, so it asks for more of one. Five
+# is still low, deliberately: an unbeaten seven-fight run belongs on the board
+# that is about who was ever any good, even before it is a career.
+ALL_TIME_MIN_FIGHTS = 5
 # How many to list per division.
 DEPTH = 15
 
@@ -143,7 +147,15 @@ def _ordered(
     # Name breaks the remaining tie so the same board comes back the same way
     # twice running, which is what the change watcher compares against.
     entries.sort(key=lambda entry: (-entry[0], entry[2].name))
+    return _ranked(entries)
 
+
+def _ranked(entries: list[tuple[int, str, Ledger]], *, home: bool = False) -> list[Ranked]:
+    """Rated entries, best first, with ranks shared between those too close to separate.
+
+    ``home`` names each fighter by the division they fought in most rather than
+    the one they finished in, which is what an all-time board is asking about.
+    """
     ranked: list[Ranked] = []
     rank, leader = 0, None
     for place, (rating, key, ledger) in enumerate(entries, 1):
@@ -155,7 +167,7 @@ def _ordered(
                 name=ledger.name,
                 rating=rating,
                 record=ledger.record,
-                division=ledger.division,
+                division=(ledger.home_division or ledger.division) if home else ledger.division,
                 key=key,
                 last_fight=ledger.last_fight,
                 last_result=ledger.last_result,
@@ -183,6 +195,35 @@ def rank_division(
     divisions out should not find them on that board either.
     """
     return _ordered(ledgers, division, on=on, include_women=include_women)[:depth]
+
+
+def all_time(
+    ledgers: dict[str, Ledger],
+    division: str | None,
+    *,
+    depth: int = DEPTH,
+    include_women: bool = True,
+) -> list[Ranked]:
+    """The best-rated fighters ever, in one division or across all of them.
+
+    The same rating as the board above it, asked a different question. Nothing
+    is faded and nobody is dropped for not having fought lately: a rating is
+    what a fighter earned, and retiring does not unearn it. That is the whole
+    difference -- the current boards hide a rating nobody is defending, because
+    a list of who is best now should not be topped by someone who has stopped.
+
+    A fighter is listed in the division they fought in most rather than the one
+    they finished in, or St-Pierre is a middleweight and Jones a heavyweight.
+    """
+    entries = [
+        (round(ledger.elo), key, ledger)
+        for key, ledger in ledgers.items()
+        if ledger.fights >= ALL_TIME_MIN_FIGHTS
+        and (division is None or (ledger.home_division or ledger.division) == division)
+        and (include_women or not is_womens(ledger.home_division or ledger.division))
+    ]
+    entries.sort(key=lambda entry: (-entry[0], entry[2].name))
+    return _ranked(entries, home=True)[:depth]
 
 
 def standing(ledgers: dict[str, Ledger], key: str, *, on: date) -> Ranked | None:

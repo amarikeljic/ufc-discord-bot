@@ -421,7 +421,8 @@ problem has gone.
 
 ### Ratings boards
 
-The ratings board ranks whoever has fought in the last eighteen months and has at least
+Each division gets one message: the current top fifteen, and beneath it the same division
+all time. The current half ranks whoever has fought in the last eighteen months and has at least
 three UFC fights, by the same rating. `/ufc channels set womens_divisions:False` leaves the
 women's divisions out entirely, boards and pound-for-pound alike. A fighter's division is
 the one their most recent fight was made at, so a move up shows the week it happens, and a
@@ -452,6 +453,21 @@ the median gap between neighbours is under four points, and a single result move
 by up to 32, so most adjacent pairs are inside the noise of one fight. Sorting those into
 1st and 2nd claims a precision the number does not have. Fighters within five points share
 a place instead, on the board and on the fighter card, which reads "joint 4th".
+
+**Under every board is the same division all time,** marked 🐐. It is the same rating with
+both of the rules above taken away: nothing fades and nobody is dropped for having retired,
+because a rating is what a fighter earned and retiring does not unearn it. The board above
+is about who is best now, which is why it hides a number nobody is defending; this one is
+about who was ever best, so it hides nobody — and most of the names people argue about are
+only on this one. It asks for five UFC fights rather than three, since it is a question
+about a career. The pound-for-pound board carries an all-time list across every division:
+Jones, Makhachev, St-Pierre, Oliveira, Nurmagomedov.
+
+On the all-time boards a fighter is listed in the division they fought in **most**, not the
+one they finished in. Otherwise St-Pierre is a middleweight on the strength of one fight
+against Bisping after twenty-one at welterweight, Jones a heavyweight, and Holloway a
+welterweight. On the current boards the division is still wherever they last fought, which
+is the right answer to a question about now.
 
 Records on the board count UFC fights only, which is all the dataset has: a fighter with a
 long road career shows fewer wins here than their MMA record. A rating also travels with a
@@ -661,7 +677,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-271 tests, a few seconds, no network and no Discord. One file per module it covers: they run against a real SQLite
+277 tests, a few seconds, no network and no Discord. One file per module it covers: they run against a real SQLite
 database in a temporary directory and fight cards built by hand. Most of them are about
 what happens when a card changes underneath the bot, because that is where the awkward
 cases live -- a fighter replaced, a fight cancelled, a card that only half-loaded -- and
