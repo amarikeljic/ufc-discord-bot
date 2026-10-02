@@ -245,8 +245,7 @@ class RatingsWatch:
                 version,
             )
             if not previous:
-                # Never seen, or last seen under a different version of the
-                # ratings. Either way there is nothing to compare against.
+                # First time this board has been built; the whole board is not news.
                 continue
             changes = diff(previous, current, ledgers, on=today)
             if changes:

@@ -359,22 +359,34 @@ class Storage:
     async def ranking_state(self, division: str, version: int = 0) -> dict[str, RankedState]:
         """Who was on this board last time, by fighter key.
 
-        Empty where the board was last written by a different version of the
-        ratings. The ratings themselves move when the model is rebuilt, so
-        comparing across a version is comparing two different measures: on a card
-        night every fighter who fought would be credited with the crossings the
-        rebuild caused. An empty answer is read as "first time", which announces
-        nothing and writes the board afresh.
+        Where the board was last written by a different version of the ratings,
+        the places come back and the ratings do not. A rebuild moves every rating,
+        so comparing them across a version is comparing two different measures --
+        but who stood where is the same question whoever rated them.
+
+        Dropping the board entirely was the first answer and it is worse: the
+        first pass after a deploy would then announce nothing at all, and if that
+        deploy lands on a fight weekend it swallows the card. Handing the ratings
+        over as missing keeps every fighter who actually fought, and silences only
+        the bystanders, whose moves are the ones that cannot be told from the
+        rebuild.
         """
         async with self.db.execute(
-            "SELECT fighter, rank, rating, last_fight, raw FROM ranking_state "
-            "WHERE division = ? AND version = ?",
-            (division, version),
+            "SELECT fighter, rank, rating, last_fight, raw, version FROM ranking_state "
+            "WHERE division = ?",
+            (division,),
         ) as cursor:
             rows = await cursor.fetchall()
         return {
             row["fighter"]: RankedState(
-                row["fighter"], row["rank"], row["rating"], _parse_date(row["last_fight"]), row["raw"]
+                row["fighter"],
+                row["rank"],
+                row["rating"],
+                _parse_date(row["last_fight"]),
+                # A rating from another version is not comparable with this one,
+                # so it is handed over as missing. The board itself still is:
+                # who was where is the same question whatever rated them.
+                row["raw"] if row["version"] == version else None,
             )
             for row in rows
         }

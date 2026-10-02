@@ -492,9 +492,9 @@ def test_a_divisional_line_says_what_the_gap_is_worth_against_the_champion():
     ]
     lines = rankings_embed("Lightweight", rows).fields[0].value.replace(" ", " ").splitlines()
 
-    assert "59% vs Gaethje" in lines[0], "rated above the champion, so better than even"
+    assert "58% vs Gaethje" in lines[0], "rated above the champion, so better than even"
     assert "vs" not in lines[1], "the champion is not compared with himself"
-    assert "44% vs Gaethje" in lines[2]
+    assert "45% vs Gaethje" in lines[2]
 
 
 def test_pound_for_pound_carries_no_odds():

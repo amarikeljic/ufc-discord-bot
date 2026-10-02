@@ -91,23 +91,23 @@ ALL_TIME_MIN_FIGHTS = 5
 # points, so a defence moves a fighter past roughly a tenth of it. Every pairing
 # that reads wrong without this reads right with it, and none that read right
 # were broken by it.
-# What the ratings actually predict, as opposed to what the 400-point scale they
-# are fitted with says they should. Measured across every fight on record, folded
-# both ways so the "Winner vs. Loser" bout naming cannot leak in.
+# The scale the odds column is computed on: the one the ratings are built with.
 #
-# Fitted across the whole range of gaps a board shows rather than at the bottom
-# of it. The slope near zero alone gives about 538, and that number is wrong out
-# where it matters: at a gap of 80 to 120 points it says 60% where the fighters
-# actually go 68%. Near zero is both the noisiest place to fit and the place a
-# predictor carrying measurement error is flattened most, and the boards are not
-# only read there -- welterweight has gaps of 150. Across 0 to 200+ this is the
-# best of 250, 300, 350, 400, 450 and 538, at 0.98% mean error against 538's
-# 2.26%.
+# Two attempts to fit it from results landed on opposite sides of 400 -- 538 from
+# the slope near zero, 350 from minimising bucket error -- which is a sign that
+# neither was measuring what it meant to rather than that the truth is in
+# between. Checked bucket by bucket, no single logistic scale fits: the implied
+# scale runs 122, 383, 351, 415, 285 across gaps of 0-15, 15-30, 30-50, 50-80 and
+# 80-120 points. The middle three agree with each other and with 400; the ends
+# disagree with everything, and the 80-120 bucket is 177 fights.
 #
-# It describes the ratings as displayed, which is what a reader needs. It is not
-# the divisor the ratings are built with, and changing that is a separate
-# question with the model attached to it.
-SHOWN_SCALE = 350
+# Scored by log loss on fights after a date, with the scale chosen on the fights
+# before it, the curve is flat: 350 is best on the held-out half at 0.68456 and
+# 400 costs 0.00016 nats against it, while 538 costs 0.00109. So the data cannot
+# tell 300 from 450, and picking a fitted number from inside that band would be
+# claiming a precision the fights do not support -- on a board whose whole
+# caption is about not doing that.
+SHOWN_SCALE = 400
 
 
 def win_chance(rating: int, against: int) -> float:

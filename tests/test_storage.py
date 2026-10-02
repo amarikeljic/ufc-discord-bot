@@ -325,19 +325,23 @@ async def test_an_older_database_is_upgraded_in_place(tmp_path):
 
 
 
-async def test_a_board_written_by_another_version_reads_as_never_seen(storage):
-    """A rebuild moves every rating, so a board written under one version and
-    read under another is two different measures being compared. On a card night
-    the gate would wave that through and credit everyone who fought with the
-    crossings the rebuild caused."""
+async def test_a_rebuild_keeps_the_places_and_drops_the_ratings(storage):
+    """A rebuild moves every rating, so comparing them across a version is
+    comparing two different measures -- but who stood where is the same question
+    whoever rated them.
+
+    Dropping the board entirely was the first answer and it is worse: the first
+    pass after a deploy would announce nothing at all, and a deploy landing on a
+    fight weekend would swallow the card.
+    """
     from ufcbot.records import RankedState
 
     board = [RankedState("a", 1, 1200, date(2026, 1, 1), 1200)]
     await storage.save_ranking_state("Lightweight", board, 9)
 
-    assert await storage.ranking_state("Lightweight", 9), "same version, same board"
-    assert await storage.ranking_state("Lightweight", 10) == {}, "a rebuild is a fresh start"
+    same = await storage.ranking_state("Lightweight", 9)
+    assert same["a"].raw == 1200, "same version, so the rating means the same thing"
 
-    await storage.save_ranking_state("Lightweight", board, 10)
-    assert await storage.ranking_state("Lightweight", 10), "and then it is the board again"
-    assert await storage.ranking_state("Lightweight", 9) == {}, "the old one is not kept"
+    after_rebuild = await storage.ranking_state("Lightweight", 10)
+    assert after_rebuild["a"].rank == 1, "he was still first, whoever rated him"
+    assert after_rebuild["a"].raw is None, "but that number is not this version's"

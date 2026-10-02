@@ -16,8 +16,12 @@ env/
 *.log
 
 # Downloaded dataset and trained model; both are rebuilt by the bot or train.py
-data/
+data/*
 models/
+
+# ...except the belt changes, which are written by hand and cannot be rebuilt
+# from anything. They are the record of what happened outside a cage.
+!data/belts.json
 
 # pytest
 .pytest_cache/

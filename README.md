@@ -455,13 +455,20 @@ without ever saying how far apart that is, and a percentage says it in a unit no
 a key for. Places are numbered straight through there: `=3` beside two different
 percentages is the board contradicting itself on one line.
 
-The scale those percentages use is fitted across the whole range of gaps a board shows, not
-at the bottom of it. The slope near zero alone gives about 538, and that is wrong out where
-it matters: at a gap of 80 to 120 points it says 60% where the fighters actually go 68%.
-Near zero is both the noisiest place to fit and where a predictor carrying measurement error
-is flattened most, and welterweight has gaps of 150. Across 0 to 200+ the best of 250, 300,
-350, 400, 450 and 538 is **350**, at 0.98% mean error against 538's 2.26%. That describes
-the ratings as displayed; it is not the divisor the ratings are built with.
+The percentages are on the scale the ratings are built with, and that is a deliberate
+refusal to fit one. Two attempts landed on opposite sides of it — 538 from the slope near
+zero, 350 from minimising bucket error — which says neither was measuring what it meant to
+rather than that the answer is in between. Bucket by bucket no single logistic scale fits at
+all: the implied scale runs 122, 383, 351, 415 and 285 across gaps of 0-15, 15-30, 30-50,
+50-80 and 80-120 points. The middle three agree with each other and with 400; the ends
+disagree with everything, and the 80-120 bucket is 177 fights.
+
+Scored properly — log loss on fights after a date, with the scale chosen on the fights
+before it — the curve is flat. 350 is best on the held-out half at 0.68456, 400 costs 0.00016
+nats against it, and 538 costs 0.00109. The fights cannot tell 300 from 450, so picking a
+number from inside that band would be claiming a precision they do not support, on a board
+whose whole caption is about not doing that. The scale is downstream of the model, so
+anything that moves the ratings should see this refitted.
 
 A board too long for one field gives something up rather than not posting. Past 1024
 characters Discord refuses the whole embed and not the overflow, so the record goes first
@@ -872,7 +879,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-320 tests, a few seconds, no network and no Discord. One file per module it covers: they run against a real SQLite
+321 tests, a few seconds, no network and no Discord. One file per module it covers: they run against a real SQLite
 database in a temporary directory and fight cards built by hand. Most of them are about
 what happens when a card changes underneath the bot, because that is where the awkward
 cases live -- a fighter replaced, a fight cancelled, a card that only half-loaded -- and

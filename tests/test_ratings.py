@@ -456,3 +456,27 @@ def test_a_shuffle_below_the_published_places_is_seen_and_not_mentioned():
         Row("x", 3, 1100, last=BEFORE),
     ]
     assert diff(previous, current, {}, on=TODAY, depth=1) == []
+
+
+def test_a_rebuild_still_announces_the_card_it_lands_on():
+    """Keying the board to the model version made the first pass after a deploy
+    silent, which swallows a card if the deploy lands on a fight weekend. The
+    places survive a rebuild and the ratings do not, so the fighters who fought
+    are still announced and only the bystanders -- whose moves cannot be told
+    from the rebuild -- go quiet."""
+    previous = {
+        # raw is None: these were rated by a version that is no longer running.
+        "winner": RankedState("winner", 2, 1100, BEFORE, None),
+        "passed": RankedState("passed", 1, 1120, BEFORE, None),
+        "bystander": RankedState("bystander", 3, 1080, BEFORE, None),
+    }
+    current = [
+        Row("winner", 1, 1150, last=RECENT, result="win"),
+        Row("passed", 2, 1120, last=BEFORE),
+        Row("bystander", 3, 1080, last=BEFORE),
+    ]
+    moved = {c.name: c for c in diff(previous, current, {}, on=TODAY)}
+
+    assert moved["Winner"].kind == UP, "he fought; that is news whatever rated him"
+    assert "Passed" not in moved, "cannot tell his drop from the rebuild"
+    assert "Bystander" not in moved
