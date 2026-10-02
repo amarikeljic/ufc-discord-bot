@@ -634,3 +634,20 @@ def test_a_belt_held_only_as_interim_still_counts_as_having_held_one():
 
     assert interim_only.title_wins == 0
     assert interim_only.former_champion
+
+
+def test_a_champion_who_has_aged_off_the_board_is_a_former_champion():
+    """The data says who won a title fight, never who vacated one. The case it
+    can catch is the champion who has since gone: Jon Jones showed as heavyweight
+    champion two years after he last held the belt."""
+    from ufcbot.stats.rankings import holds_belt
+
+    led = rated("Jon Jones", 1296, fights=24, ago=700)
+    led.champion = led.held_belt = True
+
+    assert not holds_belt(led, TODAY), "eighteen months without a fight"
+    assert holds_belt(led, None), "with no date to check against, the flag stands"
+
+    still_here = rated("Islam Makhachev", 1273, fights=19, ago=60)
+    still_here.champion = still_here.held_belt = True
+    assert holds_belt(still_here, TODAY)

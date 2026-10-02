@@ -174,10 +174,26 @@ def _ordered(
     # Name breaks the remaining tie so the same board comes back the same way
     # twice running, which is what the change watcher compares against.
     entries.sort(key=lambda entry: (-entry[0], entry[2].name))
-    return _ranked(entries)
+    return _ranked(entries, on=on)
 
 
-def _ranked(entries: list[tuple[int, str, Ledger]], *, home: bool = False) -> list[Ranked]:
+def holds_belt(ledger: Ledger, on: date | None) -> bool:
+    """Whether to show this fighter as champion.
+
+    The data records that someone won a title fight. It never records a champion
+    vacating, being stripped, or being elevated from interim, so the belt is left
+    with whoever last won one however long ago that was. The one case that can be
+    caught from the data is the champion who has since gone: past the eighteen
+    months that take a fighter off the board, they are a former champion whatever
+    the last title fight said. That is what had Jon Jones showing as heavyweight
+    champion two years after he last held it.
+    """
+    return ledger.champion and (on is None or _eligible(ledger, on))
+
+
+def _ranked(
+    entries: list[tuple[int, str, Ledger]], *, home: bool = False, on: date | None = None
+) -> list[Ranked]:
     """Rated entries, best first, with ranks shared between those too close to separate.
 
     ``home`` names each fighter by the division they fought in most rather than
@@ -196,8 +212,8 @@ def _ranked(entries: list[tuple[int, str, Ledger]], *, home: bool = False) -> li
                 record=ledger.record,
                 division=(ledger.home_division or ledger.division) if home else ledger.division,
                 key=key,
-                champion=ledger.champion,
-                former_champion=ledger.former_champion,
+                champion=holds_belt(ledger, on),
+                former_champion=ledger.held_belt and not holds_belt(ledger, on),
                 defences=ledger.title_defences,
                 last_fight=ledger.last_fight,
                 last_result=ledger.last_result,
@@ -252,6 +268,7 @@ def all_time(
     *,
     depth: int = DEPTH,
     include_women: bool = True,
+    on: date | None = None,
 ) -> list[Ranked]:
     """The greatest careers, in one division or across all of them.
 
@@ -275,7 +292,7 @@ def all_time(
         and (include_women or not is_womens(ledger.home_division or ledger.division))
     ]
     entries.sort(key=lambda entry: (-entry[0], entry[2].name))
-    return _ranked(entries, home=True)[:depth]
+    return _ranked(entries, home=True, on=on)[:depth]
 
 
 def standing(ledgers: dict[str, Ledger], key: str, *, on: date) -> Ranked | None:

@@ -72,6 +72,10 @@ def _reason(current, previous: RankedState | None, ledger: Ledger | None, on: da
     return PUSHED
 
 
+def _still_eligible(ledger: Ledger | None, on: date) -> bool:
+    return ledger is not None and is_eligible(ledger, on)
+
+
 def diff(
     previous: dict[str, RankedState],
     current: list,
@@ -81,39 +85,79 @@ def diff(
 ) -> list[RatingChange]:
     """What moved on one board since it was last published.
 
-    A move is only reported when somebody fought. The displayed rating fades by
-    the day a fighter is idle, so a board drifts on its own: simulated over 180
-    days with no fights at all it produced 130 reported moves, of which 112 were
-    nobody passing anybody and 18 were real. None of them were news. Announcing a
-    fighter as having slipped a place because the calendar advanced is noise with
-    a plausible-sounding reason attached to it.
+    A move is reported only when one of the two fighters who swapped had a fight
+    behind it. The displayed rating fades by the day a fighter is idle, so a
+    board drifts on its own: simulated over 180 days with no fights at all it
+    produced 130 reported moves, 112 of them nobody passing anybody. None of it
+    was news.
 
-    Entering and leaving are still reported either way. Ageing off the board
-    after eighteen months is a real change of state rather than drift, and it is
-    the one thing about an idle fighter worth saying.
+    Asking only whether *anybody* fought is not enough, and is worse than saying
+    nothing. The UFC runs most weekends, so a pass-level gate holds a week of
+    drift and then releases all of it on the first pass after a card -- where it
+    reads as a consequence of that card rather than of the calendar.
     """
     changes: list[RatingChange] = []
     now_by_key = {entry.key: entry for entry in current}
-    fought = any(
-        entry.last_fight != previous[entry.key].last_fight
+    fought = {
+        entry.key
         for entry in current
-        if entry.key in previous
-    )
+        if entry.key in previous and entry.last_fight != previous[entry.key].last_fight
+    }
+    # Who aged out rather than being pushed down the list. Their replacement is
+    # news with them; anyone else arriving or leaving is the same drift again,
+    # reaching the board through its ends instead of its middle.
+    aged_off = {
+        key
+        for key, was in previous.items()
+        if key not in now_by_key and not _still_eligible(ledgers.get(key), on)
+    }
+    # A fighter arriving was not on the board to be compared against, so "did
+    # they fight" is asked of the board instead: a last fight later than anything
+    # the board knew about means a card has happened since it was published.
+    newest_known = max((was.last_fight for was in previous.values() if was.last_fight), default=None)
+
+    def worth_saying(entry) -> bool:
+        """Did this fighter, or anyone they actually passed, have a fight?"""
+        if entry.key in fought:
+            return True
+        for other in current:
+            if other.key == entry.key or other.key not in fought or other.key not in previous:
+                continue
+            before = previous[entry.key].rank - previous[other.key].rank
+            after = entry.rank - other.rank
+            if before * after < 0:  # they were on opposite sides of each other
+                return True
+        return False
 
     for entry in current:
         was = previous.get(entry.key)
         reason = _reason(entry, was, ledgers.get(entry.key), on)
         if was is None:
-            changes.append(RatingChange(ENTERED, entry.name, None, entry.rank, entry.rating, reason))
-        elif not fought:
-            continue  # the whole board is a day older; nothing happened
+            # Arriving is only news with a fight behind it, or as the other half
+            # of someone ageing off. Drifting up into fifteenth because the
+            # fighter above faded is the same non-event as drifting within it.
+            arrived_by_fighting = (
+                newest_known is None
+                or (entry.last_fight is not None and entry.last_fight > newest_known)
+            )
+            if arrived_by_fighting or aged_off:
+                changes.append(RatingChange(ENTERED, entry.name, None, entry.rank, entry.rating, reason))
+        elif entry.rank == was.rank or not worth_saying(entry):
+            continue
         elif entry.rank < was.rank:
             changes.append(RatingChange(UP, entry.name, was.rank, entry.rank, entry.rating, reason))
-        elif entry.rank > was.rank:
+        else:
             changes.append(RatingChange(DOWN, entry.name, was.rank, entry.rank, entry.rating, reason))
 
     for key, was in previous.items():
-        if key not in now_by_key:
+        # Dropping out of the top fifteen without a fight is the same drift as
+        # slipping a place inside it. Ageing out at the eighteen-month cutoff is
+        # a change of state, and the one thing about an idle fighter worth saying.
+        # Leaving the board cannot be tested for crossings, because the fighter
+        # is no longer there to compare anyone against. Ageing out is always
+        # news; being pushed below fifteenth is news when a result could have
+        # done it, and nothing when the board merely got a day older.
+        if key not in now_by_key and (key in aged_off or fought):
             ledger = ledgers.get(key)
             name = ledger.name if ledger else key
             changes.append(RatingChange(LEFT, name, was.rank, None, None, _reason(None, was, ledger, on)))

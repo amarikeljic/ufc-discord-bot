@@ -573,16 +573,24 @@ a dozen times.
 
 ### Ratings moves
 
-A move is announced only when somebody fought. A board drifts on its own, because the
-displayed rating fades by the day a fighter is idle, and over 180 days with nothing
-happening that drift produced 130 reported moves — 112 of them nobody passing anybody, and
-none of them news. "Dustin Poirier is down to 6th after a long layoff" is a true sentence
-the bot can emit on an arbitrary Tuesday because a rounding boundary moved, and it reads
-exactly like a sentence about something that happened.
+A move is announced only when one of the two fighters who swapped had a fight behind it. A
+board drifts on its own, because the displayed rating fades by the day a fighter is idle,
+and over 180 days with nothing happening that drift produced 130 reported moves — 112 of
+them nobody passing anybody, and none of them news. "Dustin Poirier is down to 6th after a
+long layoff" is a true sentence the bot can emit on an arbitrary Tuesday because a rounding
+boundary moved, and it reads exactly like a sentence about something that happened.
 
-Entering and leaving are still announced either way. Ageing off the board after eighteen
-months is a change of state rather than drift, and it is the one thing about an idle
-fighter worth saying.
+Asking only whether *anybody* fought is not enough, and is worse than saying nothing. The
+UFC runs most weekends, so a gate at that level holds a week of drift and releases all of
+it on the first pass after a card — where it reads as a consequence of that card. So the
+question is asked per move: this fighter, or somebody they actually passed. That keeps the
+knock-on, which is the half worth keeping — a fighter dropping because the man below them
+won is news they had no part in.
+
+Leaving the board cannot be tested that way, because the fighter is no longer there to
+compare anyone against. Ageing out at the eighteen-month cutoff is always announced; being
+pushed below fifteenth is announced when a result could have done it, and not when the
+board merely got a day older.
 
 When a board moves, the move is posted to the live channel with its reason: a fighter's own
 win or loss, a long layoff pulling their rating down, eighteen months without a fight, or
@@ -785,7 +793,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-291 tests, a few seconds, no network and no Discord. One file per module it covers: they run against a real SQLite
+296 tests, a few seconds, no network and no Discord. One file per module it covers: they run against a real SQLite
 database in a temporary directory and fight cards built by hand. Most of them are about
 what happens when a card changes underneath the bot, because that is where the awkward
 cases live -- a fighter replaced, a fight cancelled, a card that only half-loaded -- and
