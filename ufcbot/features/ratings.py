@@ -116,6 +116,26 @@ def diff(
     # the board knew about means a card has happened since it was published.
     newest_known = max((was.last_fight for was in previous.values() if was.last_fight), default=None)
 
+    def contradicts_the_result(entry, was) -> bool:
+        """A rise after a loss, or a fall after a win.
+
+        The fade comes off the moment a fighter fights, so someone returning
+        from the fade band gets their layoff back and pays for the result out of
+        it. Carrying more than half of K -- sixteen points, which is about
+        fourteen months idle for a fighter two hundred above the starting rating
+        -- they come back from a *loss* with a higher number than they left with,
+        and the board moves them up. Poirier is carrying twenty-one points of it
+        today and Dos Anjos thirty-eight.
+
+        The board can show the reset, because it is where the rating now is. The
+        sentence about it cannot, because there is no sentence about a man losing
+        and climbing that is not simply wrong.
+        """
+        if entry.key not in fought or not entry.last_result:
+            return False
+        rose = entry.rank < was.rank
+        return rose == (entry.last_result == "loss")
+
     def worth_saying(entry) -> bool:
         """Did this fighter, or anyone they actually passed, have a fight?"""
         if entry.key in fought:
@@ -142,7 +162,7 @@ def diff(
             )
             if arrived_by_fighting or aged_off:
                 changes.append(RatingChange(ENTERED, entry.name, None, entry.rank, entry.rating, reason))
-        elif entry.rank == was.rank or not worth_saying(entry):
+        elif entry.rank == was.rank or contradicts_the_result(entry, was) or not worth_saying(entry):
             continue
         elif entry.rank < was.rank:
             changes.append(RatingChange(UP, entry.name, was.rank, entry.rank, entry.rating, reason))

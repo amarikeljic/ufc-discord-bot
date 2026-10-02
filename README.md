@@ -587,10 +587,25 @@ question is asked per move: this fighter, or somebody they actually passed. That
 knock-on, which is the half worth keeping — a fighter dropping because the man below them
 won is news they had no part in.
 
-Leaving the board cannot be tested that way, because the fighter is no longer there to
+A move that contradicts the result is not announced either. The fade comes off the moment a
+fighter fights, so someone returning from the fade band gets their layoff back and pays for
+the result out of it: carrying more than half of K — sixteen points, about fourteen months
+idle for a fighter two hundred above the starting rating — they come back from a **loss**
+with a higher number than they left with, and the board moves them up. Poirier is carrying
+twenty-one points of it today and Dos Anjos thirty-eight. The board can show the reset,
+because it is where the rating now is; the sentence cannot, because there is no way to say
+a man lost and climbed that is not simply wrong.
+
+Leaving the board cannot be tested for crossings, because the fighter is no longer there to
 compare anyone against. Ageing out at the eighteen-month cutoff is always announced; being
 pushed below fifteenth is announced when a result could have done it, and not when the
-board merely got a day older.
+board merely got a day older. This is the weakest part of the design and it is known to be:
+because the watcher diffs the published top fifteen rather than the whole ranked list,
+crossing the fifteenth line is a special case instead of an ordinary crossing between the
+fighters at fifteen and sixteen. One asymmetry falls out of that — when fifteenth loses and
+drops off, the exit is announced and the fighter who replaces him is not, because he did
+not fight. Diffing the full list would remove the special cases and the asymmetry together,
+and leave ageing out as the only one.
 
 When a board moves, the move is posted to the live channel with its reason: a fighter's own
 win or loss, a long layoff pulling their rating down, eighteen months without a fight, or
@@ -793,7 +808,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-296 tests, a few seconds, no network and no Discord. One file per module it covers: they run against a real SQLite
+298 tests, a few seconds, no network and no Discord. One file per module it covers: they run against a real SQLite
 database in a temporary directory and fight cards built by hand. Most of them are about
 what happens when a card changes underneath the bot, because that is where the awkward
 cases live -- a fighter replaced, a fight cancelled, a card that only half-loaded -- and

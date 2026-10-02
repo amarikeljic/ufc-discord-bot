@@ -234,3 +234,34 @@ def test_a_fighter_pushed_down_by_someone_elses_win_is_still_reported():
 
     assert moved["Passed"].kind == DOWN, "passed by somebody who fought"
     assert moved["Passed"].reason == PUSHED
+
+
+def test_a_fighter_returning_from_a_layoff_cannot_climb_by_losing():
+    """The fade comes off the moment someone fights, so a returning fighter gets
+    their layoff back and pays for the result out of it. Carrying more than half
+    of K they come back from a loss with a higher number than they left with --
+    Poirier is carrying 21 points of it, Dos Anjos 38 -- and the board moves them
+    up. There is no sentence about a man losing and climbing that is not wrong."""
+    previous = {
+        "returning": ranked("returning", 5, 1137, last=OLD),   # shown faded
+        "steady": ranked("steady", 4, 1140, last=OLD),
+    }
+    current = [
+        Row("steady", 5, 1140, last=OLD),
+        Row("returning", 4, 1142, last=RECENT, result="loss"),  # fade back, minus the loss
+    ]
+    moved = {c.name: c for c in diff(previous, current, {}, on=TODAY)}
+
+    assert "Returning" not in moved, "lost, and would have been announced as up"
+    assert moved["Steady"].kind == DOWN, "passed by somebody who fought, so still news"
+
+
+def test_a_fighter_who_wins_and_climbs_is_still_announced():
+    previous = {"a": ranked("a", 2, 1100, last=OLD), "b": ranked("b", 1, 1120, last=OLD)}
+    current = [
+        Row("a", 1, 1150, last=RECENT, result="win"),
+        Row("b", 2, 1120, last=OLD),
+    ]
+    moved = {c.name: c for c in diff(previous, current, {}, on=TODAY)}
+
+    assert moved["A"].kind == UP and moved["A"].reason == "a win"
