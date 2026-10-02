@@ -5,12 +5,25 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from ufcbot.embeds import ratings_changes_embed
-from ufcbot.features.ratings import DOWN, ENTERED, INACTIVE, LEFT, PUSHED, UP, diff
+from ufcbot.features.ratings import (
+    DOWN,
+    ENTERED,
+    INACTIVE,
+    LEFT,
+    PUSHED,
+    RETURNED,
+    UP,
+    diff,
+)
 from ufcbot.records import RankedState
 from ufcbot.stats.career import Ledger
 
 TODAY = date(2026, 9, 18)
 RECENT = TODAY - timedelta(days=30)
+# A fight before the one in the test, close enough that nothing is fading. The
+# diff reads "did they fight" from last_fight changing, so a fixture that uses
+# the same date on both sides of a pass is a fighter who did not fight.
+BEFORE = TODAY - timedelta(days=90)
 OLD = TODAY - timedelta(days=1000)
 
 
@@ -44,7 +57,7 @@ def test_a_board_that_has_not_moved_reports_nothing():
 
 
 def test_climbing_after_a_win_says_so():
-    previous = {"a": ranked("a", 1, 1200), "b": ranked("b", 2, 1150, last=OLD)}
+    previous = {"a": ranked("a", 1, 1200), "b": ranked("b", 2, 1150, last=BEFORE)}
     current = [Row("b", 1, 1260, last=RECENT, result="win"), Row("a", 2, 1200)]
 
     changes = {c.name: c for c in diff(previous, current, {}, on=TODAY)}
@@ -56,12 +69,12 @@ def test_climbing_after_a_win_says_so():
 
 
 def test_sliding_after_a_loss_says_so():
-    previous = {"a": ranked("a", 1, 1200, last=OLD)}
+    previous = {"a": ranked("a", 1, 1200, last=BEFORE)}
     current = [Row("a", 1, 1100, last=RECENT, result="loss")]
     # Same rank, so nothing is announced; the reason only matters when they move.
     assert diff(previous, current, {}, on=TODAY) == []
 
-    current = [Row("b", 1, 1300, last=OLD, result="win"), Row("a", 2, 1100, last=RECENT, result="loss")]
+    current = [Row("b", 1, 1300, last=RECENT, result="win"), Row("a", 2, 1100, last=RECENT, result="loss")]
     changes = {c.name: c for c in diff(previous, current, {}, on=TODAY)}
     assert changes["A"].kind == DOWN and changes["A"].reason == "a loss"
 
@@ -121,7 +134,7 @@ def test_slipping_off_the_bottom_with_nobody_fighting_is_not_announced():
 
 
 def test_the_embed_reads_as_what_happened():
-    previous = {"a": ranked("a", 3, 1200, last=OLD), "gone": ranked("gone", 5, 1100, last=OLD)}
+    previous = {"a": ranked("a", 3, 1200, last=BEFORE), "gone": ranked("gone", 5, 1100, last=OLD)}
     current = [Row("a", 1, 1290, last=RECENT, result="win", name="Islam Makhachev")]
     ledgers = {"gone": ledger("Old Timer", 1100, last=OLD)}
 
@@ -199,15 +212,15 @@ def test_one_fight_does_not_release_a_week_of_drift():
     calendar. Only the pair who actually swapped around the fight should appear.
     """
     previous = {
-        "winner": ranked("winner", 4, 1100, last=OLD),
-        "beaten": ranked("beaten", 3, 1120, last=OLD),
-        "drift_a": ranked("drift_a", 1, 1200, last=OLD),
-        "drift_b": ranked("drift_b", 2, 1190, last=OLD),
+        "winner": ranked("winner", 4, 1100, last=BEFORE),
+        "beaten": ranked("beaten", 3, 1120, last=BEFORE),
+        "drift_a": ranked("drift_a", 1, 1200, last=BEFORE),
+        "drift_b": ranked("drift_b", 2, 1190, last=BEFORE),
     }
     current = [
         # These two swapped because the fade moved them, with no fight between.
-        Row("drift_b", 1, 1188, last=OLD),
-        Row("drift_a", 2, 1187, last=OLD),
+        Row("drift_b", 1, 1188, last=BEFORE),
+        Row("drift_a", 2, 1187, last=BEFORE),
         # And these two swapped because one of them won on Saturday.
         Row("winner", 3, 1140, last=RECENT, result="win"),
         Row("beaten", 4, 1118, last=RECENT, result="loss"),
@@ -223,12 +236,12 @@ def test_a_fighter_pushed_down_by_someone_elses_win_is_still_reported():
     """The knock-on is the half worth keeping: they did not fight, but the
     fighter who passed them did."""
     previous = {
-        "winner": ranked("winner", 2, 1100, last=OLD),
-        "passed": ranked("passed", 1, 1120, last=OLD),
+        "winner": ranked("winner", 2, 1100, last=BEFORE),
+        "passed": ranked("passed", 1, 1120, last=BEFORE),
     }
     current = [
         Row("winner", 1, 1150, last=RECENT, result="win"),
-        Row("passed", 2, 1120, last=OLD),
+        Row("passed", 2, 1120, last=BEFORE),
     ]
     moved = {c.name: c for c in diff(previous, current, {}, on=TODAY)}
 
@@ -236,32 +249,51 @@ def test_a_fighter_pushed_down_by_someone_elses_win_is_still_reported():
     assert moved["Passed"].reason == PUSHED
 
 
-def test_a_fighter_returning_from_a_layoff_cannot_climb_by_losing():
+def test_a_fighter_back_from_a_layoff_is_reported_by_result_not_direction():
     """The fade comes off the moment someone fights, so a returning fighter gets
-    their layoff back and pays for the result out of it. Carrying more than half
-    of K they come back from a loss with a higher number than they left with --
-    Poirier is carrying 21 points of it, Dos Anjos 38 -- and the board moves them
-    up. There is no sentence about a man losing and climbing that is not wrong."""
+    their layoff back and pays for the result out of it: carrying more than half
+    of K they come back from a loss with a higher number than they left with, and
+    the board moves them up. "Up to 4th" of a man who just lost is wrong, and
+    saying nothing is worse -- that reports returning fighters' wins and not
+    their losses. So the result is reported, and the place, and no direction."""
     previous = {
         "returning": ranked("returning", 5, 1137, last=OLD),   # shown faded
-        "steady": ranked("steady", 4, 1140, last=OLD),
+        "steady": ranked("steady", 4, 1140, last=BEFORE),
     }
     current = [
-        Row("steady", 5, 1140, last=OLD),
         Row("returning", 4, 1142, last=RECENT, result="loss"),  # fade back, minus the loss
+        Row("steady", 5, 1140, last=BEFORE),
     ]
     moved = {c.name: c for c in diff(previous, current, {}, on=TODAY)}
 
-    assert "Returning" not in moved, "lost, and would have been announced as up"
-    assert moved["Steady"].kind == DOWN, "passed by somebody who fought, so still news"
+    assert moved["Returning"].kind == RETURNED
+    assert moved["Returning"].now == 4 and moved["Returning"].reason == "a loss"
+    assert "Steady" not in moved, "passed by a layoff coming off, not by a result"
 
 
 def test_a_fighter_who_wins_and_climbs_is_still_announced():
-    previous = {"a": ranked("a", 2, 1100, last=OLD), "b": ranked("b", 1, 1120, last=OLD)}
+    previous = {"a": ranked("a", 2, 1100, last=BEFORE), "b": ranked("b", 1, 1120, last=BEFORE)}
     current = [
         Row("a", 1, 1150, last=RECENT, result="win"),
-        Row("b", 2, 1120, last=OLD),
+        Row("b", 2, 1120, last=BEFORE),
     ]
     moved = {c.name: c for c in diff(previous, current, {}, on=TODAY)}
 
     assert moved["A"].kind == UP and moved["A"].reason == "a win"
+
+
+def test_a_return_reads_as_a_place_rather_than_a_climb():
+    """An arrow between two places would be describing the layoff ending and
+    attributing it to the fight."""
+    previous = {"rda": ranked("rda", 10, 1042, last=OLD), "aldo": ranked("aldo", 9, 1065, last=BEFORE)}
+    current = [
+        Row("rda", 9, 1064, last=RECENT, result="loss", name="Rafael Dos Anjos"),
+        Row("aldo", 10, 1065, last=BEFORE, name="Jose Aldo"),
+    ]
+    value = ratings_changes_embed(
+        "Lightweight", diff(previous, current, {}, on=TODAY)
+    ).fields[0].value.replace(" ", " ")
+
+    assert "back, now **9**" in value and "after a loss" in value
+    assert "→" not in value, "no arrow; he lost"
+    assert "Jose Aldo" not in value, "passed by a layoff coming off, not by a result"

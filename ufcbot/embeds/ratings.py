@@ -7,7 +7,7 @@ import discord
 from ..util import truncate
 from .common import DASH, UFC_RED, add_chunked_fields, join, keep, plural, stamp
 
-ARROWS = {"entered": "🆕", "left": "🚪", "up": "🔼", "down": "🔽"}
+ARROWS = {"entered": "🆕", "left": "🚪", "up": "🔼", "down": "🔽", "returned": "↩️"}
 
 
 
@@ -152,6 +152,12 @@ def ratings_changes_embed(division: str, changes: list) -> discord.Embed:
             what = f"in at **{change.now}**"
         elif change.kind == "left":
             what = f"out, was **{change.was}**"
+        elif change.kind == "returned":
+            # Where they are, not how they got there. A fighter back from a
+            # layoff is handed the fade back and pays for the result out of it,
+            # so an arrow between two places would be describing the layoff
+            # ending and attributing it to the fight.
+            what = f"back, now **{change.now}**"
         else:
             what = f"**{change.was} → {change.now}**"
         facts = [what, f"after {change.reason}"]

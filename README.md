@@ -587,14 +587,22 @@ question is asked per move: this fighter, or somebody they actually passed. That
 knock-on, which is the half worth keeping — a fighter dropping because the man below them
 won is news they had no part in.
 
-A move that contradicts the result is not announced either. The fade comes off the moment a
-fighter fights, so someone returning from the fade band gets their layoff back and pays for
-the result out of it: carrying more than half of K — sixteen points, about fourteen months
-idle for a fighter two hundred above the starting rating — they come back from a **loss**
-with a higher number than they left with, and the board moves them up. Poirier is carrying
-twenty-one points of it today and Dos Anjos thirty-eight. The board can show the reset,
-because it is where the rating now is; the sentence cannot, because there is no way to say
-a man lost and climbed that is not simply wrong.
+**A fighter back from a layoff is reported by result and place, never by direction** —
+"back, now 9th · after a loss". The fade comes off the moment a fighter fights, so a
+returning fighter is handed their layoff back and pays for the result out of it: carrying
+more than half of K — sixteen points, about fourteen months idle for a fighter two hundred
+above the starting rating — they come back from a **loss** with a higher number than they
+left with, and the board moves them up. Poirier is carrying twenty-one points of that today
+and Dos Anjos thirty-eight.
+
+Saying "up to 9th" of a man who just lost is wrong. Saying nothing is worse, and was the
+first attempt here: it reports a returning fighter's wins and swallows their losses, which
+flatters exactly the fighters least able to carry it, and "former champion loses on return"
+is usually the bigger story. So the arrow goes and the sentence keeps the result.
+
+The fighters they passed are not reported either. Being overtaken by a layoff coming off is
+not being overtaken by a result, and without that, Dos Anjos losing and climbing twenty-two
+points of fade produces "Jose Aldo drops to 10th" as the fallout of a defeat.
 
 Leaving the board cannot be tested for crossings, because the fighter is no longer there to
 compare anyone against. Ageing out at the eighteen-month cutoff is always announced; being
@@ -808,7 +816,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-298 tests, a few seconds, no network and no Discord. One file per module it covers: they run against a real SQLite
+299 tests, a few seconds, no network and no Discord. One file per module it covers: they run against a real SQLite
 database in a temporary directory and fight cards built by hand. Most of them are about
 what happens when a card changes underneath the bot, because that is where the awkward
 cases live -- a fighter replaced, a fight cancelled, a card that only half-loaded -- and

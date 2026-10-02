@@ -22,6 +22,7 @@ from ..embeds import ratings_changes_embed
 from ..records import GuildSettings, RankedState
 from ..stats.career import Ledger
 from ..stats.rankings import (
+    DECAY_GRACE,
     divisions_with_fighters,
     is_eligible,
     is_fading,
@@ -37,6 +38,15 @@ ENTERED = "entered"
 LEFT = "left"
 UP = "up"
 DOWN = "down"
+RETURNED = "returned"
+"""Back from a layoff long enough to have been fading.
+
+Reported as a result and a place rather than as a direction. The fade comes off
+the moment a fighter fights, so a returning fighter is handed their layoff back
+and pays for the result out of it -- a loss can leave them higher than they went
+in. Saying "up to 4th" of a man who just lost is wrong, and saying nothing is
+worse: it would report the wins of returning fighters and not their losses,
+which flatters exactly the fighters least able to carry it."""
 
 # Why a fighter's standing moved.
 AFTER_RESULT = {"win": "a win", "loss": "a loss", "draw": "a draw", "nc": "a no contest"}
@@ -116,6 +126,14 @@ def diff(
     # the board knew about means a card has happened since it was published.
     newest_known = max((was.last_fight for was in previous.values() if was.last_fight), default=None)
 
+    def returning(entry, was) -> bool:
+        """Back from long enough to have been fading."""
+        return (
+            entry.key in fought
+            and was.last_fight is not None
+            and on - was.last_fight > DECAY_GRACE
+        )
+
     def contradicts_the_result(entry, was) -> bool:
         """A rise after a loss, or a fall after a win.
 
@@ -127,9 +145,11 @@ def diff(
         and the board moves them up. Poirier is carrying twenty-one points of it
         today and Dos Anjos thirty-eight.
 
-        The board can show the reset, because it is where the rating now is. The
-        sentence about it cannot, because there is no sentence about a man losing
-        and climbing that is not simply wrong.
+        Used to decide whether a *bystander* has anything to report. Being passed
+        by a fighter whose own move contradicts their result is being passed by a
+        layoff coming off rather than by a result, and there is nothing to say
+        about it: without this, Dos Anjos losing and climbing twenty-two points
+        of fade produces "Aldo drops to 10th" as the fallout of a defeat.
         """
         if entry.key not in fought or not entry.last_result:
             return False
@@ -143,6 +163,8 @@ def diff(
         for other in current:
             if other.key == entry.key or other.key not in fought or other.key not in previous:
                 continue
+            if contradicts_the_result(other, previous[other.key]):
+                continue  # passed by a layoff coming off, not by a result
             before = previous[entry.key].rank - previous[other.key].rank
             after = entry.rank - other.rank
             if before * after < 0:  # they were on opposite sides of each other
@@ -162,7 +184,13 @@ def diff(
             )
             if arrived_by_fighting or aged_off:
                 changes.append(RatingChange(ENTERED, entry.name, None, entry.rank, entry.rating, reason))
-        elif entry.rank == was.rank or contradicts_the_result(entry, was) or not worth_saying(entry):
+        elif entry.rank == was.rank:
+            continue  # the board still shows them where it did
+        elif returning(entry, was):
+            # No direction word: the place is where they are and the result is
+            # what happened, and the two are not joined the way "up to 4th" says.
+            changes.append(RatingChange(RETURNED, entry.name, was.rank, entry.rank, entry.rating, reason))
+        elif not worth_saying(entry):
             continue
         elif entry.rank < was.rank:
             changes.append(RatingChange(UP, entry.name, was.rank, entry.rank, entry.rating, reason))
@@ -183,7 +211,7 @@ def diff(
             changes.append(RatingChange(LEFT, name, was.rank, None, None, _reason(None, was, ledger, on)))
 
     # Biggest movers first, and anyone entering or leaving ahead of a shuffle.
-    order = {ENTERED: 0, LEFT: 1, UP: 2, DOWN: 3}
+    order = {ENTERED: 0, LEFT: 1, RETURNED: 2, UP: 3, DOWN: 4}
     changes.sort(key=lambda c: (order[c.kind], c.now or c.was or 99))
     return changes
 
