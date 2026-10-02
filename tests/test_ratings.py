@@ -107,3 +107,60 @@ def test_the_embed_reads_as_what_happened():
 
     assert "Islam Makhachev" in value and "3 → 1" in value and "after a win" in value
     assert "Old Timer" in value and "out, was **5**" in value
+
+
+def test_a_board_that_only_got_a_day_older_has_not_moved():
+    """The displayed rating fades by the day a fighter is idle, so a board drifts
+    with nobody fighting. Over 180 days that produced 130 reported moves, 112 of
+    which were nobody passing anybody. A fighter slipping a place because the
+    calendar advanced is not news."""
+    from ufcbot.features.ratings import diff
+    from ufcbot.records import RankedState
+    from ufcbot.stats.rankings import Ranked
+
+    fought_on = date(2026, 1, 10)
+    before = {
+        "a": RankedState("a", 1, 1100, fought_on),
+        "b": RankedState("b", 2, 1098, fought_on),
+    }
+    # They swap, and neither has fought since.
+    after = [
+        Ranked(rank=1, name="B", rating=1099, division="Lightweight", record="9-1-0",
+               key="b", last_fight=fought_on),
+        Ranked(rank=2, name="A", rating=1097, division="Lightweight", record="9-2-0",
+               key="a", last_fight=fought_on),
+    ]
+    assert diff(before, after, {}, on=TODAY) == []
+
+
+def test_a_board_that_moved_because_somebody_fought_is_reported():
+    from ufcbot.features.ratings import diff
+    from ufcbot.records import RankedState
+    from ufcbot.stats.rankings import Ranked
+
+    before = {
+        "a": RankedState("a", 1, 1100, date(2026, 1, 10)),
+        "b": RankedState("b", 2, 1098, date(2026, 1, 10)),
+    }
+    after = [
+        Ranked(rank=1, name="B", rating=1130, division="Lightweight", record="10-1-0",
+               key="b", last_fight=date(2026, 3, 1), last_result="win"),
+        Ranked(rank=2, name="A", rating=1100, division="Lightweight", record="9-2-0",
+               key="a", last_fight=date(2026, 1, 10)),
+    ]
+    moves = diff(before, after, {}, on=TODAY)
+
+    assert [(c.name, c.was, c.now) for c in moves] == [("B", 2, 1), ("A", 1, 2)]
+
+
+def test_ageing_off_the_board_is_still_reported_without_a_fight():
+    """Eighteen months without a fight is a change of state rather than drift,
+    and it is the one thing about an idle fighter worth saying."""
+    from ufcbot.features.ratings import LEFT, diff
+    from ufcbot.records import RankedState
+
+    before = {"gone": RankedState("gone", 3, 1050, date(2024, 1, 1))}
+
+    moves = diff(before, [], {}, on=TODAY)
+
+    assert [c.kind for c in moves] == [LEFT]

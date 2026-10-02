@@ -487,14 +487,26 @@ at windows of one, three, five and eight fights).
 apart and not — the paragraph above gives that, and it is nine times wider. It is the
 narrower claim that five points puts two fighters in no particular order.
 
-It does not debounce the ratings-move announcements, which was the first reason given for
-keeping it and is wrong. A hard threshold does not remove flapping, it moves it to the
-boundary: a pair 4.9 points apart is tied, 5.1 apart is not, and the split reads as a rank
-change although nobody passed anybody. Simulating 180 days with no fights at all — the
-displayed rating drifts on its own, because the layoff fade moves it every day — gives 130
-moves counted by shared rank against 132 counted by who actually passed whom. The grouping
-suppresses about as many real swaps inside a tie as it invents at the edges of one. It is
-presentation, and nothing rests on it. Across the divisional boards
+It is presentation and nothing rests on it. It was briefly claimed here that it also kept
+the ratings-move announcements quiet, by stopping a point of drift being reported as a
+fighter moving up. That was measured and is wrong twice over.
+
+A hard threshold does not remove flapping, it moves it to the boundary: a pair 4.9 points
+apart is tied, 5.1 apart is not, and the split reads as a rank change although nobody
+passed anybody. The layoff fade supplies the crossings for free, because it moves a
+displayed rating every day with no fight behind it. Simulated over 180 days with no fights
+at all, the counts come to 130 moves by shared rank against 132 by who actually passed
+whom — but a net of two is not a wash, and the components are what matter:
+
+| | |
+| --- | --- |
+| reported as a move, nobody passed anybody | 112 |
+| somebody passed somebody, not reported | 114 |
+| both agree a move happened | 18 |
+
+So of 130 reported moves, 112 were invented and 18 were real. That is a fault in the
+announcements rather than in the grouping, and it is [fixed where it belongs](#ratings-moves).
+Across the divisional boards
 the median gap between neighbours is under four points, and a single result moves a rating
 by up to 32, so most adjacent pairs are inside the noise of one fight. Sorting those into
 1st and 2nd claims a precision the number does not have. Fighters within five points share
@@ -558,6 +570,19 @@ fighter across a division change, earned against whoever they have actually face
 
 Only the last board posted carries the explanation, so the channel says it once rather than
 a dozen times.
+
+### Ratings moves
+
+A move is announced only when somebody fought. A board drifts on its own, because the
+displayed rating fades by the day a fighter is idle, and over 180 days with nothing
+happening that drift produced 130 reported moves — 112 of them nobody passing anybody, and
+none of them news. "Dustin Poirier is down to 6th after a long layoff" is a true sentence
+the bot can emit on an arbitrary Tuesday because a rounding boundary moved, and it reads
+exactly like a sentence about something that happened.
+
+Entering and leaving are still announced either way. Ageing off the board after eighteen
+months is a change of state rather than drift, and it is the one thing about an idle
+fighter worth saying.
 
 When a board moves, the move is posted to the live channel with its reason: a fighter's own
 win or loss, a long layoff pulling their rating down, eighteen months without a fight, or
@@ -760,7 +785,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-288 tests, a few seconds, no network and no Discord. One file per module it covers: they run against a real SQLite
+291 tests, a few seconds, no network and no Discord. One file per module it covers: they run against a real SQLite
 database in a temporary directory and fight cards built by hand. Most of them are about
 what happens when a card changes underneath the bot, because that is where the awkward
 cases live -- a fighter replaced, a fight cancelled, a card that only half-loaded -- and
