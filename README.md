@@ -464,19 +464,30 @@ having never held one.
 
 **The order is a best guess, not a measurement.** Measured across every fight on record,
 100 rating points is worth about 11 points of win rate, so two fighters within about 45
-points of each other are a coin flip — and most of a divisional board sits inside that. A
+points of each other are inside a 55/45 edge — and most of a divisional board sits inside
+that. A
 board grouped honestly at that threshold is three tiers rather than fifteen ranks, with
 nine fighters sharing third at flyweight and thirteen of fifteen in one tier at
 welterweight. The ranks are kept because the ordering is still the best available guess and
 a board of three tiers is not one anybody can read, but the note on the board says plainly
 that it is a guess.
 
-That figure is also a check on the rating scale itself. A 400-point Elo scale implies 14.4
-points of win rate per 100, and the ratings deliver 10.7 — so the gaps between fighters are
-overstated by about a third, and a scale of roughly 540 would describe them. That is a
-property of the rating, not of the boards.
+That figure is also a check on the rating itself. A 400-point Elo scale implies 14.4 points
+of win rate per 100 and the ratings deliver 10.7, so the gaps are overstated by about a
+third. The tempting conclusion — that the scale should be 540 — is wrong, or at least not
+established: a predictor carrying measurement error produces a flatter fitted slope than
+the real relationship, and with K fixed at 32 every rating carries a K-sized random
+component. That is the same fact the flat σ(n) shows from the other side. So 10.7 is the
+right number for the caption, because it describes what the ratings *as displayed* predict,
+which is what a reader needs — but it is not a divisor waiting to be changed. Smoothing the
+predictor to test this came back too noisy to settle (7.6, 9.5, 4.0 and 14.3 points per 100
+at windows of one, three, five and eight fights).
 
-**Ratings too close to separate share a rank,** marked `=`. Across the divisional boards
+**Ratings within five points share a rank,** marked `=`. That is not the line between told
+apart and not — the paragraph above gives that, and it is nine times wider. Five points is
+the narrower claim that two ratings are the same number for any purpose, and it earns its
+keep outside the board: the ratings-move announcements compare ranks, so a shared rank is
+what stops a one-point drift being announced as a fighter moving up. Across the divisional boards
 the median gap between neighbours is under four points, and a single result moves a rating
 by up to 32, so most adjacent pairs are inside the noise of one fight. Sorting those into
 1st and 2nd claims a precision the number does not have. Fighters within five points share
