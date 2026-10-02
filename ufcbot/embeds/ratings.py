@@ -29,15 +29,26 @@ def _rating_lines(entries: list, *, with_division: bool, career: bool = False) -
         # shared rank is a character wider again, which is what pushed the
         # names out of line.
         badge = f"`{'=' if entry.tied else ' '}{entry.rank:>2}`"
-        facts = [f"**{entry.rating}**", entry.record]
-        if with_division and entry.division:
-            facts.append(entry.division)
+        facts = [f"**{entry.rating}**"]
+        # The record and the division are alternatives rather than both. A
+        # divisional board has no division to give, so the record is the context
+        # there; pound for pound the division is, and carrying both put the
+        # all-time list over the 1024 characters Discord allows in one field --
+        # which it does not refuse, it just splits, leaving a gap through the
+        # middle of a ranking.
+        if career and with_division:
+            facts.append(entry.division or entry.record)
+        else:
+            facts.append(entry.record)
+            if with_division and entry.division:
+                facts.append(entry.division)
         # The belt is shown rather than ranked on. It is the one thing a reader
         # already knows and will look for, and its absence next to the top name
         # is the question the board was getting asked.
         belt = " 🏆" if entry.champion else (" 🎖️" if entry.former_champion else "")
         if career and entry.defences:
             facts.insert(1, plural(entry.defences, "defence"))
+
         lines.append(f"{badge} {keep(entry.name)}{belt} · {join(facts)}")
     return lines
 

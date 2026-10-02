@@ -421,3 +421,41 @@ def test_a_champion_is_not_also_marked_as_a_former_one():
     # zero and he still held a belt.
     assert interim_only.former_champion
     assert not never.former_champion
+
+
+def test_a_full_ranking_is_never_split_across_two_fields():
+    """Past 1024 characters Discord does not refuse a field, it takes the second
+    half into a field of its own -- which puts a gap through the middle of a
+    ranking, between 10th and 14th. A fifteen-deep board has to fit in one.
+
+    Built from the real pound-for-pound board, which is the longest of them
+    because it is the only one carrying a division on every line. It comes to
+    about 970 of the 1024, which is why that line carries the division or the
+    record and not both.
+    """
+    from ufcbot.embeds import rankings_embed
+    from ufcbot.embeds.common import FIELD_LIMIT
+    from ufcbot.stats.rankings import Ranked
+
+    board = [
+        ("Jon Jones", "Light Heavyweight", 12), ("Georges St-Pierre", "Welterweight", 9),
+        ("Anderson Silva", "Middleweight", 10), ("Demetrious Johnson", "Flyweight", 11),
+        ("Islam Makhachev", "Lightweight", 5), ("Amanda Nunes", "Women's Bantamweight", 8),
+        ("Valentina Shevchenko", "Women's Flyweight", 9), ("Kamaru Usman", "Welterweight", 5),
+        ("Alexander Volkanovski", "Featherweight", 6), ("Matt Hughes", "Welterweight", 7),
+        ("Israel Adesanya", "Middleweight", 5), ("Max Holloway", "Featherweight", 3),
+        ("Stipe Miocic", "Heavyweight", 4), ("Daniel Cormier", "Light Heavyweight", 4),
+        ("Chuck Liddell", "Light Heavyweight", 4),
+    ]
+    rows = [
+        Ranked(rank=i, name=name, rating=1550 - i * 20, record="22-1-0 (1 NC)",
+               division=division, key=name, defences=defences,
+               champion=i == 5, former_champion=i != 5)
+        for i, (name, division, defences) in enumerate(board, 1)
+    ]
+    for p4p in (False, True):
+        embed = rankings_embed("Pound for pound" if p4p else "Lightweight", rows,
+                               pound_for_pound=p4p, all_time=rows)
+        for field in embed.fields:
+            assert len(field.value) <= FIELD_LIMIT, f"{field.name} splits at {len(field.value)}"
+        assert len(embed.fields) == 2, "one field each for current and all time"

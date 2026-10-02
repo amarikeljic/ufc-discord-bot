@@ -230,10 +230,14 @@ def rank_division(
 def career_score(ledger: Ledger) -> int:
     """What a fighter did, as one number: how good they got, and what they won.
 
-    The peak is the rating held across three fights rather than the one they
-    retired with, because a career judged on its last day is a career judged on
-    its decline -- Anderson Silva gave back 120 points going 1-6 at the end, and
-    finished below fighters he would have beaten in his sleep.
+    The peak rather than the rating they retired with, because a career judged
+    on its last day is a career judged on its decline -- Anderson Silva gave back
+    120 points going 1-6 at the end, and finished below fighters he would have
+    beaten in his sleep.
+
+    Taking the peak also keeps the two boards consistent: a current rating is
+    this rating faded by a layoff, so it can never be higher than the all-time
+    number printed beneath it.
     """
     return round(
         ledger.peak_elo

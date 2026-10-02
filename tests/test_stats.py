@@ -591,16 +591,24 @@ def test_a_tournament_final_is_not_a_title_defence():
     assert not is_lineal_title(False, "UFC Lightweight Bout"), "not a title fight at all"
 
 
-def test_the_peak_is_a_run_rather_than_one_good_night():
-    """One upset can put a rating at a number the fighter never held again."""
-    from ufcbot.stats.career import _sustained_peak
+def test_an_all_time_score_is_never_below_the_current_rating_beside_it():
+    """The two boards sit one above the other, so an all-time number lower than
+    the current one reads as a bug rather than as a different quantity. It
+    cannot happen: a current rating is the rating faded by a layoff, the peak is
+    the highest that rating ever was, and title credit only adds."""
+    from ufcbot.stats.rankings import career_score, rating_on
 
-    spike = [1000, 1000, 1200, 1000, 1000]
-    run = [1100, 1110, 1120, 1130, 1140]
+    led = rated("Someone", 1150, fights=12, ago=900)
+    led.peak_elo = 1190
 
-    assert _sustained_peak(spike) < _sustained_peak(run)
-    assert _sustained_peak([]) == 1000.0
-    assert _sustained_peak([1300]) == 1300, "too short to average is still a peak"
+    assert rating_on(led, TODAY) <= led.elo <= led.peak_elo <= career_score(led)
+
+
+def test_the_peak_is_the_best_rating_ever_held():
+    from ufcbot.stats.career import _peak
+
+    assert _peak([1000, 1180, 1050]) == 1180
+    assert _peak([]) == 1000.0
 
 
 def test_the_belt_goes_to_the_last_title_fight_won_not_the_last_lineal_one():

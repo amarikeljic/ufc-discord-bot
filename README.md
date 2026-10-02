@@ -477,11 +477,18 @@ rating a fighter *retired* with it is worse still, because that judges a career 
 decline: Silva went 1-6 at the end and gave back 120 points, finishing below fighters he
 would have beaten in his sleep.
 
-So the all-time boards rank on a career score: the best rating a fighter held across three
-consecutive fights, plus 15 points for every title defence and 5 for every title won. The
-defences are printed on each line, because that number is a career score and not a rating:
-without them it invites a comparison with the board above that does not hold, and a
-three-fight peak can sit below the single rating a fighter carries today. Three
+So the all-time boards rank on a career score: the best rating a fighter ever held, plus 15
+points for every title defence and 5 for every title won. The defences are printed on each
+line, because that number is a career score and not a rating and the two boards sit one
+above the other.
+
+The peak rather than an average over the fighter's best few fights, which is what it was
+at first. Smoothing it meant a current rating could come out *above* the all-time number
+printed under it — Gane 1170 against 1157 — which reads as a bug rather than as a different
+quantity. A plain peak cannot do that: a current rating is the rating faded by a layoff, so
+it can never be higher than the highest that rating has been. Smoothing turned out not to
+be what kept the one-good-run careers down anyway; the title credit was. Across all 2,765
+fighters there is now no case of a current rating above an all-time one. Three
 fights rather than one because a single upset is not a peak. The belt is in there because
 it is what the sport settles arguments with and the only thing the fighters are competing
 for, and it is worth about a tenth of a divisional board's spread. Every pairing that read
@@ -494,6 +501,12 @@ wrong without it reads right with it:
 | Light Heavyweight | — | Jones, Cormier, Liddell, Ortiz |
 | Welterweight | — | St-Pierre, Usman, Hughes |
 | All time | Jones, Makhachev, St-Pierre, Oliveira | Jones, St-Pierre, Silva, Johnson |
+
+An all-time line carries the division or the record, not both. Fifteen of them with both
+runs past the 1024 characters Discord allows in one field, which it does not refuse — it
+takes the overflow into a field of its own, leaving a gap through the middle of a ranking.
+Pound for pound the division is the context; on a divisional board, where there is no
+division to give, the record is.
 
 Only the undisputed belt counts. ufcstats flags three different things as title fights and
 two of them are not the belt — an interim title, and the final of a Ultimate Fighter
@@ -715,7 +728,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-286 tests, a few seconds, no network and no Discord. One file per module it covers: they run against a real SQLite
+288 tests, a few seconds, no network and no Discord. One file per module it covers: they run against a real SQLite
 database in a temporary directory and fight cards built by hand. Most of them are about
 what happens when a card changes underneath the bot, because that is where the awkward
 cases live -- a fighter replaced, a fight cancelled, a card that only half-loaded -- and

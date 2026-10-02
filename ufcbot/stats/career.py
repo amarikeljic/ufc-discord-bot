@@ -194,12 +194,11 @@ class Ledger:
     the fighter belongs.
     """
     peak_elo: float = ELO_START
-    """The best rating held across three consecutive fights.
+    """The best rating they ever held.
 
     The rating a career is judged on, where ``elo`` is the rating a fighter
-    carries now. Final rating punishes anyone who fought past their peak --
-    Anderson Silva finished 1-6 and gave back 120 points of it -- and a single
-    best fight rewards one good night. Three in a row is a run."""
+    carries now. Final rating punishes anyone who fought past their peak:
+    Anderson Silva finished 1-6 and gave back 120 points of it."""
 
     title_wins: int = 0
     """Undisputed title fights won. Interim belts and tournament finals are not
@@ -514,21 +513,18 @@ def is_lineal_title(title_fight: bool, weight_class: str) -> bool:
     """
     return bool(title_fight) and not _NOT_THE_BELT.search(weight_class or "")
 
-# How many fights in a row a peak has to be held for. One great night is not a
-# peak; three in a row is the shortest run that cannot be a single upset.
-PEAK_RUN = 3
+def _peak(ratings: list[float]) -> float:
+    """The best rating a fighter ever held.
 
-
-def _sustained_peak(ratings: list[float]) -> float:
-    """The best average rating held across ``PEAK_RUN`` consecutive fights."""
-    if not ratings:
-        return ELO_START
-    if len(ratings) < PEAK_RUN:
-        return max(ratings)
-    return max(
-        sum(ratings[i : i + PEAK_RUN]) / PEAK_RUN
-        for i in range(len(ratings) - PEAK_RUN + 1)
-    )
+    This was an average over three fights, to stop one good night counting as a
+    peak. It is a plain maximum now for a reason that outweighs that: a current
+    rating is this rating faded by a layoff, so it can never exceed the highest
+    it has been -- but it can easily exceed a three-fight average of it, and a
+    board showing an all-time number *below* the current one beside it reads as
+    a bug rather than as a different quantity. Smoothing turned out not to be
+    what kept the one-good-run careers down anyway; the title credit was.
+    """
+    return max(ratings, default=ELO_START)
 
 
 @dataclass(frozen=True, slots=True)
@@ -746,7 +742,7 @@ def build_history(dataset: Dataset, *, keep_snapshots: bool = True) -> History:
     for key, counts in division_fights.items():
         history.ledgers[key].home_division = counts.most_common(1)[0][0]
     for key, ratings in rating_path.items():
-        history.ledgers[key].peak_elo = _sustained_peak(ratings)
+        history.ledgers[key].peak_elo = _peak(ratings)
     history.champions = dict(champion)
     for key in champion.values():
         history.ledgers[key].champion = True
