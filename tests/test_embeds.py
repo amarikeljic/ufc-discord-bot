@@ -408,11 +408,16 @@ def test_a_champion_is_not_also_marked_as_a_former_one():
     from ufcbot.stats.career import Ledger
 
     champ = Ledger(name="Champ")
-    champ.title_wins, champ.champion = 3, True
+    champ.held_belt, champ.champion = True, True
     lost_it = Ledger(name="Lost it")
-    lost_it.title_wins, lost_it.champion = 3, False
+    lost_it.held_belt, lost_it.champion = True, False
+    interim_only = Ledger(name="Interim only")
+    interim_only.held_belt, interim_only.title_wins = True, 0
     never = Ledger(name="Never")
 
     assert not champ.former_champion, "holding it now is not having held it"
     assert lost_it.former_champion
+    # Aspinall's two heavyweight belts were both interim, so the lineal count is
+    # zero and he still held a belt.
+    assert interim_only.former_champion
     assert not never.former_champion

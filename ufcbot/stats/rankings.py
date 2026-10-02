@@ -110,6 +110,10 @@ class Ranked:
     """Whether they hold the belt. Shown, never ranked on: the rating is the
     rating, and a board that reordered itself around the belt would be the UFC's
     ranking rather than this one's."""
+    defences: int = 0
+    """Title defences, shown on the all-time boards. They are most of what the
+    score there is made of, and printing them stops the number reading as a
+    rating that can be compared with the board above."""
     former_champion: bool = False
     """Held one once. On a current board it is most of the answer to why someone
     is up there; on an all-time board the absence of it is the interesting half,
@@ -194,6 +198,7 @@ def _ranked(entries: list[tuple[int, str, Ledger]], *, home: bool = False) -> li
                 key=key,
                 champion=ledger.champion,
                 former_champion=ledger.former_champion,
+                defences=ledger.title_defences,
                 last_fight=ledger.last_fight,
                 last_result=ledger.last_result,
             )

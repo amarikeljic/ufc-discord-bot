@@ -5,13 +5,21 @@ from __future__ import annotations
 import discord
 
 from ..util import truncate
-from .common import DASH, UFC_RED, add_chunked_fields, join, keep, stamp
+from .common import DASH, UFC_RED, add_chunked_fields, join, keep, plural, stamp
 
 ARROWS = {"entered": "🆕", "left": "🚪", "up": "🔼", "down": "🔽"}
 
 
 
-def _rating_lines(entries: list, *, with_division: bool) -> list[str]:
+def _rating_lines(entries: list, *, with_division: bool, career: bool = False) -> list[str]:
+    """One line per fighter.
+
+    ``career`` prints the all-time boards, whose number is a career score rather
+    than a rating -- a peak plus what the fighter won with it. Printing the
+    defences alongside is what stops it reading as the same quantity as the
+    board above, where it would look wrong: a three-fight peak can sit below the
+    single rating a fighter carries today.
+    """
     lines = []
     for entry in entries:
         # A shared rank keeps its number but loses the medal: a joint first is
@@ -28,6 +36,8 @@ def _rating_lines(entries: list, *, with_division: bool) -> list[str]:
         # already knows and will look for, and its absence next to the top name
         # is the question the board was getting asked.
         belt = " 🏆" if entry.champion else (" 🎖️" if entry.former_champion else "")
+        if career and entry.defences:
+            facts.insert(1, plural(entry.defences, "defence"))
         lines.append(f"{badge} {keep(entry.name)}{belt} · {join(facts)}")
     return lines
 
@@ -65,7 +75,7 @@ def rankings_embed(
         add_chunked_fields(
             embed,
             "🐐 All Time Ratings",
-            _rating_lines(all_time, with_division=pound_for_pound),
+            _rating_lines(all_time, with_division=pound_for_pound, career=True),
         )
     if note:
         # Chunked rather than added whole: the explanation covers two boards now

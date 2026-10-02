@@ -208,12 +208,17 @@ class Ledger:
     """Title fights won while already holding that division's belt."""
     champion: bool = False
     """Whether they hold their division's belt as the data last saw it."""
+    held_belt: bool = False
+    """Whether they ever won a title fight, interim ones included.
+
+    Not ``title_wins > 0``, which counts the lineal belt only: Aspinall's two
+    heavyweight titles were both interim, and a fighter who held a belt held a
+    belt whatever the data calls it."""
 
     @property
     def former_champion(self) -> bool:
-        """Held a belt once and does not now. Derived rather than stored: it is
-        two fields that are already here."""
-        return self.title_wins > 0 and not self.champion
+        """Held a belt once and does not now."""
+        return self.held_belt and not self.champion
 
     home_division: str | None = None
     """The division they fought in most, which is not always the last one.
@@ -634,6 +639,7 @@ def build_history(dataset: Dataset, *, keep_snapshots: bool = True) -> History:
     # lives on the ledgers the bot then keeps in memory.
     rating_path: dict[str, list[float]] = defaultdict(list)
     champion: dict[str, str] = {}
+    lineal: dict[str, str] = {}
 
     for fight in dataset.fights.itertuples(index=False):
         key_a, key_b = normalise(fight.fighter_a), normalise(fight.fighter_b)
@@ -703,19 +709,28 @@ def build_history(dataset: Dataset, *, keep_snapshots: bool = True) -> History:
         rating_path[key_a].append(ledger_a.elo)
         rating_path[key_b].append(ledger_b.elo)
 
-        # A belt changes hands, or is kept. An interim title is not the belt and
-        # a tournament final is not a title; counting either hands a champion's
-        # own defences back to them as fresh reigns.
-        if (
-            fight.winner in ("a", "b")
-            and division
-            and is_lineal_title(bool(fight.title_fight), str(fight.weight_class))
-        ):
+        # Two different questions, so two different rules.
+        #
+        # How many belts someone won and defended follows the lineal chain only.
+        # An interim title is not the belt and a tournament final is not a title;
+        # counting either hands a champion's own defences back as fresh reigns.
+        #
+        # Who is holding a belt *now* is the winner of the division's most recent
+        # title fight, interim included. The data only ever says someone won one;
+        # it never says a champion vacated, was stripped, or was elevated from
+        # interim, so the lineal chain alone leaves the belt with whoever last won
+        # it outright however long ago that was. Aspinall vs Gane was a no contest
+        # and Aspinall then vacated, which left the heavyweight belt sitting with
+        # Jon Jones from two years earlier.
+        if fight.winner in ("a", "b") and division and bool(fight.title_fight):
             champ = key_a if fight.winner == "a" else key_b
             winner = ledger_a if fight.winner == "a" else ledger_b
-            winner.title_wins += 1
-            if champion.get(division) == champ:
-                winner.title_defences += 1
+            winner.held_belt = True
+            if is_lineal_title(True, str(fight.weight_class)):
+                winner.title_wins += 1
+                if lineal.get(division) == champ:
+                    winner.title_defences += 1
+                lineal[division] = champ
             champion[division] = champ
 
         met = history.meetings.setdefault(pair_key(key_a, key_b), Meeting())

@@ -448,6 +448,20 @@ injuries included; past that, what a fighter holds over the starting rating halv
 every further year out, and past eighteen months they are off the board altogether. Only
 the margin fades, so sitting still can never drag anyone below where they began.
 
+**A belt is shown and never ranked on.** 🏆 holds one now, 🎖️ held one once. A board that
+reordered itself around the belt would be the UFC's ranking rather than this one's, but the
+belt is the thing a reader already knows and looks for, and its absence beside the top name
+was the question the boards kept getting asked. A champion can still sit below a contender.
+
+Who holds a belt and how many belts someone won are two different questions, answered two
+different ways. The marker follows the winner of a division's most recent title fight,
+interim included; the defence count follows the undisputed chain only. The split is forced
+by what the data does not say — it records that someone won a title, never that a champion
+vacated, was stripped or was elevated. Aspinall vs Gane was a no contest and Aspinall then
+vacated, so on the lineal chain alone the heavyweight belt sat with Jon Jones from two
+years earlier, and Aspinall, whose two heavyweight titles were both interim, showed as
+having never held one.
+
 **Ratings too close to separate share a rank,** marked `=`. Across the divisional boards
 the median gap between neighbours is under four points, and a single result moves a rating
 by up to 32, so most adjacent pairs are inside the noise of one fight. Sorting those into
@@ -464,7 +478,10 @@ decline: Silva went 1-6 at the end and gave back 120 points, finishing below fig
 would have beaten in his sleep.
 
 So the all-time boards rank on a career score: the best rating a fighter held across three
-consecutive fights, plus 15 points for every title defence and 5 for every title won. Three
+consecutive fights, plus 15 points for every title defence and 5 for every title won. The
+defences are printed on each line, because that number is a career score and not a rating:
+without them it invites a comparison with the board above that does not hold, and a
+three-fight peak can sit below the single rating a fighter carries today. Three
 fights rather than one because a single upset is not a peak. The belt is in there because
 it is what the sport settles arguments with and the only thing the fighters are competing
 for, and it is worth about a tenth of a divisional board's spread. Every pairing that read
@@ -698,7 +715,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-284 tests, a few seconds, no network and no Discord. One file per module it covers: they run against a real SQLite
+286 tests, a few seconds, no network and no Discord. One file per module it covers: they run against a real SQLite
 database in a temporary directory and fight cards built by hand. Most of them are about
 what happens when a card changes underneath the bot, because that is where the awkward
 cases live -- a fighter replaced, a fight cancelled, a card that only half-loaded -- and

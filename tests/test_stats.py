@@ -601,3 +601,28 @@ def test_the_peak_is_a_run_rather_than_one_good_night():
     assert _sustained_peak(spike) < _sustained_peak(run)
     assert _sustained_peak([]) == 1000.0
     assert _sustained_peak([1300]) == 1300, "too short to average is still a peak"
+
+
+def test_the_belt_goes_to_the_last_title_fight_won_not_the_last_lineal_one():
+    """The data only ever says someone won a title. It never says a champion
+    vacated, was stripped, or was elevated from interim, so the lineal chain
+    alone leaves the belt wherever it was last won outright. Aspinall vs Gane
+    was a no contest and Aspinall then vacated, which left the heavyweight belt
+    sitting with Jon Jones from two years earlier."""
+    from ufcbot.stats.career import is_lineal_title
+
+    # The marker follows every title fight; the defence count follows only these.
+    assert is_lineal_title(True, "UFC Heavyweight Title Bout")
+    assert not is_lineal_title(True, "UFC Interim Heavyweight Title Bout")
+
+
+def test_a_belt_held_only_as_interim_still_counts_as_having_held_one():
+    """Both of Aspinall's heavyweight titles were interim, so his lineal count
+    is zero, and a fighter who held a belt held a belt."""
+    from ufcbot.stats.career import Ledger
+
+    interim_only = Ledger(name="Tom Aspinall")
+    interim_only.held_belt = True
+
+    assert interim_only.title_wins == 0
+    assert interim_only.former_champion
