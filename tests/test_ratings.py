@@ -326,8 +326,14 @@ def test_a_return_reads_as_a_place_rather_than_a_climb():
     ]
     value = ratings_changes_embed("Lightweight", diff(previous, current, {}, on=TODAY)).fields[0].value
 
-    assert value.replace(" ", " ") == (
-        "↩️ Rafael Dos Anjos · back, now **9** · after a loss · 1064"
+    # The non-breaking spaces are part of the output, not noise to be normalised
+    # away: keep() puts them inside each fact so a narrow screen cannot wrap
+    # "back, now" onto two lines, while the " · " between facts stays breakable.
+    # Replacing them here would let a change that drops them pass while the line
+    # falls apart on a phone.
+    assert value == (
+        "↩️ Rafael Dos Anjos · back, now **9**"
+        " · after a loss · 1064"
     )
 
 
