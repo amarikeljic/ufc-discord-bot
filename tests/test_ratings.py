@@ -37,9 +37,26 @@ def ledger(name: str, elo: float, *, last: date | None = RECENT, result: str = "
     return entry
 
 
-def ranked(key: str, rank: int, rating: int, last: date | None = RECENT):
-    """A board row in the shape the diff compares against."""
-    return RankedState(key, rank, rating, last)
+def ranked(key: str, rank: int, rating: int, last: date | None = RECENT, raw: int | None = None):
+    """A board row in the shape the diff compares against.
+
+    ``raw`` is the rating before the layoff fade. It defaults to the shown
+    rating, which is what a fighter who is not fading has.
+    """
+    return RankedState(key, rank, rating, last, rating if raw is None else raw)
+
+
+def fought_since(was: RankedState, rank: int, rating: int, *, result: str, name: str | None = None):
+    """A fighter who has had a fight since ``was`` was written.
+
+    The date is taken from the previous state and moved on, because a fixture
+    that leaves it alone is a fighter who did not fight -- the diff reads "did
+    they fight" from last_fight changing, and several tests here once claimed a
+    result while holding the date still, which made them silently vacuous.
+    """
+    assert was.last_fight is not None, "cannot fight again after never having fought"
+    return Row(was.fighter, rank, rating, last=was.last_fight + timedelta(days=1),
+               result=result, name=name)
 
 
 class Row:
@@ -257,7 +274,8 @@ def test_a_fighter_back_from_a_layoff_is_reported_by_result_not_direction():
     saying nothing is worse -- that reports returning fighters' wins and not
     their losses. So the result is reported, and the place, and no direction."""
     previous = {
-        "returning": ranked("returning", 5, 1137, last=OLD),   # shown faded
+        # Shown at 1137 with 21 points of fade on it; 1158 underneath.
+        "returning": ranked("returning", 5, 1137, last=OLD, raw=1158),
         "steady": ranked("steady", 4, 1140, last=BEFORE),
     }
     current = [
@@ -285,7 +303,10 @@ def test_a_fighter_who_wins_and_climbs_is_still_announced():
 def test_a_return_reads_as_a_place_rather_than_a_climb():
     """An arrow between two places would be describing the layoff ending and
     attributing it to the fight."""
-    previous = {"rda": ranked("rda", 10, 1042, last=OLD), "aldo": ranked("aldo", 9, 1065, last=BEFORE)}
+    previous = {
+        "rda": ranked("rda", 10, 1042, last=OLD, raw=1080),   # 38 points of fade
+        "aldo": ranked("aldo", 9, 1065, last=BEFORE),
+    }
     current = [
         Row("rda", 9, 1064, last=RECENT, result="loss", name="Rafael Dos Anjos"),
         Row("aldo", 10, 1065, last=BEFORE, name="Jose Aldo"),
@@ -297,3 +318,35 @@ def test_a_return_reads_as_a_place_rather_than_a_climb():
     assert "back, now **9**" in value and "after a loss" in value
     assert "→" not in value, "no arrow; he lost"
     assert "Jose Aldo" not in value, "passed by a layoff coming off, not by a result"
+
+
+def test_a_returning_winner_only_passes_the_people_the_win_passed():
+    """The direction agrees with the win, so a check on direction lets this
+    through. Poirier coming back and winning is 21 points of fade plus 16 of
+    result, and everyone he crosses inside the first 21 was passed by the layoff
+    ending. Only the ones the win took him past have anything to report."""
+    previous = {
+        # 1158 underneath, shown at 1137 with 21 points of fade.
+        "returning": ranked("returning", 6, 1137, last=OLD, raw=1158),
+        "already_below": ranked("already_below", 5, 1150, last=BEFORE),   # under him in raw
+        "genuinely_passed": ranked("genuinely_passed", 4, 1165, last=BEFORE),
+    }
+    current = [
+        Row("returning", 4, 1174, last=RECENT, result="win"),   # fade back, plus the win
+        Row("genuinely_passed", 5, 1165, last=BEFORE),
+        Row("already_below", 6, 1150, last=BEFORE),
+    ]
+    moved = {c.name: c for c in diff(previous, current, {}, on=TODAY)}
+
+    assert moved["Returning"].kind == RETURNED
+    assert "Already_Below" not in moved, "he was above them before the fight; the fade hid it"
+    assert moved["Genuinely_Passed"].kind == DOWN, "the win actually took him past this one"
+
+
+def test_a_fixture_cannot_claim_a_fight_without_moving_the_date():
+    """The helper exists because several tests here once did exactly that, and
+    passed while testing nothing."""
+    was = ranked("a", 3, 1100, last=BEFORE)
+    row = fought_since(was, 2, 1130, result="win")
+
+    assert row.last_fight > was.last_fight

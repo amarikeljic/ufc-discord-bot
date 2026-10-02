@@ -134,41 +134,35 @@ def diff(
             and on - was.last_fight > DECAY_GRACE
         )
 
-    def contradicts_the_result(entry, was) -> bool:
-        """A rise after a loss, or a fall after a win.
+    def was_above(a_key: str, b_key: str) -> bool:
+        """Was A above B before this pass, measured so a fade cannot decide it.
 
-        The fade comes off the moment a fighter fights, so someone returning
-        from the fade band gets their layoff back and pays for the result out of
-        it. Carrying more than half of K -- sixteen points, which is about
-        fourteen months idle for a fighter two hundred above the starting rating
-        -- they come back from a *loss* with a higher number than they left with,
-        and the board moves them up. Poirier is carrying twenty-one points of it
-        today and Dos Anjos thirty-eight.
+        A fighter coming back is handed their layoff back on top of the result,
+        and every place they climb inside the part they were given back is the
+        layoff ending rather than the fight. Comparing the raw ratings -- the
+        ones with nothing faded off -- is what tells the two apart, and it does
+        it the same way for a win and a loss: a defeat cannot take a raw rating
+        up past anybody, so a returning loser crosses nobody at all.
 
-        Used to decide whether a *bystander* has anything to report. Being passed
-        by a fighter whose own move contradicts their result is being passed by a
-        layoff coming off rather than by a result, and there is nothing to say
-        about it: without this, Dos Anjos losing and climbing twenty-two points
-        of fade produces "Aldo drops to 10th" as the fallout of a defeat.
+        Older rows have no raw rating stored, so those fall back to the rank the
+        board showed, which is what this did before.
         """
-        if entry.key not in fought or not entry.last_result:
-            return False
-        rose = entry.rank < was.rank
-        return rose == (entry.last_result == "loss")
+        a, b = previous[a_key], previous[b_key]
+        if a.raw and b.raw:
+            return a.raw > b.raw
+        return a.rank < b.rank
 
     def worth_saying(entry) -> bool:
-        """Did this fighter, or anyone they actually passed, have a fight?"""
+        """Did this fighter, or anyone who actually passed them, have a fight?"""
         if entry.key in fought:
             return True
         for other in current:
             if other.key == entry.key or other.key not in fought or other.key not in previous:
                 continue
-            if contradicts_the_result(other, previous[other.key]):
-                continue  # passed by a layoff coming off, not by a result
-            before = previous[entry.key].rank - previous[other.key].rank
-            after = entry.rank - other.rank
-            if before * after < 0:  # they were on opposite sides of each other
-                return True
+            was_under = was_above(entry.key, other.key)
+            now_under = entry.rank < other.rank
+            if was_under and not now_under:
+                return True  # passed by somebody, and by a result rather than a fade
         return False
 
     for entry in current:
@@ -234,7 +228,7 @@ class RatingsWatch:
             previous = await self.storage.ranking_state(division)
             await self.storage.save_ranking_state(
                 division,
-                [RankedState(e.key, e.rank, e.rating, e.last_fight) for e in current],
+                [RankedState(e.key, e.rank, e.rating, e.last_fight, e.raw) for e in current],
             )
             if not previous:
                 # First time this board has been built; the whole board is not news.

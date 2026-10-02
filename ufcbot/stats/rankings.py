@@ -102,8 +102,13 @@ class Ranked:
     rank: int
     name: str
     rating: int
+    """What the board shows: the rating with the layoff fade applied."""
     record: str
     division: str | None
+    raw: int = 0
+    """The same rating with nothing faded off it. Never shown -- it is how the
+    watcher tells a crossing caused by a result from one caused by a layoff
+    ending, and it is zero on a board built before this was kept."""
     key: str = ""
     """The dataset key, which is what a board is remembered by between passes."""
     champion: bool = False
@@ -209,6 +214,7 @@ def _ranked(
                 rank=rank,
                 name=ledger.name,
                 rating=rating,
+                raw=round(ledger.elo),
                 record=ledger.record,
                 division=(ledger.home_division or ledger.division) if home else ledger.division,
                 key=key,

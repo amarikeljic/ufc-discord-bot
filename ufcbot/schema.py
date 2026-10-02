@@ -177,6 +177,7 @@ DROP TABLE IF EXISTS pickem_results_posted;
 # Columns added after the first release; applied to existing databases on connect.
 MIGRATIONS = {
     "channel_posts": (("signature", "TEXT"),),
+    "ranking_state": (("raw", "INTEGER NOT NULL DEFAULT 0"),),
     "guild_config": (
         ("predictions_channel_id", "INTEGER"),
         ("schedule_channel_id", "INTEGER"),

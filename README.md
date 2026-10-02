@@ -600,9 +600,17 @@ first attempt here: it reports a returning fighter's wins and swallows their los
 flatters exactly the fighters least able to carry it, and "former champion loses on return"
 is usually the bigger story. So the arrow goes and the sentence keeps the result.
 
-The fighters they passed are not reported either. Being overtaken by a layoff coming off is
-not being overtaken by a result, and without that, Dos Anjos losing and climbing twenty-two
-points of fade produces "Jose Aldo drops to 10th" as the fallout of a defeat.
+The fighters they passed on the fade are not reported either, and that is decided against
+the **raw** rating rather than the displayed one. Being overtaken by a layoff coming off is
+not being overtaken by a result: a crossing counts only where the returning fighter was not
+already above that man with nothing faded off. Without it, Dos Anjos losing and climbing
+twenty-two points produces "Jose Aldo drops to 10th" as the fallout of a defeat — and a
+returning fighter who *wins* leaks the same way, since Poirier coming back is twenty-one
+points of fade plus sixteen of result and everyone inside the first twenty-one was passed
+by the calendar. Comparing raw ratings handles a win and a loss identically, because a
+defeat cannot take a raw rating up past anybody.
+
+The raw rating is kept in `ranking_state` for exactly this and is never shown.
 
 Leaving the board cannot be tested for crossings, because the fighter is no longer there to
 compare anyone against. Ageing out at the eighteen-month cutoff is always announced; being
@@ -816,7 +824,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-299 tests, a few seconds, no network and no Discord. One file per module it covers: they run against a real SQLite
+301 tests, a few seconds, no network and no Discord. One file per module it covers: they run against a real SQLite
 database in a temporary directory and fight cards built by hand. Most of them are about
 what happens when a card changes underneath the bot, because that is where the awkward
 cases live -- a fighter replaced, a fight cancelled, a card that only half-loaded -- and

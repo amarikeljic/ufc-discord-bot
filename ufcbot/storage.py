@@ -359,13 +359,13 @@ class Storage:
     async def ranking_state(self, division: str) -> dict[str, RankedState]:
         """Who was on this board last time, by fighter key."""
         async with self.db.execute(
-            "SELECT fighter, rank, rating, last_fight FROM ranking_state WHERE division = ?",
+            "SELECT fighter, rank, rating, last_fight, raw FROM ranking_state WHERE division = ?",
             (division,),
         ) as cursor:
             rows = await cursor.fetchall()
         return {
             row["fighter"]: RankedState(
-                row["fighter"], row["rank"], row["rating"], _parse_date(row["last_fight"])
+                row["fighter"], row["rank"], row["rating"], _parse_date(row["last_fight"]), row["raw"]
             )
             for row in rows
         }
@@ -374,11 +374,18 @@ class Storage:
         await self.db.execute("DELETE FROM ranking_state WHERE division = ?", (division,))
         await self.db.executemany(
             """
-            INSERT INTO ranking_state (division, fighter, rank, rating, last_fight)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO ranking_state (division, fighter, rank, rating, last_fight, raw)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
             [
-                (division, e.fighter, e.rank, e.rating, e.last_fight.isoformat() if e.last_fight else None)
+                (
+                    division,
+                    e.fighter,
+                    e.rank,
+                    e.rating,
+                    e.last_fight.isoformat() if e.last_fight else None,
+                    e.raw,
+                )
                 for e in entries
             ],
         )
