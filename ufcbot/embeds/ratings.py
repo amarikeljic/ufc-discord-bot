@@ -4,14 +4,57 @@ from __future__ import annotations
 
 import discord
 
+from ..stats.rankings import win_chance
 from ..util import truncate
-from .common import DASH, UFC_RED, add_chunked_fields, join, keep, plural, stamp
+from .common import (
+    DASH,
+    UFC_RED,
+    add_chunked_fields,
+    join,
+    keep,
+    plural,
+    stamp,
+    surname,
+)
 
 ARROWS = {"entered": "🆕", "left": "🚪", "up": "🔼", "down": "🔽", "returned": "↩️"}
 
 
 
-def _rating_lines(entries: list, *, with_division: bool, career: bool = False) -> list[str]:
+def _odds_against(entry, champion, fading: bool) -> str | None:
+    """What the board says this fighter would do against the champion.
+
+    Shown instead of a tie marker, because a tie band says two fighters cannot be
+    told apart without ever saying how far apart "cannot be told apart" is, and
+    this says it in a unit everybody already reads.
+
+    Against the champion rather than the board leader: the leader is whoever the
+    rating puts first, which at featherweight is two fighters sharing the place,
+    so "vs the leader" needs an arbitrary pick between two men the board calls
+    equal. The champion needs no pick and answers the question people are
+    actually asking.
+
+    Nothing for a fighter whose rating is fading. The fade is a display rule for
+    easing an absent fighter off the board, not a measured loss of skill, and
+    running it through a win probability turns the one into the other -- a
+    retired fighter would get a number that ticks down every day he stays
+    retired.
+    """
+    if champion is None or entry.key == champion.key:
+        return None
+    if fading:
+        return "inactive"
+    return f"{win_chance(entry.rating, champion.rating):.0%} vs {surname(champion.name)}"
+
+
+def _rating_lines(
+    entries: list,
+    *,
+    with_division: bool,
+    career: bool = False,
+    champion=None,
+    fading: frozenset[str] = frozenset(),
+) -> list[str]:
     """One line per fighter.
 
     ``career`` prints the all-time boards, whose number is a career score rather
@@ -21,14 +64,22 @@ def _rating_lines(entries: list, *, with_division: bool, career: bool = False) -
     single rating a fighter carries today.
     """
     lines = []
-    for entry in entries:
+    for place, entry in enumerate(entries, 1):
         # A shared rank keeps its number but loses the medal: a joint first is
         # not a winner, and two of the same medal reads as a mistake.
         # Every badge is the same three characters wide, so every name starts in
         # the same column. A medal is a different width from a number and a
         # shared rank is a character wider again, which is what pushed the
         # names out of line.
-        badge = f"`{'=' if entry.tied else ' '}{entry.rank:>2}`"
+        # Where the odds are shown, places are numbered straight through and
+        # the tie marker goes: "=3" beside two different percentages is the
+        # board contradicting itself on one line, and a shared 3 with nothing
+        # to explain it is worse than either. The column says how close they
+        # are, in a unit that needs no key.
+        if champion is not None:
+            badge = f"`{place:>3}`"
+        else:
+            badge = f"`{'=' if entry.tied else ' '}{entry.rank:>2}`"
         facts = [f"**{entry.rating}**"]
         # The record and the division are alternatives rather than both. A
         # divisional board has no division to give, so the record is the context
@@ -48,6 +99,9 @@ def _rating_lines(entries: list, *, with_division: bool, career: bool = False) -
         belt = " 🏆" if entry.champion else (" 🎖️" if entry.former_champion else "")
         if career and entry.defences:
             facts.insert(1, plural(entry.defences, "defence"))
+        odds = None if career else _odds_against(entry, champion, entry.key in fading)
+        if odds:
+            facts.append(odds)
 
         lines.append(f"{badge} {keep(entry.name)}{belt} · {join(facts)}")
     return lines
@@ -60,6 +114,7 @@ def rankings_embed(
     pound_for_pound: bool = False,
     note: bool = False,
     all_time: list | None = None,
+    fading: frozenset[str] = frozenset(),
 ) -> discord.Embed:
     """One division's ratings board. ``entries`` are ``Ranked`` records.
 
@@ -79,8 +134,13 @@ def rankings_embed(
         embed.description = "Nobody ranked here yet."
         return stamp(embed)
 
+    # Pound for pound carries no odds column: a win probability between a
+    # flyweight and a heavyweight is a number about a fight nobody can make.
+    champion = None if pound_for_pound else next((e for e in entries if e.champion), None)
     add_chunked_fields(
-        embed, "Current Ratings", _rating_lines(entries, with_division=pound_for_pound)
+        embed,
+        "Current Ratings",
+        _rating_lines(entries, with_division=pound_for_pound, champion=champion, fading=fading),
     )
     if all_time:
         add_chunked_fields(
@@ -101,13 +161,16 @@ def rankings_embed(
                 "worth more than beating a debutant. Nobody votes, and a belt counts for "
                 "nothing by itself, which is why a champion can sit below a contender here.\n\n"
                 "🏆 holds the belt · 🎖️ held it once · **=** a shared rank, because ratings a "
-                "few points apart are in no particular order. It is not the line between told "
-                "apart and not — that one is much wider, and comes next.\n\n"
-                "How much a gap is worth, measured on every fight on record: 100 rating "
-                "points is about 11 points of win rate. So the order here is the best guess "
-                "rather than a measurement — within about 45 points the higher-rated fighter "
-                "wins at most 55% of the time, and most of a divisional board sits inside "
-                "that.\n\n"
+                "few points apart are in no particular order.\n\n"
+                "On a divisional board each line says what these ratings give that fighter "
+                "against the champion, so the gap is in a unit that needs no key. Those "
+                "percentages are measured, not assumed: across every fight on record 100 "
+                "rating points is worth about 11 points of win rate. It is also why the order "
+                "is a best guess rather than a measurement — within about 45 points the "
+                "higher-rated fighter wins at most 55% of the time, and most of a board sits "
+                "inside that. A fighter whose rating is fading reads **inactive** instead: "
+                "the fade eases an absent fighter off the board and is not a measured loss of "
+                "skill, so it has no business inside a win probability.\n\n"
                 "Ranked here: three or more UFC fights, and a fight in the last eighteen "
                 "months. After a year out a rating fades — halving what a fighter holds over "
                 "the starting rating for every further year — so a number nobody is "

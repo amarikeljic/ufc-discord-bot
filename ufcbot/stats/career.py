@@ -193,6 +193,15 @@ class Ledger:
     A catchweight leaves it alone: it says where the fight was made, not where
     the fighter belongs.
     """
+    elo_before_last: float = ELO_START
+    """The rating they carried into their most recent fight.
+
+    A fighter who fought but was not on the board last time -- off the bottom, or
+    gone past the eighteen-month cutoff -- has no previous position to read
+    crossings against. This is that position: where they would have stood going
+    in. The ledger otherwise only keeps the rating after the fight, and the delta
+    is gone."""
+
     peak_elo: float = ELO_START
     """The best rating they ever held.
 
@@ -610,6 +619,13 @@ class History:
     champions: dict[str, str] = field(default_factory=dict)
     """Division -> the key of whoever holds its belt, as the data last saw it."""
 
+    last_title_fight: dict[str, date] = field(default_factory=dict)
+    """Division -> when it last had a title fight of any kind.
+
+    What decides whether a hand-written belt change has been overtaken by the
+    cage, which is the only thing stopping that file from pinning a champion
+    forever."""
+
     meetings: dict[tuple[str, str], Meeting] = field(default_factory=dict)
     """Who has fought whom, keyed by the sorted pair.
 
@@ -702,6 +718,10 @@ def build_history(dataset: Dataset, *, keep_snapshots: bool = True) -> History:
             division_fights[key_a][division] += 1
             division_fights[key_b][division] += 1
 
+        # elo_a and elo_b were read above, before either ledger moved, so they are
+        # what each fighter carried in. The path below is read after, so it is
+        # where the fight left them.
+        ledger_a.elo_before_last, ledger_b.elo_before_last = elo_a, elo_b
         rating_path[key_a].append(ledger_a.elo)
         rating_path[key_b].append(ledger_b.elo)
 
@@ -728,6 +748,7 @@ def build_history(dataset: Dataset, *, keep_snapshots: bool = True) -> History:
                     winner.title_defences += 1
                 lineal[division] = champ
             champion[division] = champ
+            history.last_title_fight[division] = on
 
         met = history.meetings.setdefault(pair_key(key_a, key_b), Meeting())
         met.fights += 1

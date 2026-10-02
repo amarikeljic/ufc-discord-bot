@@ -91,6 +91,23 @@ ALL_TIME_MIN_FIGHTS = 5
 # points, so a defence moves a fighter past roughly a tenth of it. Every pairing
 # that reads wrong without this reads right with it, and none that read right
 # were broken by it.
+# What the ratings actually predict, as opposed to what a 400-point Elo scale
+# says they should. Measured across every fight on record, folded both ways so
+# the "Winner vs. Loser" bout naming cannot leak in: 100 rating points is worth
+# about 11 points of win rate near zero, which is this scale rather than 400.
+#
+# It is the right number to show a reader, because it describes the ratings as
+# displayed. It is not a divisor waiting to be changed: a predictor carrying
+# measurement error fits flatter than the real relationship, and with K fixed
+# every rating carries a K-sized random component.
+SHOWN_SCALE = 538
+
+
+def win_chance(rating: int, against: int) -> float:
+    """What the board's own numbers say about these two, on the scale they fit."""
+    return 1 / (1 + 10 ** ((against - rating) / SHOWN_SCALE))
+
+
 TITLE_DEFENCE_POINTS = 15
 TITLE_WIN_POINTS = 5
 # How many to list per division.
@@ -266,6 +283,18 @@ def career_score(ledger: Ledger) -> int:
         + TITLE_DEFENCE_POINTS * ledger.title_defences
         + TITLE_WIN_POINTS * ledger.title_wins
     )
+
+
+def all_ranked(
+    ledgers: dict[str, Ledger], division: str | None, *, on: date, include_women: bool = True
+) -> list[Ranked]:
+    """Everyone eligible in a division, in order, with no cut.
+
+    The boards print the top of this. The ratings watcher reads all of it, so
+    that crossing the line the boards cut at is an ordinary crossing between the
+    fighters either side of it.
+    """
+    return _ordered(ledgers, division, on=on, include_women=include_women)
 
 
 def all_time(

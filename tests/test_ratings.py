@@ -113,12 +113,16 @@ def test_a_new_entrant_is_reported_with_how_they_got_there():
 
 
 def test_drifting_up_into_the_board_is_not_an_entrance():
-    """Nobody has fought since it was last published. The fighter below fifteenth
-    did not arrive; the fighter above them faded."""
-    previous = {"a": ranked("a", 1, 1200, last=OLD)}
-    current = [Row("a", 1, 1200, last=OLD), Row("drifter", 2, 1150, last=OLD)]
+    """Nobody has fought. The fighter below the cut did not arrive; the one above
+    him faded under him. The watcher sees the whole division, so he was always
+    there -- the only thing that changed is which side of the line he is on."""
+    previous = {
+        "faded": ranked("faded", 1, 1200, last=OLD, raw=1200),
+        "drifter": ranked("drifter", 2, 1150, last=BEFORE),
+    }
+    current = [Row("drifter", 1, 1150, last=BEFORE), Row("faded", 2, 1140, last=OLD)]
 
-    assert diff(previous, current, {"a": ledger("A", 1200, last=OLD)}, on=TODAY) == []
+    assert diff(previous, current, {}, on=TODAY, depth=1) == []
 
 
 def test_dropping_off_through_inactivity_says_so():
@@ -145,14 +149,16 @@ def test_being_pushed_off_the_bottom_is_not_called_inactivity():
 
 
 def test_slipping_off_the_bottom_with_nobody_fighting_is_not_announced():
-    """The fade moves a rating every day, so the fifteenth place changes hands
-    on its own. That is the same non-event as slipping a place inside the board,
-    reaching it through the end instead of the middle."""
-    previous = {"a": ranked("a", 1, 1200, last=OLD), "slipped": ranked("slipped", 2, 1150, last=OLD)}
-    current = [Row("a", 1, 1200, last=OLD)]
-    ledgers = {"slipped": ledger("Still Active", 1150, last=RECENT)}
+    """The fade moves a rating every day, so the last place on the board changes
+    hands on its own. That is the same non-event as slipping a place inside it,
+    reaching the board through its end instead of its middle."""
+    previous = {
+        "slipped": ranked("slipped", 1, 1200, last=OLD, raw=1200),
+        "stayer": ranked("stayer", 2, 1150, last=BEFORE),
+    }
+    current = [Row("stayer", 1, 1150, last=BEFORE), Row("slipped", 2, 1140, last=OLD)]
 
-    assert diff(previous, current, ledgers, on=TODAY) == []
+    assert diff(previous, current, {}, on=TODAY, depth=1) == []
 
 
 def test_the_embed_reads_as_what_happened():
@@ -391,3 +397,62 @@ def test_a_crossing_nobody_can_explain_is_not_announced():
 
     assert moved["Returner"].kind == RETURNED, "his own comeback is still reported"
     assert "Bystander" not in moved, "no way to tell a result from a fade, so nothing is said"
+
+
+def test_the_fighter_who_takes_a_vacated_place_is_named_with_the_one_who_left():
+    """The asymmetry the full-list diff removes. Last place loses and drops off;
+    the man below moves up into it. Announcing the exit and not the arrival tells
+    the channel who went and never who replaced him."""
+    previous = {
+        "last": ranked("last", 1, 1100, last=BEFORE),
+        "next_up": ranked("next_up", 2, 1090, last=BEFORE),
+    }
+    current = [
+        Row("next_up", 1, 1090, last=BEFORE),
+        fought_on(previous["last"], RECENT, 2, 1060, result="loss"),
+    ]
+    moved = {c.name: c for c in diff(previous, current, {}, on=TODAY, depth=1)}
+
+    assert moved["Last"].kind == LEFT, "lost and dropped out of the published places"
+    assert moved["Next_Up"].kind == ENTERED, "and the man who took the place is named too"
+
+
+def test_a_comeback_names_the_man_the_win_passed_and_not_the_rest():
+    """He faded down the board, so the old top-fifteen state had no row for him
+    and the fighters he genuinely passed went unannounced. Measured on the raw
+    ratings, the win takes him past the holder and not past the man he was
+    already above with nothing faded off.
+
+        before, raw:   holder 1090   returner 1080   other 1050
+        shown:         holder 1090   other    1050   returner 1040 (40 faded)
+        after:         returner 1096 holder   1090   other    1050
+    """
+    previous = {
+        "holder": ranked("holder", 1, 1090, last=BEFORE),
+        "other": ranked("other", 2, 1050, last=BEFORE),
+        "returner": ranked("returner", 3, 1040, last=OLD, raw=1080),
+    }
+    current = [
+        fought_on(previous["returner"], RECENT, 1, 1096, result="win"),
+        Row("holder", 2, 1090, last=BEFORE),
+        Row("other", 3, 1050, last=BEFORE),
+    ]
+    moved = {c.name: c for c in diff(previous, current, {}, on=TODAY, depth=3)}
+
+    assert moved["Returner"].kind == RETURNED, "back from a layoff, so no direction word"
+    assert moved["Holder"].kind == DOWN, "he was above the returner going in; the win passed him"
+    assert "Other" not in moved, "already below the returner with nothing faded off"
+
+
+def test_a_shuffle_below_the_published_places_is_seen_and_not_mentioned():
+    previous = {
+        "top": ranked("top", 1, 1200, last=BEFORE),
+        "x": ranked("x", 2, 1100, last=BEFORE),
+        "y": ranked("y", 3, 1090, last=BEFORE),
+    }
+    current = [
+        Row("top", 1, 1200, last=BEFORE),
+        fought_on(previous["y"], RECENT, 2, 1120, result="win"),
+        Row("x", 3, 1100, last=BEFORE),
+    ]
+    assert diff(previous, current, {}, on=TODAY, depth=1) == []

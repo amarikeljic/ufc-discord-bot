@@ -23,11 +23,12 @@ from ..records import GuildSettings, RankedState
 from ..stats.career import Ledger
 from ..stats.rankings import (
     DECAY_GRACE,
+    DEPTH,
+    all_ranked,
     divisions_with_fighters,
     is_eligible,
     is_fading,
     is_womens,
-    rank_division,
 )
 from ..storage import Storage
 from .cardwatch import news_channel
@@ -82,8 +83,9 @@ def _reason(current, previous: RankedState | None, ledger: Ledger | None, on: da
     return PUSHED
 
 
-def _still_eligible(ledger: Ledger | None, on: date) -> bool:
-    return ledger is not None and is_eligible(ledger, on)
+def _returning(entry, was: RankedState, on: date) -> bool:
+    """Back from a layoff long enough to have been fading."""
+    return was.last_fight is not None and on - was.last_fight > DECAY_GRACE
 
 
 def diff(
@@ -92,117 +94,107 @@ def diff(
     ledgers: dict[str, Ledger],
     *,
     on: date,
+    depth: int = DEPTH,
 ) -> list[RatingChange]:
     """What moved on one board since it was last published.
 
-    A move is reported only when one of the two fighters who swapped had a fight
-    behind it. The displayed rating fades by the day a fighter is idle, so a
-    board drifts on its own: simulated over 180 days with no fights at all it
-    produced 130 reported moves, 112 of them nobody passing anybody. None of it
-    was news.
+    ``current`` is the whole ranked division, not the published top fifteen, and
+    ``previous`` is the whole of it as it stood last time. Crossing the fifteenth
+    line is then an ordinary crossing between the fighters at fifteen and sixteen
+    rather than a case of its own, which is what entering and leaving used to
+    need rules for. Only moves touching the published ``depth`` are reported, so
+    a shuffle at fortieth is seen and not mentioned.
 
-    Asking only whether *anybody* fought is not enough, and is worse than saying
-    nothing. The UFC runs most weekends, so a pass-level gate holds a week of
-    drift and then releases all of it on the first pass after a card -- where it
-    reads as a consequence of that card rather than of the calendar.
+    A move is reported when the fighter, or somebody who actually passed them,
+    had a fight. The displayed rating fades by the day a fighter is idle, so a
+    board drifts on its own: 180 days with no fights at all produced 130 reported
+    moves, 112 of them nobody passing anybody.
+
+    Crossings are decided on the raw rating rather than the displayed one,
+    because a fighter coming back is handed the fade back on top of the result
+    and every place they climb inside it is the layoff ending, not the fight.
     """
     changes: list[RatingChange] = []
     now_by_key = {entry.key: entry for entry in current}
+    place = {entry.key: i for i, entry in enumerate(current, 1)}
     fought = {
         entry.key
         for entry in current
-        if entry.key in previous and entry.last_fight != previous[entry.key].last_fight
+        if entry.key not in previous or entry.last_fight != previous[entry.key].last_fight
     }
-    # Who aged out rather than being pushed down the list. Their replacement is
-    # news with them; anyone else arriving or leaving is the same drift again,
-    # reaching the board through its ends instead of its middle.
-    aged_off = {
-        key
-        for key, was in previous.items()
-        if key not in now_by_key and not _still_eligible(ledgers.get(key), on)
-    }
-    # A fighter arriving was not on the board to be compared against, so "did
-    # they fight" is asked of the board instead: a last fight later than anything
-    # the board knew about means a card has happened since it was published.
-    newest_known = max((was.last_fight for was in previous.values() if was.last_fight), default=None)
 
-    def returning(entry, was) -> bool:
-        """Back from long enough to have been fading."""
-        return (
-            entry.key in fought
-            and was.last_fight is not None
-            and on - was.last_fight > DECAY_GRACE
-        )
+    def raw_before(key: str) -> int | None:
+        """Where this fighter stood before the pass, with nothing faded off.
 
-    def was_above(a_key: str, b_key: str) -> bool | None:
-        """Was A above B before this pass, measured so a fade cannot decide it.
-
-        A fighter coming back is handed their layoff back on top of the result,
-        and every place they climb inside the part they were given back is the
-        layoff ending rather than the fight. Comparing the raw ratings -- the
-        ones with nothing faded off -- is what tells the two apart, and it does
-        it the same way for a win and a loss: a defeat cannot take a raw rating
-        up past anybody, so a returning loser crosses nobody at all.
-
-        None where a row predates the raw rating being stored. Falling back to
-        the ranks the board showed would be reading the fade as the answer,
-        which is the thing this exists to avoid, so the caller says nothing
-        instead. That lasts until the next pass rewrites the board's state.
+        A fighter who fought and was not on the last board -- off the bottom of
+        it, or gone past the eighteen-month cutoff -- has no row to read, so the
+        rating they carried into that fight stands in for one. It is the same
+        question asked of a fighter who was there, and it is the only thing that
+        covers a comeback from off the board.
         """
-        a, b = previous[a_key], previous[b_key]
-        if a.raw is None or b.raw is None:
-            return None
-        return a.raw > b.raw
+        was = previous.get(key)
+        if was is not None and was.raw is not None:
+            return was.raw
+        if key in fought:
+            ledger = ledgers.get(key)
+            if ledger is not None:
+                return round(ledger.elo_before_last)
+        return None
 
-    def worth_saying(entry) -> bool:
-        """Did this fighter, or anyone who actually passed them, have a fight?"""
-        if entry.key in fought:
-            return True
+    def crossed_someone_who_fought(entry) -> bool:
+        """Did this fighter change places with anybody who had a fight?
+
+        Either direction: a man passing somebody who fought and a man passed by
+        somebody who fought are both moves with a result behind them. What is
+        excluded is the pair who ended up on opposite sides of each other with
+        neither of them fighting, which is the fade moving them.
+
+        Going in is measured on the raw rating and coming out on the new order,
+        so a returning fighter being handed his layoff back does not read as
+        having passed anyone he was already above.
+        """
+        mine = raw_before(entry.key)
+        if mine is None:
+            return False
         for other in current:
-            if other.key == entry.key or other.key not in fought or other.key not in previous:
+            if other.key == entry.key or other.key not in fought:
                 continue
-            was_under = was_above(entry.key, other.key)
-            if was_under is None:
-                continue  # no way to tell a result from a fade; say nothing
-            if was_under and entry.rank > other.rank:
-                return True  # passed by somebody, and by a result rather than a fade
+            theirs = raw_before(other.key)
+            if theirs is None:
+                continue
+            if (mine > theirs) != (place[entry.key] < place[other.key]):
+                return True
         return False
 
     for entry in current:
         was = previous.get(entry.key)
+        was_ranked = was is not None and was.rank <= depth
+        now_ranked = place[entry.key] <= depth
+        if not was_ranked and not now_ranked:
+            continue  # a shuffle below the board is not the board moving
+        if entry.key not in fought and not crossed_someone_who_fought(entry):
+            continue  # nobody fought their way into this; it is the fade
         reason = _reason(entry, was, ledgers.get(entry.key), on)
-        if was is None:
-            # Arriving is only news with a fight behind it, or as the other half
-            # of someone ageing off. Drifting up into fifteenth because the
-            # fighter above faded is the same non-event as drifting within it.
-            arrived_by_fighting = (
-                newest_known is None
-                or (entry.last_fight is not None and entry.last_fight > newest_known)
-            )
-            if arrived_by_fighting or aged_off:
-                changes.append(RatingChange(ENTERED, entry.name, None, entry.rank, entry.rating, reason))
+
+        if not was_ranked:
+            changes.append(RatingChange(ENTERED, entry.name, None, entry.rank, entry.rating, reason))
+        elif not now_ranked:
+            changes.append(RatingChange(LEFT, entry.name, was.rank, None, entry.rating, reason))
         elif entry.rank == was.rank:
-            continue  # the board still shows them where it did
-        elif returning(entry, was):
+            continue
+        elif _returning(entry, was, on):
             # No direction word: the place is where they are and the result is
             # what happened, and the two are not joined the way "up to 4th" says.
             changes.append(RatingChange(RETURNED, entry.name, was.rank, entry.rank, entry.rating, reason))
-        elif not worth_saying(entry):
-            continue
         elif entry.rank < was.rank:
             changes.append(RatingChange(UP, entry.name, was.rank, entry.rank, entry.rating, reason))
         else:
             changes.append(RatingChange(DOWN, entry.name, was.rank, entry.rank, entry.rating, reason))
 
     for key, was in previous.items():
-        # Dropping out of the top fifteen without a fight is the same drift as
-        # slipping a place inside it. Ageing out at the eighteen-month cutoff is
-        # a change of state, and the one thing about an idle fighter worth saying.
-        # Leaving the board cannot be tested for crossings, because the fighter
-        # is no longer there to compare anyone against. Ageing out is always
-        # news; being pushed below fifteenth is news when a result could have
-        # done it, and nothing when the board merely got a day older.
-        if key not in now_by_key and (key in aged_off or fought):
+        # Gone from the ranked list altogether: eighteen months without a fight.
+        # Everything else now leaves by crossing somebody, above.
+        if key not in now_by_key and was.rank <= depth:
             ledger = ledgers.get(key)
             name = ledger.name if ledger else key
             changes.append(RatingChange(LEFT, name, was.rank, None, None, _reason(None, was, ledger, on)))
@@ -227,7 +219,11 @@ class RatingsWatch:
         found: list[tuple[str, list[RatingChange]]] = []
 
         for division in divisions_with_fighters(ledgers, on=today):
-            current = rank_division(ledgers, division, on=today)
+            # The whole division, not the published fifteen. Crossing the
+            # fifteenth line is then an ordinary crossing rather than a case of
+            # its own, and a fighter who faded off the bottom still has a
+            # position to be compared against when he comes back.
+            current = all_ranked(ledgers, division, on=today)
             previous = await self.storage.ranking_state(division)
             await self.storage.save_ranking_state(
                 division,

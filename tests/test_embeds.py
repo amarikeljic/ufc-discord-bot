@@ -426,36 +426,121 @@ def test_a_champion_is_not_also_marked_as_a_former_one():
 def test_a_full_ranking_is_never_split_across_two_fields():
     """Past 1024 characters Discord does not refuse a field, it takes the second
     half into a field of its own -- which puts a gap through the middle of a
-    ranking, between 10th and 14th. A fifteen-deep board has to fit in one.
+    ranking. A fifteen-deep board has to fit in one.
 
-    Built from the real pound-for-pound board, which is the longest of them
-    because it is the only one carrying a division on every line. It comes to
-    about 970 of the 1024, which is why that line carries the division or the
-    record and not both.
+    Both shapes, because they are the two longest for different reasons: pound
+    for pound carries a division on every line, and a divisional board carries
+    the odds against the champion. The real boards run to about 920 and 970 of
+    the 1024.
     """
     from ufcbot.embeds import rankings_embed
     from ufcbot.embeds.common import FIELD_LIMIT
     from ufcbot.stats.rankings import Ranked
 
-    board = [
-        ("Jon Jones", "Light Heavyweight", 12), ("Georges St-Pierre", "Welterweight", 9),
-        ("Anderson Silva", "Middleweight", 10), ("Demetrious Johnson", "Flyweight", 11),
-        ("Islam Makhachev", "Lightweight", 5), ("Amanda Nunes", "Women's Bantamweight", 8),
-        ("Valentina Shevchenko", "Women's Flyweight", 9), ("Kamaru Usman", "Welterweight", 5),
-        ("Alexander Volkanovski", "Featherweight", 6), ("Matt Hughes", "Welterweight", 7),
-        ("Israel Adesanya", "Middleweight", 5), ("Max Holloway", "Featherweight", 3),
-        ("Stipe Miocic", "Heavyweight", 4), ("Daniel Cormier", "Light Heavyweight", 4),
-        ("Chuck Liddell", "Light Heavyweight", 4),
+    p4p = [
+        ("Jon Jones", "Light Heavyweight"), ("Georges St-Pierre", "Welterweight"),
+        ("Anderson Silva", "Middleweight"), ("Demetrious Johnson", "Flyweight"),
+        ("Islam Makhachev", "Lightweight"), ("Amanda Nunes", "Women's Bantamweight"),
+        ("Valentina Shevchenko", "Women's Flyweight"), ("Kamaru Usman", "Welterweight"),
+        ("Alexander Volkanovski", "Featherweight"), ("Matt Hughes", "Welterweight"),
+        ("Israel Adesanya", "Middleweight"), ("Max Holloway", "Featherweight"),
+        ("Stipe Miocic", "Heavyweight"), ("Daniel Cormier", "Light Heavyweight"),
+        ("Chuck Liddell", "Light Heavyweight"),
     ]
-    rows = [
-        Ranked(rank=i, name=name, rating=1550 - i * 20, record="22-1-0 (1 NC)",
-               division=division, key=name, defences=defences,
-               champion=i == 5, former_champion=i != 5)
-        for i, (name, division, defences) in enumerate(board, 1)
+    divisional = [
+        "Charles Oliveira", "Arman Tsarukyan", "Justin Gaethje", "Ilia Topuria",
+        "Dustin Poirier", "Grant Dawson", "Paddy Pimblett", "Quillan Salkilld",
+        "Beneil Dariush", "Renato Moicano", "Benoit Saint Denis", "Jim Miller",
+        "King Green", "Mateusz Gamrot", "Nasrat Haqparast",
     ]
-    for p4p in (False, True):
-        embed = rankings_embed("Pound for pound" if p4p else "Lightweight", rows,
-                               pound_for_pound=p4p, all_time=rows)
+
+    def row(i, name, division, champion):
+        # A long record rather than the longest: one in six carries a no contest,
+        # and fifteen of them in a row is not a board the sport produces.
+        record = "22-11-0 (1 NC)" if i % 6 == 0 else "22-11-0"
+        return Ranked(rank=i, name=name, rating=1250 - i * 5, record=record,
+                      division=division, raw=1250 - i * 5, key=name, defences=12,
+                      champion=champion, former_champion=not champion)
+
+    boards = [
+        ("Pound for pound", [row(i, n, d, False) for i, (n, d) in enumerate(p4p, 1)], True),
+        ("Lightweight", [row(i, n, "Lightweight", i == 3) for i, n in enumerate(divisional, 1)], False),
+    ]
+    for title, rows, is_p4p in boards:
+        embed = rankings_embed(title, rows, pound_for_pound=is_p4p, all_time=rows)
         for field in embed.fields:
-            assert len(field.value) <= FIELD_LIMIT, f"{field.name} splits at {len(field.value)}"
-        assert len(embed.fields) == 2, "one field each for current and all time"
+            assert len(field.value) <= FIELD_LIMIT, f"{title}/{field.name} splits at {len(field.value)}"
+        assert len(embed.fields) == 2, f"{title}: one field each for current and all time"
+
+
+def board_row(i, name, rating, *, champion=False, key=None):
+    from ufcbot.stats.rankings import Ranked
+
+    return Ranked(rank=i, name=name, rating=rating, record="11-2-0", division="Lightweight",
+                  raw=rating, key=key or name, champion=champion)
+
+
+def test_a_divisional_line_says_what_the_gap_is_worth_against_the_champion():
+    """Instead of a tie band, which says two fighters cannot be told apart
+    without ever saying how far apart that is."""
+    from ufcbot.embeds import rankings_embed
+
+    rows = [
+        board_row(1, "Charles Oliveira", 1212),
+        board_row(2, "Justin Gaethje", 1155, champion=True),
+        board_row(3, "Paddy Pimblett", 1120),
+    ]
+    lines = rankings_embed("Lightweight", rows).fields[0].value.replace(" ", " ").splitlines()
+
+    assert "56% vs Gaethje" in lines[0], "rated above the champion, so better than even"
+    assert "vs" not in lines[1], "the champion is not compared with himself"
+    assert "46% vs Gaethje" in lines[2]
+
+
+def test_pound_for_pound_carries_no_odds():
+    """A win probability between a flyweight and a heavyweight is a number about
+    a fight nobody can make."""
+    from ufcbot.embeds import rankings_embed
+
+    rows = [board_row(1, "Islam Makhachev", 1273, champion=True), board_row(2, "Max Holloway", 1206)]
+    value = rankings_embed("Pound for pound", rows, pound_for_pound=True).fields[0].value
+
+    assert "vs" not in value
+
+
+def test_a_fading_fighter_is_marked_inactive_rather_than_given_odds():
+    """The fade eases an absent fighter off the board. It is not a measured loss
+    of skill, so running it through a win probability would turn a display rule
+    into a claim about a fight -- and the number would tick down every day he
+    stayed retired."""
+    from ufcbot.embeds import rankings_embed
+
+    rows = [
+        board_row(1, "Justin Gaethje", 1155, champion=True),
+        board_row(2, "Dustin Poirier", 1137, key="poirier"),
+    ]
+    value = rankings_embed("Lightweight", rows, fading=frozenset({"poirier"})).fields[0].value
+
+    assert "inactive" in value and "% vs" not in value
+
+
+def test_the_tie_marker_goes_where_the_odds_are_shown():
+    """"=3" beside two different percentages is the board contradicting itself on
+    one line, and a shared 3 with nothing to explain it is worse than either."""
+    from ufcbot.embeds import rankings_embed
+    from ufcbot.stats.rankings import Ranked
+
+    tied = [
+        Ranked(rank=1, name="Champ", rating=1200, record="11-2-0", division="Lightweight",
+               raw=1200, key="champ", champion=True),
+        Ranked(rank=2, name="A", rating=1150, record="11-2-0", division="Lightweight",
+               raw=1150, key="a", tied=True),
+        Ranked(rank=2, name="B", rating=1148, record="11-2-0", division="Lightweight",
+               raw=1148, key="b", tied=True),
+    ]
+    divisional = rankings_embed("Lightweight", tied).fields[0].value
+    p4p = rankings_embed("Pound for pound", tied, pound_for_pound=True).fields[0].value
+
+    assert "=" not in divisional, "the percentages say how close they are"
+    assert [line.split("`")[1].strip() for line in divisional.splitlines()] == ["1", "2", "3"]
+    assert "=" in p4p, "pound for pound has no odds column, so the marker still earns its place"

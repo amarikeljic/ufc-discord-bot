@@ -36,6 +36,7 @@ from ..stats.rankings import (
     POUND_FOR_POUND,
     all_time,
     divisions_with_fighters,
+    is_fading,
     rank_division,
 )
 from ..storage import Storage
@@ -395,6 +396,12 @@ class ChannelPublisher:
                     pound_for_pound=p4p,
                     note=p4p,
                     all_time=all_time(ledgers, None if p4p else key, include_women=women),
+                    # A fading rating is a display rule for easing an absent
+                    # fighter off the board, so it is not run through a win
+                    # probability; those read "inactive" instead.
+                    fading=frozenset(
+                        e.key for e in entries if is_fading(ledgers[e.key], today)
+                    ),
                 ),
                 result,
                 force=force,

@@ -27,6 +27,7 @@ from pathlib import Path
 
 from ..models import Event
 from ..util import normalise
+from . import belts
 from .career import NO_REMATCH, FighterInfo, Ledger, Rematch, rematch_between
 from .features import fighter_features
 from .names import NameIndex
@@ -174,6 +175,30 @@ class StatsService:
         self._resolved.clear()
         self._card_picks.clear()
         self.last_error = None
+        self._apply_belt_changes()
+
+    def _apply_belt_changes(self) -> None:
+        """Lay the hand-kept belt changes over the ones the fight data implies.
+
+        A vacancy, a stripping, a retirement and an elevation all happen outside
+        a cage, so no fight records them and the derived champion stays where the
+        last title fight left it. The file holds those and nothing else; see
+        ``stats.belts`` for the format and for why an entry expires on its own.
+        """
+        if self.careers is None:
+            return
+        changes = belts.load(self.data_dir)
+        champions, warnings = belts.apply(
+            self.careers.champions,
+            self.careers.last_title_fight,
+            changes,
+            resolve=self.resolve,
+        )
+        for complaint in warnings:
+            log.warning("Belt override: %s", complaint)
+        for key, ledger in self.careers.ledgers.items():
+            ledger.champion = key in set(champions.values())
+        self.careers.champions = champions
 
     # -- refresh -------------------------------------------------------------
 

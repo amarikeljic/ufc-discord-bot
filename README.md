@@ -448,6 +448,25 @@ injuries included; past that, what a fighter holds over the starting rating halv
 every further year out, and past eighteen months they are off the board altogether. Only
 the margin fades, so sitting still can never drag anyone below where they began.
 
+**Each divisional line says what the gap is worth.** `56% vs Gaethje` — what these ratings
+give that fighter against the champion, on the scale the ratings actually fit. It replaces
+the tie marker on those boards, because a tie band says two fighters cannot be told apart
+without ever saying how far apart that is, and a percentage says it in a unit nobody needs
+a key for. Places are numbered straight through there: `=3` beside two different
+percentages is the board contradicting itself on one line.
+
+Against the champion rather than the board leader. The leader is whoever the rating puts
+first, which at featherweight is two fighters sharing the place, so "vs the leader" needs an
+arbitrary pick between two men the board calls equal — and "who beats the champion" is the
+question being asked anyway. The champion differs from the leader in five of eight men's
+divisions. Pound for pound carries no column: a win probability between a flyweight and a
+heavyweight is a number about a fight nobody can make.
+
+A fighter whose rating is fading reads **inactive** instead of a percentage. The fade eases
+an absent fighter off the board and is not a measured loss of skill, so putting it through a
+win probability would turn a display rule into a claim about a fight — and the number would
+tick down every day he stayed retired.
+
 **A belt is shown and never ranked on.** 🏆 holds one now, 🎖️ held one once. A board that
 reordered itself around the belt would be the UFC's ranking rather than this one's, but the
 belt is the thing a reader already knows and looks for, and its absence beside the top name
@@ -617,33 +636,26 @@ the answer. The column is nullable for the same reason: zero is a rating a fight
 hold, so a sentinel of zero would read to any later code that forgot to check as somebody
 below everybody, and count every crossing against them.
 
-The state is kept for the published fifteen only, which leaves the other half of this
-unfixed: a fighter who faded below fifteenth has no row, so when he comes back and wins,
-the fighters he genuinely passed are not announced. That is a missed sentence rather than a
-wrong one — he is absent from the previous board, so he never counts as having crossed
-anybody — and it is the fourth thing that would be fixed by diffing the full ranked list
-instead of the published top fifteen.
+One rule covers the fighter who was below the published places, the one who was off the
+list entirely, and the row written before the raw rating was kept: a fighter who fought and
+has no usable previous position is placed at the rating he carried into that fight. The
+ledger keeps that now — it holds the rating after a fight, and the delta is gone, so the
+replay records it on the way past.
 
-The full list would not cover a fighter returning from past the eighteen-month cutoff,
-because he is on no list at all. One rule covers him, the off-board returner and the
-pre-migration row together: a fighter who fought this pass and has no usable previous row
-gets placed in the previous board at his pre-fight raw rating, and crossings are read as
-normal. That number is not currently kept anywhere — the ledger holds the rating after the
-fight, not before it, and the delta is gone — so the rule needs one more field written
-during the career replay, which already walks every fight in order. About 11 KB across all
-the ledgers. Solving for it instead, from the fact that Elo is zero-sum within a bout, is
-possible and not worth it: it breaks on anything that is not plain Elo, to save the 11 KB.
+**The watcher reads the whole division, not the published fifteen.** Crossing the line the
+boards cut at is then an ordinary crossing between the fighters either side of it, rather
+than a case needing rules of its own — which is what entering and leaving used to be, with
+the asymmetry that fifteenth losing and dropping off was announced while the fighter who
+replaced him was not. Only moves touching the published places are reported, so a shuffle
+at fortieth is seen and not mentioned.
 
-Leaving the board cannot be tested for crossings, because the fighter is no longer there to
-compare anyone against. Ageing out at the eighteen-month cutoff is always announced; being
-pushed below fifteenth is announced when a result could have done it, and not when the
-board merely got a day older. This is the weakest part of the design and it is known to be:
-because the watcher diffs the published top fifteen rather than the whole ranked list,
-crossing the fifteenth line is a special case instead of an ordinary crossing between the
-fighters at fifteen and sixteen. One asymmetry falls out of that — when fifteenth loses and
-drops off, the exit is announced and the fighter who replaces him is not, because he did
-not fight. Diffing the full list would remove the special cases and the asymmetry together,
-and leave ageing out as the only one.
+It also means a fighter who faded off the bottom still has a position to be compared against
+when he comes back. For the one who does not — gone past the eighteen-month cutoff, so on no
+list at all — the rating he carried into that fight stands in, which is kept on the ledger
+for exactly this.
+
+Simulated over 180 days with no fights at all, the announcements go from 130 to 4, and all
+four are fighters ageing out at eighteen months.
 
 When a board moves, the move is posted to the live channel with its reason: a fighter's own
 win or loss, a long layoff pulling their rating down, eighteen months without a fight, or
@@ -846,7 +858,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-302 tests, a few seconds, no network and no Discord. One file per module it covers: they run against a real SQLite
+317 tests, a few seconds, no network and no Discord. One file per module it covers: they run against a real SQLite
 database in a temporary directory and fight cards built by hand. Most of them are about
 what happens when a card changes underneath the bot, because that is where the awkward
 cases live -- a fighter replaced, a fight cancelled, a card that only half-loaded -- and
