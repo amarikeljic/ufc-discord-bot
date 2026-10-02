@@ -17,6 +17,7 @@ Fight time only counts fights that have statistics recorded, matching the site.
 from __future__ import annotations
 
 import math
+import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field, replace
 from datetime import date
@@ -192,6 +193,28 @@ class Ledger:
     A catchweight leaves it alone: it says where the fight was made, not where
     the fighter belongs.
     """
+    peak_elo: float = ELO_START
+    """The best rating held across three consecutive fights.
+
+    The rating a career is judged on, where ``elo`` is the rating a fighter
+    carries now. Final rating punishes anyone who fought past their peak --
+    Anderson Silva finished 1-6 and gave back 120 points of it -- and a single
+    best fight rewards one good night. Three in a row is a run."""
+
+    title_wins: int = 0
+    """Undisputed title fights won. Interim belts and tournament finals are not
+    counted: the first is not the belt and the second is not a title."""
+    title_defences: int = 0
+    """Title fights won while already holding that division's belt."""
+    champion: bool = False
+    """Whether they hold their division's belt as the data last saw it."""
+
+    @property
+    def former_champion(self) -> bool:
+        """Held a belt once and does not now. Derived rather than stored: it is
+        two fields that are already here."""
+        return self.title_wins > 0 and not self.champion
+
     home_division: str | None = None
     """The division they fought in most, which is not always the last one.
 
@@ -470,6 +493,39 @@ class Ledger:
         self.finish_elo += ELO_K * (score - expected)
 
 
+# An interim belt is not the belt and a tournament final is not a title.
+_NOT_THE_BELT = re.compile(r"interim|tournament", re.I)
+
+
+def is_lineal_title(title_fight: bool, weight_class: str) -> bool:
+    """Whether winning this bout means holding a division's belt.
+
+    ufcstats flags three different things as title fights. Two of them are not
+    the belt: an interim title, and the final of a Ultimate Fighter tournament.
+    Counting either loses a champion their own defences, because the interim
+    fight puts someone else in the chair -- Poirier and Gaethje each won interim
+    lightweight belts between Khabib's defences, which read his three defences
+    back to him as four separate reigns.
+    """
+    return bool(title_fight) and not _NOT_THE_BELT.search(weight_class or "")
+
+# How many fights in a row a peak has to be held for. One great night is not a
+# peak; three in a row is the shortest run that cannot be a single upset.
+PEAK_RUN = 3
+
+
+def _sustained_peak(ratings: list[float]) -> float:
+    """The best average rating held across ``PEAK_RUN`` consecutive fights."""
+    if not ratings:
+        return ELO_START
+    if len(ratings) < PEAK_RUN:
+        return max(ratings)
+    return max(
+        sum(ratings[i : i + PEAK_RUN]) / PEAK_RUN
+        for i in range(len(ratings) - PEAK_RUN + 1)
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class Rematch:
     """What has passed between two fighters, from the first one's side.
@@ -550,6 +606,9 @@ class History:
     snapshots: list[FightSnapshot] = field(default_factory=list)
     """Pre-fight state for every fight with a decided winner, oldest first."""
 
+    champions: dict[str, str] = field(default_factory=dict)
+    """Division -> the key of whoever holds its belt, as the data last saw it."""
+
     meetings: dict[tuple[str, str], Meeting] = field(default_factory=dict)
     """Who has fought whom, keyed by the sorted pair.
 
@@ -570,6 +629,11 @@ def build_history(dataset: Dataset, *, keep_snapshots: bool = True) -> History:
     # field, and a counter per fighter would outlive the build inside what the
     # bot then holds in memory.
     division_fights: dict[str, Counter[str]] = defaultdict(Counter)
+    # The rating after each fight, for the sustained peak, and who holds each
+    # belt, for defences. Both are only needed to settle a field, so neither
+    # lives on the ledgers the bot then keeps in memory.
+    rating_path: dict[str, list[float]] = defaultdict(list)
+    champion: dict[str, str] = {}
 
     for fight in dataset.fights.itertuples(index=False):
         key_a, key_b = normalise(fight.fighter_a), normalise(fight.fighter_b)
@@ -636,6 +700,24 @@ def build_history(dataset: Dataset, *, keep_snapshots: bool = True) -> History:
             division_fights[key_a][division] += 1
             division_fights[key_b][division] += 1
 
+        rating_path[key_a].append(ledger_a.elo)
+        rating_path[key_b].append(ledger_b.elo)
+
+        # A belt changes hands, or is kept. An interim title is not the belt and
+        # a tournament final is not a title; counting either hands a champion's
+        # own defences back to them as fresh reigns.
+        if (
+            fight.winner in ("a", "b")
+            and division
+            and is_lineal_title(bool(fight.title_fight), str(fight.weight_class))
+        ):
+            champ = key_a if fight.winner == "a" else key_b
+            winner = ledger_a if fight.winner == "a" else ledger_b
+            winner.title_wins += 1
+            if champion.get(division) == champ:
+                winner.title_defences += 1
+            champion[division] = champ
+
         met = history.meetings.setdefault(pair_key(key_a, key_b), Meeting())
         met.fights += 1
         met.last_on = on
@@ -648,5 +730,10 @@ def build_history(dataset: Dataset, *, keep_snapshots: bool = True) -> History:
 
     for key, counts in division_fights.items():
         history.ledgers[key].home_division = counts.most_common(1)[0][0]
+    for key, ratings in rating_path.items():
+        history.ledgers[key].peak_elo = _sustained_peak(ratings)
+    history.champions = dict(champion)
+    for key in champion.values():
+        history.ledgers[key].champion = True
 
     return history

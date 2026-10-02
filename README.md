@@ -421,9 +421,9 @@ problem has gone.
 
 ### Ratings boards
 
-Each division gets one message: the current top fifteen, and beneath it the same division
-all time. The current half ranks whoever has fought in the last eighteen months and has at least
-three UFC fights, by the same rating. `/ufc channels set womens_divisions:False` leaves the
+Each division gets one message, holding **Current Ratings** and, beneath it, **🐐 All Time
+Ratings**. The current half ranks whoever has fought in the last eighteen months and has at
+least three UFC fights. `/ufc channels set womens_divisions:False` leaves the
 women's divisions out entirely, boards and pound-for-pound alike. A fighter's division is
 the one their most recent fight was made at, so a move up shows the week it happens, and a
 catchweight leaves it alone. The women's divisions are kept separate from the men's.
@@ -454,20 +454,41 @@ by up to 32, so most adjacent pairs are inside the noise of one fight. Sorting t
 1st and 2nd claims a precision the number does not have. Fighters within five points share
 a place instead, on the board and on the fighter card, which reads "joint 4th".
 
-**Under every board is the same division all time,** marked 🐐. It is the same rating with
-both of the rules above taken away: nothing fades and nobody is dropped for having retired,
-because a rating is what a fighter earned and retiring does not unearn it. The board above
-is about who is best now, which is why it hides a number nobody is defending; this one is
-about who was ever best, so it hides nobody — and most of the names people argue about are
-only on this one. It asks for five UFC fights rather than three, since it is a question
-about a career. The pound-for-pound board carries an all-time list across every division:
-Jones, Makhachev, St-Pierre, Oliveira, Nurmagomedov.
+**Under every board is the same division all time,** marked 🐐 — and it is not the board
+above with the filter taken off, because a rating cannot answer that question. A rating is
+transitive and cumulative: it adds up results, so a longer career outscores a better one.
+Left to the rating alone this board had Holloway above Volkanovski, who beat him three
+times for the featherweight title, and Du Plessis above Anderson Silva. Judged on the
+rating a fighter *retired* with it is worse still, because that judges a career by its
+decline: Silva went 1-6 at the end and gave back 120 points, finishing below fighters he
+would have beaten in his sleep.
+
+So the all-time boards rank on a career score: the best rating a fighter held across three
+consecutive fights, plus 15 points for every title defence and 5 for every title won. Three
+fights rather than one because a single upset is not a peak. The belt is in there because
+it is what the sport settles arguments with and the only thing the fighters are competing
+for, and it is worth about a tenth of a divisional board's spread. Every pairing that read
+wrong without it reads right with it:
+
+| | rating alone | career score |
+| --- | --- | --- |
+| Featherweight | Holloway over Volkanovski, who beat him 3-0 | Volkanovski, Holloway, Aldo |
+| Middleweight | Du Plessis 1st, Silva and Adesanya outside the top 12 | Silva, Adesanya, Weidman |
+| Light Heavyweight | — | Jones, Cormier, Liddell, Ortiz |
+| Welterweight | — | St-Pierre, Usman, Hughes |
+| All time | Jones, Makhachev, St-Pierre, Oliveira | Jones, St-Pierre, Silva, Johnson |
+
+Only the undisputed belt counts. ufcstats flags three different things as title fights and
+two of them are not the belt — an interim title, and the final of a Ultimate Fighter
+tournament — and counting either loses a champion their own defences: Poirier and Gaethje
+each won interim lightweight titles between Khabib's defences, which read his three
+defences back to him as four separate reigns.
 
 On the all-time boards a fighter is listed in the division they fought in **most**, not the
 one they finished in. Otherwise St-Pierre is a middleweight on the strength of one fight
 against Bisping after twenty-one at welterweight, Jones a heavyweight, and Holloway a
-welterweight. On the current boards the division is still wherever they last fought, which
-is the right answer to a question about now.
+welterweight. 215 fighters are in that position. On the current boards the division is
+still wherever they last fought, which is the right answer to a question about now.
 
 Records on the board count UFC fights only, which is all the dataset has: a fighter with a
 long road career shows fewer wins here than their MMA record. A rating also travels with a
@@ -677,7 +698,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-277 tests, a few seconds, no network and no Discord. One file per module it covers: they run against a real SQLite
+284 tests, a few seconds, no network and no Discord. One file per module it covers: they run against a real SQLite
 database in a temporary directory and fight cards built by hand. Most of them are about
 what happens when a card changes underneath the bot, because that is where the awkward
 cases live -- a fighter replaced, a fight cancelled, a card that only half-loaded -- and

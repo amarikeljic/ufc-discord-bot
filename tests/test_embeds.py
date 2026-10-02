@@ -359,7 +359,7 @@ def test_the_ratings_note_is_split_rather_than_rejected():
     embed = rankings_embed("Pound for pound", top, pound_for_pound=True, note=True, all_time=top)
 
     note = " ".join(f.value for f in embed.fields if "rating" in (f.name or "").lower() or f.name == ZERO_WIDTH)
-    assert "All time" in note and "retiring does not unearn it" in note
+    assert "All Time Ratings" in note and "every title they won and defended" in note
     assert within_limits(embed)
 
 
@@ -376,7 +376,43 @@ def test_a_board_carries_the_all_time_list_under_the_current_one():
     names = [f.name for f in embed.fields]
     plain = [f.value.replace(" ", " ") for f in embed.fields]
 
-    assert names[0] == "Ratings" and "All time" in names[1], "current first, all-time beneath"
+    assert names[0] == "Current Ratings" and "All Time" in names[1], "current first, all-time beneath"
     assert "Retired Great" not in plain[0]
     assert "Retired Great" in plain[1]
     assert within_limits(embed)
+
+
+def test_a_board_says_who_holds_a_belt_and_who_held_one():
+    """The question the board kept getting asked was why a champion sits below
+    someone who is not one, so it has to say which is which."""
+    from ufcbot.embeds import rankings_embed
+    from ufcbot.stats.rankings import Ranked
+
+    def entry(rank, name, **kw):
+        return Ranked(rank=rank, name=name, rating=1200 - rank, record="10-2-0",
+                      division="Lightweight", key=name, **kw)
+
+    rows = [
+        entry(1, "Contender"),
+        entry(2, "Champion", champion=True),
+        entry(3, "Ex Champion", former_champion=True),
+    ]
+    lines = rankings_embed("Lightweight", rows).fields[0].value.splitlines()
+
+    assert "🏆" not in lines[0] and "🎖️" not in lines[0], "never held one"
+    assert "🏆" in lines[1]
+    assert "🎖️" in lines[2] and "🏆" not in lines[2]
+
+
+def test_a_champion_is_not_also_marked_as_a_former_one():
+    from ufcbot.stats.career import Ledger
+
+    champ = Ledger(name="Champ")
+    champ.title_wins, champ.champion = 3, True
+    lost_it = Ledger(name="Lost it")
+    lost_it.title_wins, lost_it.champion = 3, False
+    never = Ledger(name="Never")
+
+    assert not champ.former_champion, "holding it now is not having held it"
+    assert lost_it.former_champion
+    assert not never.former_champion

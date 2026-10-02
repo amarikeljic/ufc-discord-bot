@@ -28,7 +28,7 @@ from .scorer import MODEL_FILE
 log = logging.getLogger(__name__)
 
 CAREER_FILE = "career.pkl"
-CAREER_VERSION = 7
+CAREER_VERSION = 8
 
 # How far back the honest evaluation window reaches when training.
 HOLDOUT_MONTHS = 18
@@ -49,6 +49,8 @@ class CareerData:
     """Tale of the tape keyed by normalised name."""
     meetings: dict[tuple[str, str], Meeting] = field(default_factory=dict)
     """Who has fought whom, keyed by the sorted pair of normalised names."""
+    champions: dict[str, str] = field(default_factory=dict)
+    """Division -> whoever the data last saw win its belt. Thirteen entries."""
     fight_count: int = 0
     newest_event: date | None = None
     fingerprint: str = ""
@@ -259,6 +261,7 @@ def refresh(data_dir: str, model_dir: str, *, force_retrain: bool = False, downl
         # file, and the memory the bot holds it in, bigger.
         fighters={key: info for key, info in dataset.fighters.items() if key in history.ledgers},
         meetings=history.meetings,
+        champions=history.champions,
         fight_count=dataset.fight_count,
         newest_event=newest,
         fingerprint=digest,

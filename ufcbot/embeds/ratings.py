@@ -24,7 +24,11 @@ def _rating_lines(entries: list, *, with_division: bool) -> list[str]:
         facts = [f"**{entry.rating}**", entry.record]
         if with_division and entry.division:
             facts.append(entry.division)
-        lines.append(f"{badge} {keep(entry.name)} · {join(facts)}")
+        # The belt is shown rather than ranked on. It is the one thing a reader
+        # already knows and will look for, and its absence next to the top name
+        # is the question the board was getting asked.
+        belt = " 🏆" if entry.champion else (" 🎖️" if entry.former_champion else "")
+        lines.append(f"{badge} {keep(entry.name)}{belt} · {join(facts)}")
     return lines
 
 
@@ -55,12 +59,12 @@ def rankings_embed(
         return stamp(embed)
 
     add_chunked_fields(
-        embed, "Ratings", _rating_lines(entries, with_division=pound_for_pound)
+        embed, "Current Ratings", _rating_lines(entries, with_division=pound_for_pound)
     )
     if all_time:
         add_chunked_fields(
             embed,
-            "🐐 All time" if not pound_for_pound else "🐐 All time, every division",
+            "🐐 All Time Ratings",
             _rating_lines(all_time, with_division=pound_for_pound),
         )
     if note:
@@ -73,21 +77,24 @@ def rankings_embed(
             _paragraphs(
                 "The bot's own rating, not the UFC's ranking. Everyone starts level and a "
                 "win moves it by how good the fighter beaten was, so beating a contender is "
-                "worth more than beating a debutant. Nobody votes and a belt counts for "
-                "nothing by itself, which is why champions often sit below contenders "
-                "here.\n\n"
-                "**=** marks a shared rank: ratings a few points apart are a tie, not an "
-                "order.\n\n"
+                "worth more than beating a debutant. Nobody votes, and a belt counts for "
+                "nothing by itself, which is why a champion can sit below a contender here.\n\n"
+                "🏆 holds the belt · 🎖️ held it once · **=** a shared rank, because ratings a "
+                "few points apart are a tie rather than an order.\n\n"
                 "Ranked here: three or more UFC fights, and a fight in the last eighteen "
                 "months. After a year out a rating fades — halving what a fighter holds over "
                 "the starting rating for every further year — so a number nobody is "
                 "defending stops outranking the fighters competing for it.\n\n"
-                "**🐐 All time** is the same rating with both of those taken away: five or "
-                "more fights, nothing faded, and nobody dropped for having retired. A rating "
-                "is what a fighter earned and retiring does not unearn it, so this is the "
-                "board the old names are on. There a fighter is listed in the division they "
-                "fought in most rather than the one they finished in, or St-Pierre is a "
-                "middleweight.\n\n"
+                "**🐐 All Time Ratings** asks a different question and scores it differently. "
+                "Nothing "
+                "fades and nobody is dropped for having retired, and instead of the rating a "
+                "fighter carries now it uses the best they held across three fights, plus "
+                "credit for every title they won and defended.\n\n"
+                "A rating on its own cannot say *beat him three times*: it adds up results, "
+                "so a longer career outscores a better one. And a career judged by the "
+                "rating it ended on is judged by its decline. Five or more fights to qualify, "
+                "and a fighter is listed in the division they fought in most rather than the "
+                "one they finished in, or St-Pierre is a middleweight.\n\n"
                 "Records are UFC fights only. On the current boards a fighter's division is "
                 "wherever they last fought, and the rating travels with them."
             ),

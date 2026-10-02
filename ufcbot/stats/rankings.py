@@ -78,6 +78,21 @@ MIN_FIGHTS = 3
 # is still low, deliberately: an unbeaten seven-fight run belongs on the board
 # that is about who was ever any good, even before it is a career.
 ALL_TIME_MIN_FIGHTS = 5
+# What a belt is worth on an all-time board, in rating points.
+#
+# A rating cannot say "beat him three times", because it is transitive: it adds
+# up every result and a long career outscores a better one. Left to the rating
+# alone the board had Holloway above Volkanovski, who beat him three times for
+# the belt, and Du Plessis above Anderson Silva. What those boards were missing
+# is the thing the sport actually settles arguments with, and the only one the
+# fighters are competing for.
+#
+# Weighed against the gap it has to close: a divisional board spans about 150
+# points, so a defence moves a fighter past roughly a tenth of it. Every pairing
+# that reads wrong without this reads right with it, and none that read right
+# were broken by it.
+TITLE_DEFENCE_POINTS = 15
+TITLE_WIN_POINTS = 5
 # How many to list per division.
 DEPTH = 15
 
@@ -91,6 +106,14 @@ class Ranked:
     division: str | None
     key: str = ""
     """The dataset key, which is what a board is remembered by between passes."""
+    champion: bool = False
+    """Whether they hold the belt. Shown, never ranked on: the rating is the
+    rating, and a board that reordered itself around the belt would be the UFC's
+    ranking rather than this one's."""
+    former_champion: bool = False
+    """Held one once. On a current board it is most of the answer to why someone
+    is up there; on an all-time board the absence of it is the interesting half,
+    since it marks out the careers that never got the belt."""
     last_fight: date | None = None
     last_result: str | None = None
     tied: bool = False
@@ -169,6 +192,8 @@ def _ranked(entries: list[tuple[int, str, Ledger]], *, home: bool = False) -> li
                 record=ledger.record,
                 division=(ledger.home_division or ledger.division) if home else ledger.division,
                 key=key,
+                champion=ledger.champion,
+                former_champion=ledger.former_champion,
                 last_fight=ledger.last_fight,
                 last_result=ledger.last_result,
             )
@@ -197,6 +222,21 @@ def rank_division(
     return _ordered(ledgers, division, on=on, include_women=include_women)[:depth]
 
 
+def career_score(ledger: Ledger) -> int:
+    """What a fighter did, as one number: how good they got, and what they won.
+
+    The peak is the rating held across three fights rather than the one they
+    retired with, because a career judged on its last day is a career judged on
+    its decline -- Anderson Silva gave back 120 points going 1-6 at the end, and
+    finished below fighters he would have beaten in his sleep.
+    """
+    return round(
+        ledger.peak_elo
+        + TITLE_DEFENCE_POINTS * ledger.title_defences
+        + TITLE_WIN_POINTS * ledger.title_wins
+    )
+
+
 def all_time(
     ledgers: dict[str, Ledger],
     division: str | None,
@@ -204,19 +244,22 @@ def all_time(
     depth: int = DEPTH,
     include_women: bool = True,
 ) -> list[Ranked]:
-    """The best-rated fighters ever, in one division or across all of them.
+    """The greatest careers, in one division or across all of them.
 
-    The same rating as the board above it, asked a different question. Nothing
-    is faded and nobody is dropped for not having fought lately: a rating is
-    what a fighter earned, and retiring does not unearn it. That is the whole
-    difference -- the current boards hide a rating nobody is defending, because
-    a list of who is best now should not be topped by someone who has stopped.
+    Not the board above with the filter taken off. That board answers who is
+    best now and answers it with a rating; this one answers who was ever best,
+    and a rating on its own cannot. A rating is transitive and cumulative, so a
+    long career outscores a better one: on the rating alone this board had
+    Holloway above Volkanovski, who beat him three times for the belt, and Du
+    Plessis above Anderson Silva. So it ranks on :func:`career_score`, which is
+    the peak a fighter held plus what they won holding it.
 
-    A fighter is listed in the division they fought in most rather than the one
+    Nothing is faded and nobody is dropped for not having fought lately. A
+    fighter is listed in the division they fought in most rather than the one
     they finished in, or St-Pierre is a middleweight and Jones a heavyweight.
     """
     entries = [
-        (round(ledger.elo), key, ledger)
+        (career_score(ledger), key, ledger)
         for key, ledger in ledgers.items()
         if ledger.fights >= ALL_TIME_MIN_FIGHTS
         and (division is None or (ledger.home_division or ledger.division) == division)

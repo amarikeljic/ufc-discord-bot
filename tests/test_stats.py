@@ -59,13 +59,26 @@ def test_a_fight_at_no_division_has_none(text):
 # -- ratings ------------------------------------------------------------------
 
 
-def rated(name: str, elo: float, *, fights: int = 6, division: str | None = "Lightweight", ago: int = 30) -> Ledger:
+def rated(
+    name: str,
+    elo: float,
+    *,
+    fights: int = 6,
+    division: str | None = "Lightweight",
+    ago: int = 30,
+    peak: float | None = None,
+    defences: int = 0,
+    titles: int = 0,
+) -> Ledger:
     ledger = Ledger(name=name)
     ledger.elo = elo
+    ledger.peak_elo = elo if peak is None else peak
     ledger.fights = fights
     ledger.wins = fights
     ledger.division = division
     ledger.last_fight = TODAY - timedelta(days=ago)
+    ledger.title_defences = defences
+    ledger.title_wins = titles
     return ledger
 
 
@@ -497,16 +510,42 @@ def test_a_retired_fighter_is_off_the_current_board_and_top_of_the_all_time_one(
     assert ever[0] == "Georges St-Pierre"
 
 
-def test_the_all_time_board_does_not_fade_a_rating_for_a_layoff():
+def test_the_all_time_board_does_not_fade_a_career_for_a_layoff():
     """The current board halves what an idle fighter holds over the starting
     rating. Doing that here would rank the dead by how long they have been dead."""
-    from ufcbot.stats.rankings import all_time
+    from ufcbot.stats.rankings import all_time, career_score
 
     led = rated("Khabib Nurmagomedov", 1207, fights=13, division="Lightweight", ago=2500)
     entry = all_time({"khabib": led}, "Lightweight")[0]
 
-    assert entry.rating == 1207, "the number he retired with"
+    assert entry.rating == career_score(led), "scored as a career, not faded"
     assert rating_on(led, TODAY) < 1207, "the current board does fade it"
+
+
+def test_a_career_is_scored_on_the_peak_held_not_the_rating_retired_with():
+    """Anderson Silva gave back 120 points going 1-6 at the end. Judging a career
+    on its last day is judging it on its decline."""
+    from ufcbot.stats.rankings import career_score
+
+    declined = rated("Anderson Silva", 1096, fights=25, peak=1216)
+    steady = rated("Someone Else", 1150, fights=12, peak=1150)
+
+    assert career_score(declined) > career_score(steady)
+
+
+def test_beating_the_same_man_for_the_belt_outranks_the_longer_career():
+    """Volkanovski beat Holloway three times for the featherweight title and the
+    rating still had Holloway above him, because a rating adds up every result
+    and a longer career adds up more of them. What it was missing is the belt."""
+    from ufcbot.stats.rankings import all_time
+
+    volk = rated("Volkanovski", 1186, fights=18, division="Featherweight",
+                 peak=1186, defences=5, titles=8)
+    holloway = rated("Holloway", 1206, fights=33, division="Featherweight",
+                     peak=1206, defences=3, titles=5)
+
+    assert holloway.peak_elo > volk.peak_elo, "the rating alone has it the wrong way round"
+    assert [e.name for e in all_time({"v": volk, "h": holloway}, "Featherweight")][0] == "Volkanovski"
 
 
 def test_an_all_time_board_lists_a_fighter_where_they_fought_most():
@@ -516,6 +555,7 @@ def test_an_all_time_board_lists_a_fighter_where_they_fought_most():
 
     led = rated("Georges St-Pierre", 1260, fights=22, division="Middleweight", ago=3000)
     led.home_division = "Welterweight"
+
 
     assert [e.name for e in all_time({"gsp": led}, "Welterweight")] == ["Georges St-Pierre"]
     assert all_time({"gsp": led}, "Middleweight") == [], "not where he belongs"
@@ -530,3 +570,34 @@ def test_the_all_time_board_asks_for_more_of_a_career_than_the_current_one():
 
     assert rank_division({"d": brief}, "Lightweight", on=TODAY), "enough for the current board"
     assert all_time({"d": brief}, "Lightweight") == [], "not enough for an all-time one"
+
+
+def test_an_interim_belt_is_not_the_belt():
+    """Poirier and Gaethje each won interim lightweight titles between Khabib's
+    defences. Counted as title changes they put someone else in the chair, and
+    handed his three defences back to him as four separate reigns."""
+    from ufcbot.stats.career import is_lineal_title
+
+    assert is_lineal_title(True, "UFC Lightweight Title Bout")
+    assert not is_lineal_title(True, "UFC Interim Lightweight Title Bout")
+
+
+def test_a_tournament_final_is_not_a_title_defence():
+    """ufcstats flags the Ultimate Fighter finals as title fights, and they
+    normalise to a real division, so they land in the middle of its lineage."""
+    from ufcbot.stats.career import is_lineal_title
+
+    assert not is_lineal_title(True, "Ultimate Fighter 27 Lightweight Tournament Title Bout")
+    assert not is_lineal_title(False, "UFC Lightweight Bout"), "not a title fight at all"
+
+
+def test_the_peak_is_a_run_rather_than_one_good_night():
+    """One upset can put a rating at a number the fighter never held again."""
+    from ufcbot.stats.career import _sustained_peak
+
+    spike = [1000, 1000, 1200, 1000, 1000]
+    run = [1100, 1110, 1120, 1130, 1140]
+
+    assert _sustained_peak(spike) < _sustained_peak(run)
+    assert _sustained_peak([]) == 1000.0
+    assert _sustained_peak([1300]) == 1300, "too short to average is still a peak"
