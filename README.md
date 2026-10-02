@@ -462,6 +462,20 @@ vacated, so on the lineal chain alone the heavyweight belt sat with Jon Jones fr
 years earlier, and Aspinall, whose two heavyweight titles were both interim, showed as
 having never held one.
 
+**The order is a best guess, not a measurement.** Measured across every fight on record,
+100 rating points is worth about 11 points of win rate, so two fighters within about 45
+points of each other are a coin flip — and most of a divisional board sits inside that. A
+board grouped honestly at that threshold is three tiers rather than fifteen ranks, with
+nine fighters sharing third at flyweight and thirteen of fifteen in one tier at
+welterweight. The ranks are kept because the ordering is still the best available guess and
+a board of three tiers is not one anybody can read, but the note on the board says plainly
+that it is a guess.
+
+That figure is also a check on the rating scale itself. A 400-point Elo scale implies 14.4
+points of win rate per 100, and the ratings deliver 10.7 — so the gaps between fighters are
+overstated by about a third, and a scale of roughly 540 would describe them. That is a
+property of the rating, not of the boards.
+
 **Ratings too close to separate share a rank,** marked `=`. Across the divisional boards
 the median gap between neighbours is under four points, and a single result moves a rating
 by up to 32, so most adjacent pairs are inside the noise of one fight. Sorting those into
