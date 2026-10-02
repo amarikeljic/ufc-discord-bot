@@ -321,7 +321,11 @@ def test_a_return_reads_as_a_place_rather_than_a_climb():
     ).fields[0].value.replace(" ", " ")
 
     assert "back, now **9**" in value and "after a loss" in value
+    # The event still carries the rank he came from, because the diff needs it
+    # to know he moved. Only the renderer keeps it off the board, so that is
+    # what has to be checked: with it, this line reads "10 → 9 · after a loss".
     assert "→" not in value, "no arrow; he lost"
+    assert "**10" not in value, "the rank he came from is not his, it is the layoff's"
     assert "Jose Aldo" not in value, "passed by a layoff coming off, not by a result"
 
 

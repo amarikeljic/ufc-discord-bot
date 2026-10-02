@@ -624,6 +624,13 @@ wrong one — he is absent from the previous board, so he never counts as having
 anybody — and it is the fourth thing that would be fixed by diffing the full ranked list
 instead of the published top fifteen.
 
+The full list would not cover a fighter returning from past the eighteen-month cutoff,
+because he is on no list at all. One rule covers him, the off-board returner and the
+pre-migration row together: a fighter who fought this pass and has no usable previous row
+gets placed in the previous board at his pre-fight raw rating, and crossings are read as
+normal. That number is not currently kept anywhere — the ledger holds the rating after the
+fight, not before it — so the rule needs one more field written during the career replay.
+
 Leaving the board cannot be tested for crossings, because the fighter is no longer there to
 compare anyone against. Ageing out at the eighteen-month cutoff is always announced; being
 pushed below fifteenth is announced when a result could have done it, and not when the
