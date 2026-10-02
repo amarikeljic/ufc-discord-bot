@@ -356,11 +356,20 @@ class Storage:
 
     # -- the ratings boards as last published --------------------------------------
 
-    async def ranking_state(self, division: str) -> dict[str, RankedState]:
-        """Who was on this board last time, by fighter key."""
+    async def ranking_state(self, division: str, version: int = 0) -> dict[str, RankedState]:
+        """Who was on this board last time, by fighter key.
+
+        Empty where the board was last written by a different version of the
+        ratings. The ratings themselves move when the model is rebuilt, so
+        comparing across a version is comparing two different measures: on a card
+        night every fighter who fought would be credited with the crossings the
+        rebuild caused. An empty answer is read as "first time", which announces
+        nothing and writes the board afresh.
+        """
         async with self.db.execute(
-            "SELECT fighter, rank, rating, last_fight, raw FROM ranking_state WHERE division = ?",
-            (division,),
+            "SELECT fighter, rank, rating, last_fight, raw FROM ranking_state "
+            "WHERE division = ? AND version = ?",
+            (division, version),
         ) as cursor:
             rows = await cursor.fetchall()
         return {
@@ -370,12 +379,14 @@ class Storage:
             for row in rows
         }
 
-    async def save_ranking_state(self, division: str, entries: list[RankedState]) -> None:
+    async def save_ranking_state(
+        self, division: str, entries: list[RankedState], version: int = 0
+    ) -> None:
         await self.db.execute("DELETE FROM ranking_state WHERE division = ?", (division,))
         await self.db.executemany(
             """
-            INSERT INTO ranking_state (division, fighter, rank, rating, last_fight, raw)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO ranking_state (division, fighter, rank, rating, last_fight, raw, version)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
@@ -385,6 +396,7 @@ class Storage:
                     e.rating,
                     e.last_fight.isoformat() if e.last_fight else None,
                     e.raw,
+                    version,
                 )
                 for e in entries
             ],

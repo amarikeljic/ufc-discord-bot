@@ -104,3 +104,22 @@ def test_an_entry_missing_a_field_is_skipped_and_the_rest_are_read(tmp_path):
 def test_no_file_means_the_data_decides_everything(tmp_path):
     assert load(tmp_path) == []
     assert apply(DERIVED, LAST_FIGHT, [], resolve=keys) == (DERIVED, [])
+
+
+def test_an_entry_survives_a_title_fight_on_the_same_day():
+    """A belt announced vacant on the morning of a card is vacant for that card,
+    and the card's own result writes the next champion anyway. "After" has to be
+    read one way, and the schema says which."""
+    same_day = {"Lightweight": date(2026, 2, 1)}
+    changes = [BeltChange("Lightweight", "Tom Aspinall", VACATED, date(2026, 2, 1))]
+
+    champions, warnings = apply(DERIVED, same_day, changes, resolve=keys)
+
+    assert "Lightweight" not in champions, "the entry stands on the day itself"
+    assert warnings == []
+
+    later = {"Lightweight": date(2026, 2, 2)}
+    champions, warnings = apply(DERIVED, later, changes, resolve=keys)
+
+    assert champions["Lightweight"] == "justin gaethje", "a day later and the cage decides"
+    assert len(warnings) == 1

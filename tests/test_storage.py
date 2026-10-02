@@ -323,3 +323,21 @@ async def test_an_older_database_is_upgraded_in_place(tmp_path):
     finally:
         await store.close()
 
+
+
+async def test_a_board_written_by_another_version_reads_as_never_seen(storage):
+    """A rebuild moves every rating, so a board written under one version and
+    read under another is two different measures being compared. On a card night
+    the gate would wave that through and credit everyone who fought with the
+    crossings the rebuild caused."""
+    from ufcbot.records import RankedState
+
+    board = [RankedState("a", 1, 1200, date(2026, 1, 1), 1200)]
+    await storage.save_ranking_state("Lightweight", board, 9)
+
+    assert await storage.ranking_state("Lightweight", 9), "same version, same board"
+    assert await storage.ranking_state("Lightweight", 10) == {}, "a rebuild is a fresh start"
+
+    await storage.save_ranking_state("Lightweight", board, 10)
+    assert await storage.ranking_state("Lightweight", 10), "and then it is the board again"
+    assert await storage.ranking_state("Lightweight", 9) == {}, "the old one is not kept"

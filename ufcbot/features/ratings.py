@@ -211,8 +211,22 @@ class RatingsWatch:
     def __init__(self, storage: Storage) -> None:
         self.storage = storage
 
-    async def poll(self, ledgers: dict[str, Ledger], *, on: date | None = None) -> list[tuple[str, list[RatingChange]]]:
-        """Compare every division's board with the last published one and record it."""
+    async def poll(
+        self,
+        ledgers: dict[str, Ledger],
+        *,
+        on: date | None = None,
+        version: int = 0,
+    ) -> list[tuple[str, list[RatingChange]]]:
+        """Compare every division's board with the last published one and record it.
+
+        ``version`` is the career data's. A rebuild moves every rating, so a board
+        written by one version and read by another is two different measures being
+        compared -- and on a card night the gate would wave it through, crediting
+        everyone who fought with the crossings the rebuild caused. The stored board
+        is keyed by version, so a change reads as a board never seen before:
+        nothing is announced for one pass and the new one is written.
+        """
         if not ledgers:
             return []
         today = on or date.today()
@@ -224,13 +238,15 @@ class RatingsWatch:
             # its own, and a fighter who faded off the bottom still has a
             # position to be compared against when he comes back.
             current = all_ranked(ledgers, division, on=today)
-            previous = await self.storage.ranking_state(division)
+            previous = await self.storage.ranking_state(division, version)
             await self.storage.save_ranking_state(
                 division,
                 [RankedState(e.key, e.rank, e.rating, e.last_fight, e.raw) for e in current],
+                version,
             )
             if not previous:
-                # First time this board has been built; the whole board is not news.
+                # Never seen, or last seen under a different version of the
+                # ratings. Either way there is nothing to compare against.
                 continue
             changes = diff(previous, current, ledgers, on=today)
             if changes:

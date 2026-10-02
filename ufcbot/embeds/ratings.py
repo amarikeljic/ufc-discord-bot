@@ -8,6 +8,7 @@ from ..stats.rankings import win_chance
 from ..util import truncate
 from .common import (
     DASH,
+    FIELD_LIMIT,
     UFC_RED,
     add_chunked_fields,
     join,
@@ -47,6 +48,32 @@ def _odds_against(entry, champion, fading: bool) -> str | None:
     return f"{win_chance(entry.rating, champion.rating):.0%} vs {surname(champion.name)}"
 
 
+# What a line gives up, in the order it gives it up, when fifteen of them will
+# not fit in one field. Discord refuses the whole embed rather than the overflow,
+# so a board that cannot be trimmed is a board that does not post -- and the
+# alternative to trimming is a ranking split down the middle into two fields,
+# which is what this all started as. The record goes first, because it is the one
+# thing on the line that is also on the fighter's own card.
+_DROP_IN_ORDER = ("record", "odds")
+
+
+def _fitted(entries: list, **kw) -> list[str]:
+    """The lines, trimmed until a full board fits in one field.
+
+    The real boards run to about 920 of the 1024 with everything on, so this does
+    nothing almost always. It exists because "almost" is doing work there: one
+    long name arriving on a board, or a sixteenth no contest, is the difference
+    between a board and no board at all.
+    """
+    lines = _rating_lines(entries, **kw)
+    for give_up in _DROP_IN_ORDER:
+        if len("\n".join(lines)) <= FIELD_LIMIT:
+            break
+        kw[give_up] = False
+        lines = _rating_lines(entries, **kw)
+    return lines
+
+
 def _rating_lines(
     entries: list,
     *,
@@ -54,6 +81,8 @@ def _rating_lines(
     career: bool = False,
     champion=None,
     fading: frozenset[str] = frozenset(),
+    record: bool = True,
+    odds: bool = True,
 ) -> list[str]:
     """One line per fighter.
 
@@ -90,7 +119,8 @@ def _rating_lines(
         if career and with_division:
             facts.append(entry.division or entry.record)
         else:
-            facts.append(entry.record)
+            if record:
+                facts.append(entry.record)
             if with_division and entry.division:
                 facts.append(entry.division)
         # The belt is shown rather than ranked on. It is the one thing a reader
@@ -99,9 +129,9 @@ def _rating_lines(
         belt = " 🏆" if entry.champion else (" 🎖️" if entry.former_champion else "")
         if career and entry.defences:
             facts.insert(1, plural(entry.defences, "defence"))
-        odds = None if career else _odds_against(entry, champion, entry.key in fading)
-        if odds:
-            facts.append(odds)
+        against = None if career or not odds else _odds_against(entry, champion, entry.key in fading)
+        if against:
+            facts.append(against)
 
         lines.append(f"{badge} {keep(entry.name)}{belt} · {join(facts)}")
     return lines
@@ -140,13 +170,13 @@ def rankings_embed(
     add_chunked_fields(
         embed,
         "Current Ratings",
-        _rating_lines(entries, with_division=pound_for_pound, champion=champion, fading=fading),
+        _fitted(entries, with_division=pound_for_pound, champion=champion, fading=fading),
     )
     if all_time:
         add_chunked_fields(
             embed,
             "🐐 All Time Ratings",
-            _rating_lines(all_time, with_division=pound_for_pound, career=True),
+            _fitted(all_time, with_division=pound_for_pound, career=True),
         )
     if note:
         # Chunked rather than added whole: the explanation covers two boards now

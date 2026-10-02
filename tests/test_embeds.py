@@ -492,9 +492,9 @@ def test_a_divisional_line_says_what_the_gap_is_worth_against_the_champion():
     ]
     lines = rankings_embed("Lightweight", rows).fields[0].value.replace(" ", " ").splitlines()
 
-    assert "56% vs Gaethje" in lines[0], "rated above the champion, so better than even"
+    assert "59% vs Gaethje" in lines[0], "rated above the champion, so better than even"
     assert "vs" not in lines[1], "the champion is not compared with himself"
-    assert "46% vs Gaethje" in lines[2]
+    assert "44% vs Gaethje" in lines[2]
 
 
 def test_pound_for_pound_carries_no_odds():
@@ -544,3 +544,25 @@ def test_the_tie_marker_goes_where_the_odds_are_shown():
     assert "=" not in divisional, "the percentages say how close they are"
     assert [line.split("`")[1].strip() for line in divisional.splitlines()] == ["1", "2", "3"]
     assert "=" in p4p, "pound for pound has no odds column, so the marker still earns its place"
+
+
+def test_an_oversized_board_gives_something_up_rather_than_not_posting():
+    """Past 1024 characters in a field Discord refuses the whole embed, not the
+    overflow, so a board that cannot be trimmed is a board that does not appear.
+    The real ones run to about 920, which is one long name away from trouble."""
+    from ufcbot.embeds import rankings_embed
+    from ufcbot.embeds.common import FIELD_LIMIT
+    from ufcbot.stats.rankings import DEPTH, Ranked
+
+    rows = [
+        Ranked(rank=i, name="Valentina Shevchenko" * 2, rating=1300 - i, record="22-11-0 (1 NC)",
+               division="Women's Bantamweight", raw=1300 - i, key=f"f{i}", champion=i == 1)
+        for i in range(1, DEPTH + 1)
+    ]
+    embed = rankings_embed("Lightweight", rows)
+    field = embed.fields[0].value
+
+    assert len(field) <= FIELD_LIMIT, "trimmed to fit"
+    assert len(embed.fields) == 1, "and still one field, not a ranking cut in half"
+    assert "22-11-0" not in field, "the record is the first thing given up"
+    assert all(f"`{i:>3}`" in field for i in (1, DEPTH)), "every place is still there"

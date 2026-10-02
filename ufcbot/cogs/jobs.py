@@ -192,7 +192,13 @@ class JobsCog(commands.Cog):
             log.exception("Checking cards for changes failed")
             changes = []
         try:
-            moves = await self.bot.ratingswatch.poll(self.bot.ledgers())
+            # Keyed by the career data's version: a rebuild moves every rating,
+            # and comparing across one would credit a card night with the moves
+            # the rebuild caused.
+            careers = self.bot.stats.careers
+            moves = await self.bot.ratingswatch.poll(
+                self.bot.ledgers(), version=careers.version if careers else 0
+            )
         except Exception:
             log.exception("Checking the ratings boards for changes failed")
             moves = []

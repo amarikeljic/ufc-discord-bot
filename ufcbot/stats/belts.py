@@ -19,23 +19,32 @@ Format -- a list of objects in ``belts.json`` in the data directory::
 
     [
       {
-        "division": "Heavyweight",
-        "fighter": "Tom Aspinall",
+        "division": "Women's Flyweight",
+        "fighter": "Valentina Shevchenko",
         "status": "vacated",
-        "on": "2025-06-14",
+        "on": "2026-09-30",
         "source": "https://www.ufc.com/news/..."
       }
     ]
 
 ``status`` is one of ``undisputed`` (they hold it), ``interim`` (they hold the
 interim belt), or ``vacated`` (nobody holds it, and ``fighter`` names whoever
-gave it up). ``on`` is the date it happened and ``source`` is where it was read,
-so a later reader can check it rather than trust it.
+gave it up). ``source`` is where it was read, so a later reader can check it
+rather than trust it.
 
-An entry is superseded by any title fight in the data dated after it. That is
-the whole guard against this file going stale: a forgotten entry stops mattering
-the moment somebody fights for the belt, rather than pinning a champion forever
-and recreating the problem it was written to fix with a person as the source.
+``on`` is **the date of the administrative change** -- the announcement that the
+belt was vacated, stripped or handed over -- and never the date of the fight
+that led to it. Dating an entry to the fight makes it no later than that fight,
+and a later fight supersedes an entry, so it would be ignored the moment it was
+written.
+
+An entry is superseded by any title fight in the data dated strictly after it,
+and survives one on the same day: a belt announced vacant on the morning of a
+card is vacant for that card, and the card's own result writes the next champion
+anyway. That supersession is the guard against this file going stale. A
+forgotten entry stops mattering the moment somebody fights for the belt, rather
+than pinning a champion forever and recreating the problem it was written to fix
+with a person as the source.
 """
 
 from __future__ import annotations
