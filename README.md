@@ -610,7 +610,19 @@ points of fade plus sixteen of result and everyone inside the first twenty-one w
 by the calendar. Comparing raw ratings handles a win and a loss identically, because a
 defeat cannot take a raw rating up past anybody.
 
-The raw rating is kept in `ranking_state` for exactly this and is never shown.
+The raw rating is kept in `ranking_state` for exactly this and is never shown. Where it is
+missing — a row written before it was stored — nothing is said about that crossing at all,
+rather than falling back to the ranks the board showed, which would be reading the fade as
+the answer. The column is nullable for the same reason: zero is a rating a fighter could
+hold, so a sentinel of zero would read to any later code that forgot to check as somebody
+below everybody, and count every crossing against them.
+
+The state is kept for the published fifteen only, which leaves the other half of this
+unfixed: a fighter who faded below fifteenth has no row, so when he comes back and wins,
+the fighters he genuinely passed are not announced. That is a missed sentence rather than a
+wrong one — he is absent from the previous board, so he never counts as having crossed
+anybody — and it is the fourth thing that would be fixed by diffing the full ranked list
+instead of the published top fifteen.
 
 Leaving the board cannot be tested for crossings, because the fighter is no longer there to
 compare anyone against. Ageing out at the eighteen-month cutoff is always announced; being
@@ -824,7 +836,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-301 tests, a few seconds, no network and no Discord. One file per module it covers: they run against a real SQLite
+302 tests, a few seconds, no network and no Discord. One file per module it covers: they run against a real SQLite
 database in a temporary directory and fight cards built by hand. Most of them are about
 what happens when a card changes underneath the bot, because that is where the awkward
 cases live -- a fighter replaced, a fight cancelled, a card that only half-loaded -- and

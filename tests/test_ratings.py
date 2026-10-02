@@ -46,17 +46,22 @@ def ranked(key: str, rank: int, rating: int, last: date | None = RECENT, raw: in
     return RankedState(key, rank, rating, last, rating if raw is None else raw)
 
 
-def fought_since(was: RankedState, rank: int, rating: int, *, result: str, name: str | None = None):
-    """A fighter who has had a fight since ``was`` was written.
+def fought_on(
+    was: RankedState, card: date, rank: int, rating: int, *, result: str, name: str | None = None
+):
+    """A fighter who fought on ``card``, which is after the last time they did.
 
-    The date is taken from the previous state and moved on, because a fixture
-    that leaves it alone is a fighter who did not fight -- the diff reads "did
-    they fight" from last_fight changing, and several tests here once claimed a
-    result while holding the date still, which made them silently vacuous.
+    The date is the card's, not the old one nudged forward, because the rest of
+    the bot reads it as a date and not only as a thing that changed: a fighter
+    idle 440 days whose "new" fight is dated day 441 is still 439 days idle at
+    the pass, and would age out and read as inactive while supposedly having
+    just fought. The assertion is what stops a fixture claiming a result while
+    holding the date still, which several tests here once did -- and passed,
+    testing nothing.
     """
     assert was.last_fight is not None, "cannot fight again after never having fought"
-    return Row(was.fighter, rank, rating, last=was.last_fight + timedelta(days=1),
-               result=result, name=name)
+    assert card > was.last_fight, "a fight has to be later than the one before it"
+    return Row(was.fighter, rank, rating, last=card, result=result, name=name)
 
 
 class Row:
@@ -193,8 +198,8 @@ def test_a_board_that_moved_because_somebody_fought_is_reported():
     from ufcbot.stats.rankings import Ranked
 
     before = {
-        "a": RankedState("a", 1, 1100, date(2026, 1, 10)),
-        "b": RankedState("b", 2, 1098, date(2026, 1, 10)),
+        "a": RankedState("a", 1, 1100, date(2026, 1, 10), 1100),
+        "b": RankedState("b", 2, 1098, date(2026, 1, 10), 1098),
     }
     after = [
         Ranked(rank=1, name="B", rating=1130, division="Lightweight", record="10-1-0",
@@ -345,8 +350,32 @@ def test_a_returning_winner_only_passes_the_people_the_win_passed():
 
 def test_a_fixture_cannot_claim_a_fight_without_moving_the_date():
     """The helper exists because several tests here once did exactly that, and
-    passed while testing nothing."""
-    was = ranked("a", 3, 1100, last=BEFORE)
-    row = fought_since(was, 2, 1130, result="win")
+    passed while testing nothing. The date is the card's, so the fighter is as
+    recently active as the fixture says they are."""
+    import pytest
 
-    assert row.last_fight > was.last_fight
+    was = ranked("a", 3, 1100, last=BEFORE)
+    card = TODAY - timedelta(days=2)
+
+    assert fought_on(was, card, 2, 1130, result="win").last_fight == card
+    with pytest.raises(AssertionError):
+        fought_on(was, was.last_fight - timedelta(days=1), 2, 1130, result="win")
+
+
+def test_a_crossing_nobody_can_explain_is_not_announced():
+    """A row written before the raw rating was kept cannot say whether a
+    returning fighter passed somebody on his result or on his layoff coming off.
+    Falling back to the ranks the board showed would be reading the fade as the
+    answer, which is the thing the raw rating exists to avoid."""
+    previous = {
+        "returner": RankedState("returner", 6, 1137, OLD, None),   # pre-migration row
+        "bystander": ranked("bystander", 5, 1150, last=BEFORE),
+    }
+    current = [
+        Row("returner", 5, 1174, last=RECENT, result="win"),
+        Row("bystander", 6, 1150, last=BEFORE),
+    ]
+    moved = {c.name: c for c in diff(previous, current, {}, on=TODAY)}
+
+    assert moved["Returner"].kind == RETURNED, "his own comeback is still reported"
+    assert "Bystander" not in moved, "no way to tell a result from a fade, so nothing is said"

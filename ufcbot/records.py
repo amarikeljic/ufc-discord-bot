@@ -59,13 +59,18 @@ class RankedState(NamedTuple):
     rank: int
     rating: int
     last_fight: date | None
-    raw: int = 0
+    raw: int | None = None
     """The rating before the layoff fade was applied to it.
 
     Kept because a fighter coming back is handed the fade back on top of the
     result, and the crossings inside the part they were given back are the
     layoff ending rather than the fight. Comparing against the raw rating is
-    what tells the two apart. Zero on a row written before this was stored."""
+    what tells the two apart.
+
+    None, not zero, on a row written before this was stored. Zero is a rating a
+    fighter could in principle hold, so any later code that forgets to check
+    would read the sentinel as somebody below everybody and count every crossing
+    against them."""
 
 
 class CardBout(NamedTuple):

@@ -134,7 +134,7 @@ def diff(
             and on - was.last_fight > DECAY_GRACE
         )
 
-    def was_above(a_key: str, b_key: str) -> bool:
+    def was_above(a_key: str, b_key: str) -> bool | None:
         """Was A above B before this pass, measured so a fade cannot decide it.
 
         A fighter coming back is handed their layoff back on top of the result,
@@ -144,13 +144,15 @@ def diff(
         it the same way for a win and a loss: a defeat cannot take a raw rating
         up past anybody, so a returning loser crosses nobody at all.
 
-        Older rows have no raw rating stored, so those fall back to the rank the
-        board showed, which is what this did before.
+        None where a row predates the raw rating being stored. Falling back to
+        the ranks the board showed would be reading the fade as the answer,
+        which is the thing this exists to avoid, so the caller says nothing
+        instead. That lasts until the next pass rewrites the board's state.
         """
         a, b = previous[a_key], previous[b_key]
-        if a.raw and b.raw:
-            return a.raw > b.raw
-        return a.rank < b.rank
+        if a.raw is None or b.raw is None:
+            return None
+        return a.raw > b.raw
 
     def worth_saying(entry) -> bool:
         """Did this fighter, or anyone who actually passed them, have a fight?"""
@@ -160,8 +162,9 @@ def diff(
             if other.key == entry.key or other.key not in fought or other.key not in previous:
                 continue
             was_under = was_above(entry.key, other.key)
-            now_under = entry.rank < other.rank
-            if was_under and not now_under:
+            if was_under is None:
+                continue  # no way to tell a result from a fade; say nothing
+            if was_under and entry.rank > other.rank:
                 return True  # passed by somebody, and by a result rather than a fade
         return False
 
