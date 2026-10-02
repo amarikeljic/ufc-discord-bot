@@ -484,10 +484,17 @@ predictor to test this came back too noisy to settle (7.6, 9.5, 4.0 and 14.3 poi
 at windows of one, three, five and eight fights).
 
 **Ratings within five points share a rank,** marked `=`. That is not the line between told
-apart and not — the paragraph above gives that, and it is nine times wider. Five points is
-the narrower claim that two ratings are the same number for any purpose, and it earns its
-keep outside the board: the ratings-move announcements compare ranks, so a shared rank is
-what stops a one-point drift being announced as a fighter moving up. Across the divisional boards
+apart and not — the paragraph above gives that, and it is nine times wider. It is the
+narrower claim that five points puts two fighters in no particular order.
+
+It does not debounce the ratings-move announcements, which was the first reason given for
+keeping it and is wrong. A hard threshold does not remove flapping, it moves it to the
+boundary: a pair 4.9 points apart is tied, 5.1 apart is not, and the split reads as a rank
+change although nobody passed anybody. Simulating 180 days with no fights at all — the
+displayed rating drifts on its own, because the layoff fade moves it every day — gives 130
+moves counted by shared rank against 132 counted by who actually passed whom. The grouping
+suppresses about as many real swaps inside a tie as it invents at the edges of one. It is
+presentation, and nothing rests on it. Across the divisional boards
 the median gap between neighbours is under four points, and a single result moves a rating
 by up to 32, so most adjacent pairs are inside the noise of one fight. Sorting those into
 1st and 2nd claims a precision the number does not have. Fighters within five points share
