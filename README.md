@@ -629,7 +629,10 @@ because he is on no list at all. One rule covers him, the off-board returner and
 pre-migration row together: a fighter who fought this pass and has no usable previous row
 gets placed in the previous board at his pre-fight raw rating, and crossings are read as
 normal. That number is not currently kept anywhere — the ledger holds the rating after the
-fight, not before it — so the rule needs one more field written during the career replay.
+fight, not before it, and the delta is gone — so the rule needs one more field written
+during the career replay, which already walks every fight in order. About 11 KB across all
+the ledgers. Solving for it instead, from the fact that Elo is zero-sum within a bout, is
+possible and not worth it: it breaks on anything that is not plain Elo, to save the 11 KB.
 
 Leaving the board cannot be tested for crossings, because the fighter is no longer there to
 compare anyone against. Ageing out at the eighteen-month cutoff is always announced; being

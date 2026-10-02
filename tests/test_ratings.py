@@ -306,8 +306,16 @@ def test_a_fighter_who_wins_and_climbs_is_still_announced():
 
 
 def test_a_return_reads_as_a_place_rather_than_a_climb():
-    """An arrow between two places would be describing the layoff ending and
-    attributing it to the fight."""
+    """The whole line, not a pattern in it.
+
+    The comeback event carries the rank the fighter came from, because the diff
+    needs it to know he moved at all, and only the renderer keeps it off the
+    board. Asserting the absence of a pattern -- no arrow, no "**10" -- guards
+    nothing the moment the format changes: drop the bold, write "=10", use "->"
+    instead of an arrow, and the assertions still pass while a from-rank is back
+    on the board. Against the whole line a deliberate format change fails here
+    and has to be looked at, which is what this is for.
+    """
     previous = {
         "rda": ranked("rda", 10, 1042, last=OLD, raw=1080),   # 38 points of fade
         "aldo": ranked("aldo", 9, 1065, last=BEFORE),
@@ -316,17 +324,11 @@ def test_a_return_reads_as_a_place_rather_than_a_climb():
         Row("rda", 9, 1064, last=RECENT, result="loss", name="Rafael Dos Anjos"),
         Row("aldo", 10, 1065, last=BEFORE, name="Jose Aldo"),
     ]
-    value = ratings_changes_embed(
-        "Lightweight", diff(previous, current, {}, on=TODAY)
-    ).fields[0].value.replace(" ", " ")
+    value = ratings_changes_embed("Lightweight", diff(previous, current, {}, on=TODAY)).fields[0].value
 
-    assert "back, now **9**" in value and "after a loss" in value
-    # The event still carries the rank he came from, because the diff needs it
-    # to know he moved. Only the renderer keeps it off the board, so that is
-    # what has to be checked: with it, this line reads "10 → 9 · after a loss".
-    assert "→" not in value, "no arrow; he lost"
-    assert "**10" not in value, "the rank he came from is not his, it is the layoff's"
-    assert "Jose Aldo" not in value, "passed by a layoff coming off, not by a result"
+    assert value.replace(" ", " ") == (
+        "↩️ Rafael Dos Anjos · back, now **9** · after a loss · 1064"
+    )
 
 
 def test_a_returning_winner_only_passes_the_people_the_win_passed():
