@@ -477,6 +477,27 @@ def test_a_rebuild_still_announces_the_card_it_lands_on():
     ]
     moved = {c.name: c for c in diff(previous, current, {}, on=TODAY)}
 
-    assert moved["Winner"].kind == UP, "he fought; that is news whatever rated him"
+    assert moved["Winner"].kind == RETURNED, "he fought, but the old place is another model's"
+    assert moved["Winner"].now == 1 and moved["Winner"].reason == "a win"
     assert "Passed" not in moved, "cannot tell his drop from the rebuild"
     assert "Bystander" not in moved
+
+
+def test_a_rebuild_cannot_announce_a_loser_as_climbing():
+    """Across a version change a fighter's move is his result plus the model's
+    shift, so a loser the new model rates higher comes out as "6 to 4, after a
+    loss" -- the sentence this all started with. The place is where he is and the
+    result is what happened; the place he came from belongs to another model."""
+    previous = {
+        "lost": RankedState("lost", 6, 1100, BEFORE, None),   # None: another version
+        "other": RankedState("other", 4, 1130, BEFORE, None),
+    }
+    current = [
+        Row("lost", 4, 1140, last=RECENT, result="loss"),
+        Row("other", 6, 1100, last=BEFORE),
+    ]
+    moved = {c.name: c for c in diff(previous, current, {}, on=TODAY)}
+
+    assert moved["Lost"].kind == RETURNED, "no direction, because none is comparable"
+    assert moved["Lost"].reason == "a loss" and moved["Lost"].now == 4
+    assert "Other" not in moved

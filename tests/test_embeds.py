@@ -218,6 +218,10 @@ def test_the_fighter_card_calls_a_shared_rank_joint():
     assert "joint 1st at Middleweight" in fields["Bot Rating"].replace("\xa0", " ")
 
 
+def badges_of(embed) -> list[str]:
+    return [line[: line.index("`", 1) + 1] for line in embed.fields[0].value.split("\n")]
+
+
 def test_every_name_on_a_ratings_board_starts_in_the_same_column():
     """A medal is a different width from a number, and a shared rank is a
     character wider again. Mixing the three pushed the names out of line."""
@@ -227,11 +231,32 @@ def test_every_name_on_a_ratings_board_starts_in_the_same_column():
         Ranked(rank=3, name="C", rating=1171, record="9-1-0", division="Lightweight", tied=True),
         Ranked(rank=15, name="D", rating=1100, record="8-2-0", division="Lightweight"),
     ]
-    lines = rankings_embed("Lightweight", entries).fields[0].value.split("\n")
+    divisional = badges_of(rankings_embed("Lightweight", entries))
+    p4p = badges_of(rankings_embed("Pound for pound", entries, pound_for_pound=True))
 
-    badges = [line[: line.index("`", 1) + 1] for line in lines]
-    assert {len(badge) for badge in badges} == {5}, f"badges differ in width: {badges}"
-    assert badges == ["`  1`", "`= 3`", "`= 3`", "` 15`"]
+    assert {len(b) for b in divisional + p4p} == {5}, f"badges differ in width: {divisional}"
+    assert p4p == ["`  1`", "`= 3`", "`= 3`", "` 15`"]
+    assert divisional == ["`  1`", "`  2`", "`  3`", "`  4`"]
+
+
+def test_the_numbering_rule_is_the_board_and_not_whether_a_belt_is_vacant():
+    """The first version tied it to the odds column, which disappears when a
+    division has no champion -- so the same one-point gap would have read tied on
+    a board with a vacant belt and numbered on the one beside it, for a reason
+    with nothing to do with the gap."""
+    entries = [
+        Ranked(rank=1, name="A", rating=1200, record="10-0-0", division="Lightweight",
+               key="a", champion=True),
+        Ranked(rank=2, name="B", rating=1171, record="9-1-0", division="Lightweight",
+               key="b", tied=True),
+        Ranked(rank=2, name="C", rating=1171, record="9-1-0", division="Lightweight",
+               key="c", tied=True),
+    ]
+    held = badges_of(rankings_embed("Lightweight", entries))
+    vacant = badges_of(rankings_embed("Lightweight", [e for e in entries if not e.champion]))
+
+    assert held == ["`  1`", "`  2`", "`  3`"]
+    assert vacant == ["`  1`", "`  2`"], "numbered either way"
 
 
 # -- everyone's picks for a card -------------------------------------------------

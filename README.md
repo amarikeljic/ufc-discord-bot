@@ -512,20 +512,23 @@ welterweight. The ranks are kept because the ordering is still the best availabl
 a board of three tiers is not one anybody can read, but the note on the board says plainly
 that it is a guess.
 
-That figure is also a check on the rating itself. A 400-point Elo scale implies 14.4 points
-of win rate per 100 and the ratings deliver 10.7, so the gaps are overstated by about a
-third. The tempting conclusion — that the scale should be 540 — is wrong, or at least not
-established: a predictor carrying measurement error produces a flatter fitted slope than
-the real relationship, and with K fixed at 32 every rating carries a K-sized random
-component. That is the same fact the flat σ(n) shows from the other side. So 10.7 is the
-right number for the caption, because it describes what the ratings *as displayed* predict,
-which is what a reader needs — but it is not a divisor waiting to be changed. Smoothing the
-predictor to test this came back too noisy to settle (7.6, 9.5, 4.0 and 14.3 points per 100
-at windows of one, three, five and eight fights).
+The 400-point scale the ratings are built on is calibrated, within noise. Tested bucket by
+bucket against what it predicts, in standard errors: 1.7, 0.1, 0.5, 0.2 and 1.4 across gaps
+of 0-15, 15-30, 30-50, 50-80 and 80-120 points. One bucket of five at 1.7 is what chance
+looks like. Log loss agrees from the other side — chosen on fights before a date and scored
+on the ones after, 350 comes out best at 0.68456 and 400 costs 0.00016 nats against it, so
+the fights cannot tell 300 from 450.
 
-**Ratings within five points share a rank,** marked `=`. That is not the line between told
-apart and not — the paragraph above gives that, and it is nine times wider. It is the
-narrower claim that five points puts two fighters in no particular order.
+Two earlier attempts to fit a scale from results, 538 and 350, landed either side of it,
+and a long argument was had about which was right. Both were reading noise. An implied scale
+computed per bucket divides by tiny deviations near zero, which turns that 1.7-sigma bucket
+into a scale of 122 and makes a flat picture look like a broken one.
+
+**Pound for pound shares ranks within five points,** marked `=`; the divisional boards
+number straight through, because each of their lines already says what the gap is worth.
+The rule is the board and not whether a belt happens to be vacant — tying it to the odds
+column, which disappears when a division has no champion, would have shown the same
+one-point gap as a tie on one board and as two places on the one beside it.
 
 It is presentation and nothing rests on it. It was briefly claimed here that it also kept
 the ratings-move announcements quiet, by stopping a point of drift being reported as a
@@ -879,7 +882,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-321 tests, a few seconds, no network and no Discord. One file per module it covers: they run against a real SQLite
+323 tests, a few seconds, no network and no Discord. One file per module it covers: they run against a real SQLite
 database in a temporary directory and fight cards built by hand. Most of them are about
 what happens when a card changes underneath the bot, because that is where the awkward
 cases live -- a fighter replaced, a fight cancelled, a card that only half-loaded -- and

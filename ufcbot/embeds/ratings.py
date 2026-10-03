@@ -100,15 +100,15 @@ def _rating_lines(
         # the same column. A medal is a different width from a number and a
         # shared rank is a character wider again, which is what pushed the
         # names out of line.
-        # Where the odds are shown, places are numbered straight through and
-        # the tie marker goes: "=3" beside two different percentages is the
-        # board contradicting itself on one line, and a shared 3 with nothing
-        # to explain it is worse than either. The column says how close they
-        # are, in a unit that needs no key.
-        if champion is not None:
-            badge = f"`{place:>3}`"
-        else:
+        # Divisional boards number straight through; pound for pound shares
+        # ranks and marks them. Not "wherever the odds are shown", which was the
+        # first rule and tied itself to whether a belt happened to be vacant --
+        # a reader would have seen the same one-point gap tied on one board and
+        # numbered on another, for a reason that has nothing to do with the gap.
+        if with_division:
             badge = f"`{'=' if entry.tied else ' '}{entry.rank:>2}`"
+        else:
+            badge = f"`{place:>3}`"
         facts = [f"**{entry.rating}**"]
         # The record and the division are alternatives rather than both. A
         # divisional board has no division to give, so the record is the context

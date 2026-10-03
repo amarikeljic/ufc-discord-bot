@@ -91,22 +91,20 @@ ALL_TIME_MIN_FIGHTS = 5
 # points, so a defence moves a fighter past roughly a tenth of it. Every pairing
 # that reads wrong without this reads right with it, and none that read right
 # were broken by it.
-# The scale the odds column is computed on: the one the ratings are built with.
+# The scale the odds column is computed on: the one the ratings are built with,
+# which the results say is already right.
 #
-# Two attempts to fit it from results landed on opposite sides of 400 -- 538 from
-# the slope near zero, 350 from minimising bucket error -- which is a sign that
-# neither was measuring what it meant to rather than that the truth is in
-# between. Checked bucket by bucket, no single logistic scale fits: the implied
-# scale runs 122, 383, 351, 415, 285 across gaps of 0-15, 15-30, 30-50, 50-80 and
-# 80-120 points. The middle three agree with each other and with 400; the ends
-# disagree with everything, and the 80-120 bucket is 177 fights.
+# Tested bucket by bucket against what 400 predicts, in standard errors: 1.7,
+# 0.1, 0.5, 0.2 and 1.4 across gaps of 0-15, 15-30, 30-50, 50-80 and 80-120
+# points. One bucket of five at 1.7 is what chance looks like. Log loss says the
+# same from the other side -- chosen on fights before a date and scored on the
+# ones after, 350 is best at 0.68456 and 400 costs 0.00016 nats against it, so
+# the fights cannot tell 300 from 450.
 #
-# Scored by log loss on fights after a date, with the scale chosen on the fights
-# before it, the curve is flat: 350 is best on the held-out half at 0.68456 and
-# 400 costs 0.00016 nats against it, while 538 costs 0.00109. So the data cannot
-# tell 300 from 450, and picking a fitted number from inside that band would be
-# claiming a precision the fights do not support -- on a board whose whole
-# caption is about not doing that.
+# Two earlier attempts to fit a scale, 538 from the slope near zero and 350 from
+# minimising bucket error, landed either side of this one. Both were reading
+# noise: an implied scale computed per bucket divides by tiny deviations near
+# zero and turns a 1.7-sigma bucket into a scale of 122.
 SHOWN_SCALE = 400
 
 

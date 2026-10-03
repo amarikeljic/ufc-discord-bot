@@ -182,7 +182,12 @@ def diff(
             changes.append(RatingChange(LEFT, entry.name, was.rank, None, entry.rating, reason))
         elif entry.rank == was.rank:
             continue
-        elif _returning(entry, was, on):
+        elif _returning(entry, was, on) or was.raw is None:
+            # was.raw is None when the board was last written by another version
+            # of the ratings. The place it gives is not comparable with this
+            # one's, so a fighter who fought takes the comeback wording: his
+            # move would otherwise be his result plus the model's shift, and a
+            # loser the new model likes better reads "6 to 4, after a loss".
             # No direction word: the place is where they are and the result is
             # what happened, and the two are not joined the way "up to 4th" says.
             changes.append(RatingChange(RETURNED, entry.name, was.rank, entry.rank, entry.rating, reason))
