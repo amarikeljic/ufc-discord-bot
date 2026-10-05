@@ -593,13 +593,12 @@ the best unbeaten five-fight career sits 34th, so it has not swung the other way
 line, because that number is a career score and not a rating and the two boards sit one
 above the other.
 
-The peak rather than an average over the fighter's best few fights, which is what it was
-at first. Smoothing it meant a current rating could come out *above* the all-time number
-printed under it — Gane 1170 against 1157 — which reads as a bug rather than as a different
-quantity. A plain peak cannot do that: a current rating is the rating faded by a layoff, so
-it can never be higher than the highest that rating has been. Smoothing turned out not to
-be what kept the one-good-run careers down anyway; the title credit was. Across all 2,765
-fighters there is now no case of a current rating above an all-time one. Three
+That number used to be a reading of the running rating — the career best, after an average
+over the best few fights before that. Both are gone, because both paid for length. What is
+left of the argument is one property they had and this does not: a current rating could
+never come out above the all-time number printed under it. Now it can, and on the real
+boards it does once, to Joselyne Edwards, by two points. The case that prompted the rule was
+Gane at 1170 against 1157, which is thirteen. Three
 fights rather than one because a single upset is not a peak. The belt is in there because
 it is what the sport settles arguments with and the only thing the fighters are competing
 for, and it is worth about a tenth of a divisional board's spread. Every pairing that read

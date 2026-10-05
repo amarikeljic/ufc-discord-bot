@@ -638,9 +638,8 @@ def build_history(dataset: Dataset, *, keep_snapshots: bool = True) -> History:
     # (winner, loser) for every decided fight, which is all the strength fit
     # needs: it has no notion of when a fight happened.
     decided: list[tuple[str, str]] = []
-    # The rating after each fight, for the sustained peak, and who holds each
-    # belt, for defences. Both are only needed to settle a field, so neither
-    # lives on the ledgers the bot then keeps in memory.
+    # Who holds each belt, for the defence counts. Only needed to settle a
+    # field, so it does not live on the ledgers the bot then keeps in memory.
     champion: dict[str, str] = {}
     lineal: dict[str, str] = {}
 

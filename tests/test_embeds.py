@@ -384,7 +384,7 @@ def test_the_ratings_note_is_split_rather_than_rejected():
     embed = rankings_embed("Pound for pound", top, pound_for_pound=True, note=True, all_time=top)
 
     note = " ".join(f.value for f in embed.fields if "rating" in (f.name or "").lower() or f.name == ZERO_WIDTH)
-    assert "All Time Ratings" in note and "every title they won and defended" in note
+    assert "All Time Ratings" in note and "every title he won and defended" in note
     assert within_limits(embed)
 
 

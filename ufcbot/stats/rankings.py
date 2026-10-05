@@ -274,14 +274,12 @@ def rank_division(
 def career_score(ledger: Ledger) -> int:
     """What a fighter did, as one number: how good they got, and what they won.
 
-    The peak rather than the rating they retired with, because a career judged
-    on its last day is a career judged on its decline -- Anderson Silva gave back
-    120 points going 1-6 at the end, and finished below fighters he would have
-    beaten in his sleep.
-
-    Taking the peak also keeps the two boards consistent: a current rating is
-    this rating faded by a layoff, so it can never be higher than the all-time
-    number printed beneath it.
+    The fitted strength rather than the rating they ended on, because a career
+    judged on its last day is judged on its decline -- Anderson Silva gave back
+    120 points going 1-6 at the end and finished below fighters he would have
+    beaten in his sleep. And rather than any reading of the running rating,
+    because that one starts everybody in the middle and takes a career to leave,
+    so every summary of it pays for length. See :mod:`ufcbot.stats.strength`.
     """
     return round(
         ledger.strength
@@ -314,11 +312,11 @@ def all_time(
 
     Not the board above with the filter taken off. That board answers who is
     best now and answers it with a rating; this one answers who was ever best,
-    and a rating on its own cannot. A rating is transitive and cumulative, so a
-    long career outscores a better one: on the rating alone this board had
-    Holloway above Volkanovski, who beat him three times for the belt, and Du
-    Plessis above Anderson Silva. So it ranks on :func:`career_score`, which is
-    the peak a fighter held plus what they won holding it.
+    and the running rating cannot. It is transitive, so it had Holloway above
+    Volkanovski, who beat him three times for the belt; and it accumulates from a
+    standing start, so it paid nearly twice as much for another ten fights as for
+    another ten points of win rate. So this ranks on :func:`career_score`: how
+    good a fighter was, fitted from every fight at once, plus what he won.
 
     Nothing is faded and nobody is dropped for not having fought lately. A
     fighter is listed in the division they fought in most rather than the one

@@ -87,10 +87,9 @@ def _rating_lines(
     """One line per fighter.
 
     ``career`` prints the all-time boards, whose number is a career score rather
-    than a rating -- a peak plus what the fighter won with it. Printing the
-    defences alongside is what stops it reading as the same quantity as the
-    board above, where it would look wrong: a three-fight peak can sit below the
-    single rating a fighter carries today.
+    than a rating -- how good a fighter was, fitted from the whole record, plus
+    what he won. Printing the defences alongside is what stops it reading as the
+    same quantity as the rating on the board above it.
     """
     lines = []
     for place, entry in enumerate(entries, 1):
@@ -207,8 +206,8 @@ def rankings_embed(
                 "**🐐 All Time Ratings** asks a different question and scores it differently. "
                 "Nothing "
                 "fades and nobody is dropped for having retired, and instead of the rating a "
-                "fighter carries now it uses the best they ever held, plus credit for every "
-                "title they won and defended.\n\n"
+                "fighter carries now it uses how good he was across the whole record, plus "
+                "credit for every title he won and defended.\n\n"
                 "A rating on its own cannot say *beat him three times*: it adds up results, "
                 "so a longer career outscores a better one. And a career judged by the "
                 "rating it ended on is judged by its decline. Five or more fights to qualify, "
