@@ -8,6 +8,7 @@ from datetime import date, timedelta
 import pytest
 
 from ufcbot.stats.career import (
+    ELO_START,
     NO_REMATCH,
     Ledger,
     Meeting,
@@ -77,9 +78,78 @@ def rated(
     ledger.wins = fights
     ledger.division = division
     ledger.last_fight = TODAY - timedelta(days=ago)
-    ledger.title_defences = defences
+    if defences:
+        # Defences belong to a division now, and a fixture's are of the one
+        # it fought in: a count attached to no division would be invisible
+        # on the board that asks for it.
+        ledger.defences_by_division = ((division or "", defences),)
     ledger.title_wins = titles
     return ledger
+
+
+def one_fight(result: str, *, method_class: str = "dec", against: float = 1000.0) -> Ledger:
+    """A fighter with a single fight on the record, rated from level."""
+    led = Ledger(name="X")
+    led.record_fight(
+        on=TODAY, result=result, method_class=method_class, title_fight=False,
+        scheduled_rounds=3, total_seconds=900.0, own=None, opp=None,
+        opponent_elo=against, opponent_finish_elo=against,
+        opponent_model_elo=against, opponent_model_finish_elo=against,
+    )
+    return led
+
+
+def test_a_no_contest_moves_neither_finishing_rating():
+    """The guard lived in the caller. A second caller was added for the model's
+    rating and did not have one, so a no contest moved that rating and not the
+    board's -- quietly, for every fighter with one on their record, and the
+    design matrix could not show it because both sides of the comparison had
+    the same bug. It belongs in the step itself."""
+    led = one_fight("nc")
+
+    assert led.finish_elo == ELO_START
+    assert led.model_finish_elo == ELO_START
+    assert led.elo == ELO_START
+    assert led.model_elo == ELO_START
+
+
+def test_the_boards_rating_and_the_models_move_at_their_own_rates():
+    """Two systems walked over the same fights. The boards keep the spread every
+    constant quoted in rating points was set against; the model gets the K that
+    rolling origin put ahead of it."""
+    from ufcbot.stats.career import ELO_K, MODEL_ELO_K
+
+    led = one_fight("win")
+
+    assert MODEL_ELO_K != ELO_K, "two constants, or there is no point to any of this"
+    assert led.elo > ELO_START and led.model_elo > ELO_START
+    # From level against a level opponent the expected score is a half either
+    # way, so the two moves differ by exactly the ratio of their K.
+    assert (led.model_elo - ELO_START) == pytest.approx(
+        (led.elo - ELO_START) * MODEL_ELO_K / ELO_K
+    )
+
+
+def test_a_finish_moves_the_rating_further_in_both_systems():
+    """The finish bonus is a ratio, so it survives the change of K rather than
+    being absorbed by it."""
+    decision, finish = one_fight("win"), one_fight("win", method_class="ko")
+
+    assert finish.elo > decision.elo
+    assert finish.model_elo > decision.model_elo
+
+
+def test_quality_of_opposition_is_remembered_on_both_scales():
+    """The model reads its own ratings for who a fighter has faced too, not the
+    boards'. Mixing the two would feed it a rating gap measured in one unit
+    against opposition measured in another."""
+    led = one_fight("win", against=1300.0)
+
+    assert led.avg_opponent_elo == 1300.0
+    assert led.avg_model_opponent_elo == 1300.0
+    assert led.best_win == 1300.0
+    assert led.model_best_win == 1300.0
+    assert led.avg_model_lost_to_elo != led.avg_model_lost_to_elo, "no losses yet, so not a number"
 
 
 def test_a_win_over_a_better_fighter_moves_the_rating_further():
@@ -324,7 +394,11 @@ def test_a_retired_fighter_stops_outranking_the_division_he_left():
 # -- ratings too close to separate share a rank ----------------------------------
 
 
-def test_fighters_within_a_handful_of_points_share_a_rank():
+def test_every_fighter_gets_a_place_of_their_own():
+    """Fighters within a few points used to share one, on the argument that a
+    gap that small is inside the noise of a single result. The board still had
+    to print one of them above the other, so it was claiming an order and
+    disclaiming it on the same line."""
     ledgers = {
         "a": rated("Clear", 1250),
         "b": rated("Close", 1188),
@@ -332,17 +406,23 @@ def test_fighters_within_a_handful_of_points_share_a_rank():
     }
     board = rank_division(ledgers, "Lightweight", on=TODAY)
 
-    assert [entry.rank for entry in board] == [1, 2, 2]
-    assert [entry.tied for entry in board] == [False, True, True]
+    assert [entry.rank for entry in board] == [1, 2, 3]
 
 
-def test_a_tie_does_not_chain_across_the_whole_board():
-    """Each is within TIE_GAP of the one above, but the ends are far apart, so
-    they are not all one rank."""
-    ledgers = {str(i): rated(f"F{i}", 1200 - 4 * i) for i in range(6)}
-    ranks = [entry.rank for entry in rank_division(ledgers, "Lightweight", on=TODAY)]
+def test_the_same_rating_goes_to_whoever_got_there_first():
+    """Two fighters on the same number are not equal: one of them has been
+    holding it since before the other arrived, which is to say nobody has taken
+    it off him since. Sorting on the name instead would order them
+    alphabetically, which is about their parents."""
+    ledgers = {
+        "late": rated("Zane Newcomer", 1150, ago=10),
+        "early": rated("Adam Holder", 1150, ago=300),
+    }
+    board = rank_division(ledgers, "Lightweight", on=TODAY)
 
-    assert ranks == [1, 1, 3, 3, 5, 5]
+    assert [entry.name for entry in board] == ["Adam Holder", "Zane Newcomer"]
+    assert [entry.rank for entry in board] == [1, 2]
+    assert board[0].rating == board[1].rating, "the ratings really are equal"
 
 
 def test_a_board_comes_back_the_same_way_twice():
@@ -549,6 +629,47 @@ def test_beating_the_same_man_for_the_belt_outranks_the_longer_career():
 
     assert holloway.strength > volk.strength, "the rating alone has it the wrong way round"
     assert [e.name for e in all_time({"v": volk, "h": holloway}, "Featherweight")][0] == "Volkanovski"
+
+
+def test_an_all_time_score_is_not_on_the_rating_scale():
+    """The all-time number used to be in rating points, and the gap between a
+    fighter's two numbers got read as a rise: Evloev showed 1160 on the current
+    board and 1257 all time, and the 97 between them were not 97 points of
+    anything. Two figures on their own scale cannot be read against a rating."""
+    from ufcbot.stats.rankings import career_score
+
+    best = rated("Jon Jones", 1300, fights=22, strength=1346, defences=12, titles=14)
+    ordinary = rated("Journeyman", 1030, fights=12, strength=1030)
+    poor = rated("Also Ran", 900, fights=12, strength=900)
+
+    assert career_score(best) == 99
+    assert career_score(ordinary) == 5
+    assert career_score(poor) == 0, "floored rather than negative"
+
+
+def test_nothing_caps_a_career_score():
+    """It is not a mark out of a hundred -- nothing in the formula bounds it, so
+    whoever eventually passes Jones goes over 100 rather than piling up against
+    a ceiling the scale was never given."""
+    from ufcbot.stats.rankings import career_score
+
+    beyond = rated("Someone Better", 1400, fights=30, strength=1500, defences=15, titles=16)
+
+    assert career_score(beyond) > 100
+
+
+def test_defences_are_counted_against_the_division_they_happened_in():
+    """Jones defended at light heavyweight eleven times and at heavyweight once.
+    A career twelve on the light heavyweight board credits that division with a
+    reign it never saw."""
+    jones = Ledger(name="Jon Jones")
+    jones.defences_by_division = (("Heavyweight", 1), ("Light Heavyweight", 11))
+
+    assert jones.defences_in("Light Heavyweight") == 11
+    assert jones.defences_in("Heavyweight") == 1
+    assert jones.defences_in("Welterweight") == 0
+    assert jones.defences_in(None) == 12, "pound for pound counts any belt"
+    assert jones.title_defences == 12, "and a career is scored on all of them"
 
 
 def test_an_all_time_board_lists_a_fighter_where_they_fought_most():

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import discord
 
-from ..stats.rankings import win_chance
 from ..util import truncate
 from .common import (
     DASH,
@@ -15,37 +14,9 @@ from .common import (
     keep,
     plural,
     stamp,
-    surname,
 )
 
 ARROWS = {"entered": "🆕", "left": "🚪", "up": "🔼", "down": "🔽", "returned": "↩️"}
-
-
-
-def _odds_against(entry, champion, fading: bool) -> str | None:
-    """What the board says this fighter would do against the champion.
-
-    Shown instead of a tie marker, because a tie band says two fighters cannot be
-    told apart without ever saying how far apart "cannot be told apart" is, and
-    this says it in a unit everybody already reads.
-
-    Against the champion rather than the board leader: the leader is whoever the
-    rating puts first, which at featherweight is two fighters sharing the place,
-    so "vs the leader" needs an arbitrary pick between two men the board calls
-    equal. The champion needs no pick and answers the question people are
-    actually asking.
-
-    Nothing for a fighter whose rating is fading. The fade is a display rule for
-    easing an absent fighter off the board, not a measured loss of skill, and
-    running it through a win probability turns the one into the other -- a
-    retired fighter would get a number that ticks down every day he stays
-    retired.
-    """
-    if champion is None or entry.key == champion.key:
-        return None
-    if fading:
-        return "inactive"
-    return f"{win_chance(entry.rating, champion.rating):.0%} vs {surname(champion.name)}"
 
 
 # What a line gives up, in the order it gives it up, when fifteen of them will
@@ -54,13 +25,13 @@ def _odds_against(entry, champion, fading: bool) -> str | None:
 # alternative to trimming is a ranking split down the middle into two fields,
 # which is what this all started as. The record goes first, because it is the one
 # thing on the line that is also on the fighter's own card.
-_DROP_IN_ORDER = ("record", "odds")
+_DROP_IN_ORDER = ("record",)
 
 
 def _fitted(entries: list, **kw) -> list[str]:
     """The lines, trimmed until a full board fits in one field.
 
-    The real boards run to about 920 of the 1024 with everything on, so this does
+    The real boards run to about 750 of the 1024 with everything on, so this does
     nothing almost always. It exists because "almost" is doing work there: one
     long name arriving on a board, or a sixteenth no contest, is the difference
     between a board and no board at all.
@@ -79,35 +50,19 @@ def _rating_lines(
     *,
     with_division: bool,
     career: bool = False,
-    champion=None,
-    fading: frozenset[str] = frozenset(),
     record: bool = True,
-    odds: bool = True,
 ) -> list[str]:
     """One line per fighter.
 
-    ``career`` prints the all-time boards, whose number is a career score rather
-    than a rating -- how good a fighter was, fitted from the whole record, plus
-    what he won. Printing the defences alongside is what stops it reading as the
-    same quantity as the rating on the board above it.
+    ``career`` prints the all-time boards, whose number is a career score on its
+    own scale rather than a rating -- how good a fighter was, fitted from the
+    whole record, plus what he won. Printing the defences alongside is the other
+    half of what stops it reading as the same quantity as the board above.
     """
     lines = []
-    for place, entry in enumerate(entries, 1):
-        # A shared rank keeps its number but loses the medal: a joint first is
-        # not a winner, and two of the same medal reads as a mistake.
-        # Every badge is the same three characters wide, so every name starts in
-        # the same column. A medal is a different width from a number and a
-        # shared rank is a character wider again, which is what pushed the
-        # names out of line.
-        # Divisional boards number straight through; pound for pound shares
-        # ranks and marks them. Not "wherever the odds are shown", which was the
-        # first rule and tied itself to whether a belt happened to be vacant --
-        # a reader would have seen the same one-point gap tied on one board and
-        # numbered on another, for a reason that has nothing to do with the gap.
-        if with_division:
-            badge = f"`{'=' if entry.tied else ' '}{entry.rank:>2}`"
-        else:
-            badge = f"`{place:>3}`"
+    for entry in entries:
+        # Three characters wide, so every name starts in the same column.
+        badge = f"`{entry.rank:>3}`"
         facts = [f"**{entry.rating}**"]
         # The record and the division are alternatives rather than both. A
         # divisional board has no division to give, so the record is the context
@@ -128,9 +83,6 @@ def _rating_lines(
         belt = " 🏆" if entry.champion else (" 🎖️" if entry.former_champion else "")
         if career and entry.defences:
             facts.insert(1, plural(entry.defences, "defence"))
-        against = None if career or not odds else _odds_against(entry, champion, entry.key in fading)
-        if against:
-            facts.append(against)
 
         lines.append(f"{badge} {keep(entry.name)}{belt} · {join(facts)}")
     return lines
@@ -143,7 +95,6 @@ def rankings_embed(
     pound_for_pound: bool = False,
     note: bool = False,
     all_time: list | None = None,
-    fading: frozenset[str] = frozenset(),
 ) -> discord.Embed:
     """One division's ratings board. ``entries`` are ``Ranked`` records.
 
@@ -163,13 +114,10 @@ def rankings_embed(
         embed.description = "Nobody ranked here yet."
         return stamp(embed)
 
-    # Pound for pound carries no odds column: a win probability between a
-    # flyweight and a heavyweight is a number about a fight nobody can make.
-    champion = None if pound_for_pound else next((e for e in entries if e.champion), None)
     add_chunked_fields(
         embed,
         "Current Ratings",
-        _fitted(entries, with_division=pound_for_pound, champion=champion, fading=fading),
+        _fitted(entries, with_division=pound_for_pound),
     )
     if all_time:
         add_chunked_fields(
@@ -189,36 +137,26 @@ def rankings_embed(
                 "win moves it by how good the fighter beaten was, so beating a contender is "
                 "worth more than beating a debutant. Nobody votes, and a belt counts for "
                 "nothing by itself, which is why a champion can sit below a contender here.\n\n"
-                "🏆 holds this division's belt · 🎖️ held it once · **=** a shared rank, "
-                "because ratings a few points apart are in no particular order.\n\n"
-                "The belt meant is the one on this board and not any belt. Makhachev is "
-                "welterweight champion and the lightweight boards are full of him, where the "
-                "belt is Gaethje's. Pound for pound counts any of them, being about no "
-                "division in particular.\n\n"
-                "On a divisional board each line says what these ratings give that fighter "
-                "against the champion, so the gap is in a unit that needs no key. It is the "
-                "rating saying what it thinks rather than a forecast: within about 35 points "
-                "the higher-rated fighter is no better than a 55-45 bet, and most of a board "
-                "sits inside that — which is why the order here is a best guess and not a "
-                "measurement. A fighter whose rating is fading reads **inactive** instead, "
-                "because the fade eases an absent fighter off the board and is not a measured "
-                "loss of skill, so it has no business inside a win probability.\n\n"
+                "🏆 current champion · 🎖️ former champion\n\n"
                 "Ranked here: three or more UFC fights, and a fight in the last eighteen "
                 "months. After a year out a rating fades — halving what a fighter holds over "
                 "the starting rating for every further year — so a number nobody is "
                 "defending stops outranking the fighters competing for it.\n\n"
-                "**🐐 All Time Ratings** asks a different question and scores it differently. "
-                "Nothing "
-                "fades and nobody is dropped for having retired, and instead of the rating a "
-                "fighter carries now it uses how good he was across the whole record, plus "
-                "credit for every title he won and defended.\n\n"
-                "A rating on its own cannot say *beat him three times*: it adds up results, "
-                "so a longer career outscores a better one. And a career judged by the "
-                "rating it ended on is judged by its decline. Five or more fights to qualify, "
-                "and a fighter is listed in the division they fought in most rather than the "
-                "one they finished in, or St-Pierre is a middleweight.\n\n"
-                "Records are UFC fights only. On the current boards a fighter's division is "
-                "wherever they last fought, and the rating travels with them."
+                "**🐐 All Time Ratings** asks a different question and answers it in a "
+                "different unit: a career score, not a rating, so there is nothing to be "
+                "read in the gap between a fighter's two numbers. Higher is better and "
+                "nothing caps it. Nothing fades and nobody is dropped for having retired, "
+                "and instead of the rating a fighter carries now it uses how good he was "
+                "across the whole record, plus credit for every title he won and "
+                "defended.\n\n"
+                "Not the rating with the fade taken off: a rating adds up results, so it "
+                "pays for a long career over a good one, and it cannot say *beat him three "
+                "times*. A career judged by the number it ended on is judged by its "
+                "decline. Five or more fights to qualify, and a fighter is listed in the "
+                "division they fought in most rather than the one they finished in, or "
+                "St-Pierre is a middleweight.\n\n"
+                "Defences are this board's belt, so a two-division champion's are split "
+                "between his divisions."
             ),
         )
     return stamp(embed)
@@ -235,6 +173,7 @@ def _paragraphs(text: str) -> list[str]:
     # standing alone, or a split lands between them and leaves a field ending in
     # whitespace.
     return paragraphs[:1] + ["\n" + para for para in paragraphs[1:]]
+
 
 def ratings_changes_embed(division: str, changes: list) -> discord.Embed:
     """How one division's board moved. ``changes`` are ``RatingChange`` records."""

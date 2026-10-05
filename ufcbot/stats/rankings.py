@@ -16,9 +16,8 @@ here rather than in the rating itself:
   not earning. Left alone, someone who retires keeps the number they walked
   away with and outranks everyone still competing for it. So a rating fades
   once a fighter has been out longer than any ordinary gap between bouts.
-* Ratings a few points apart are a tie, not an order. Fighters that close
-  share a rank instead of being sorted into a precision the number does not
-  have.
+* Ratings that land on the same number are separated by who got there first,
+  so the board is an order all the way down rather than a set of ties.
 
 Both are presentation. ``Ledger.elo`` is left exactly as the fights left it, so
 what the model trains and predicts on does not change.
@@ -26,11 +25,11 @@ what the model trains and predicts on does not change.
 
 from __future__ import annotations
 
-from collections import Counter
 from dataclasses import dataclass
 from datetime import date, timedelta
 
 from .career import ELO_START, Ledger
+from .strength import CENTRE
 
 # Divisions in the order they are usually listed, lightest first.
 DIVISION_ORDER = (
@@ -66,12 +65,6 @@ DECAY_HALF_LIFE = timedelta(days=365)
 # from injury is still on the board and short enough that a retirement is not.
 ACTIVE_WITHIN = timedelta(days=548)
 
-# Ratings this close are a tie, not an order: one result moves a rating by up to
-# ELO_K points, so a handful between two fighters is inside the noise of a
-# single fight. Across the divisional boards the median gap between neighbours
-# is under four points, which is the whole reason this exists.
-TIE_GAP = 5
-
 # Below this many UFC fights a rating is mostly where it started.
 MIN_FIGHTS = 3
 # All-time asks what someone did over a career, so it asks for more of one. Five
@@ -91,28 +84,6 @@ ALL_TIME_MIN_FIGHTS = 5
 # points, so a defence moves a fighter past roughly a tenth of it. Every pairing
 # that reads wrong without this reads right with it, and none that read right
 # were broken by it.
-# The scale the odds column is computed on: the one the ratings are built with,
-# which the results say is already right.
-#
-# Tested bucket by bucket against what 400 predicts, in standard errors: 1.7,
-# 0.1, 0.5, 0.2 and 1.4 across gaps of 0-15, 15-30, 30-50, 50-80 and 80-120
-# points. One bucket of five at 1.7 is what chance looks like. Log loss says the
-# same from the other side -- chosen on fights before a date and scored on the
-# ones after, 350 is best at 0.68456 and 400 costs 0.00016 nats against it, so
-# the fights cannot tell 300 from 450.
-#
-# Two earlier attempts to fit a scale, 538 from the slope near zero and 350 from
-# minimising bucket error, landed either side of this one. Both were reading
-# noise: an implied scale computed per bucket divides by tiny deviations near
-# zero and turns a 1.7-sigma bucket into a scale of 122.
-SHOWN_SCALE = 400
-
-
-def win_chance(rating: int, against: int) -> float:
-    """What the board's own numbers say about these two, on the scale they fit."""
-    return 1 / (1 + 10 ** ((against - rating) / SHOWN_SCALE))
-
-
 TITLE_DEFENCE_POINTS = 15
 TITLE_WIN_POINTS = 5
 # How many to list per division.
@@ -138,9 +109,9 @@ class Ranked:
     is the rating, and a board that reordered itself around the belt would be the
     UFC's ranking rather than this one's."""
     defences: int = 0
-    """Title defences, shown on the all-time boards. They are most of what the
-    score there is made of, and printing them stops the number reading as a
-    rating that can be compared with the board above."""
+    """Title defences of this board's belt -- of any belt, pound for pound.
+    Shown on the all-time boards, where they are most of what the score is made
+    of."""
     former_champion: bool = False
     """Held this board's belt once and does not now. On a current board it is
     most of the answer to why someone is up there; on an all-time board the
@@ -148,8 +119,6 @@ class Ranked:
     never got a belt."""
     last_fight: date | None = None
     last_result: str | None = None
-    tied: bool = False
-    """Whether this rank is shared with another fighter, rather than held alone."""
 
 
 def rating_on(ledger: Ledger, on: date) -> int:
@@ -199,9 +168,11 @@ def _ordered(
         and (division is None or ledger.division == division)
         and (include_women or not is_womens(ledger.division))
     ]
-    # Name breaks the remaining tie so the same board comes back the same way
-    # twice running, which is what the change watcher compares against.
-    entries.sort(key=lambda entry: (-entry[0], entry[2].name))
+    # Equal ratings go to whoever got there first: the fighter who has been
+    # holding that number longest is the one who has not had it taken off him
+    # since. Name breaks what is left, so the same board comes back the same
+    # way twice running, which is what the change watcher compares against.
+    entries.sort(key=lambda entry: (-entry[0], entry[2].last_fight or date.min, entry[2].name))
     return _ranked(entries, on=on, division=division)
 
 
@@ -234,19 +205,22 @@ def _ranked(
     on: date | None = None,
     division: str | None = None,
 ) -> list[Ranked]:
-    """Rated entries, best first, with ranks shared between those too close to separate.
+    """Rated entries, best first, one place each.
 
     ``home`` names each fighter by the division they fought in most rather than
     the one they finished in, which is what an all-time board is asking about.
+
+    Places run straight through. Fighters used to share one when their ratings
+    were within a few points, on the argument that a gap that small is inside
+    the noise of a single result -- but the board still had to print one of
+    them above the other, so it was claiming an order and disclaiming it on the
+    same line. The order given is the one the sort made.
     """
     ranked: list[Ranked] = []
-    rank, leader = 0, None
     for place, (rating, key, ledger) in enumerate(entries, 1):
-        if leader is None or leader - rating > TIE_GAP:
-            rank, leader = place, rating
         ranked.append(
             Ranked(
-                rank=rank,
+                rank=place,
                 name=ledger.name,
                 rating=rating,
                 raw=round(ledger.elo),
@@ -260,15 +234,11 @@ def _ranked(
                     else division in ledger.belts_held
                 )
                 and not holds_belt(ledger, on, division),
-                defences=ledger.title_defences,
+                defences=ledger.defences_in(division),
                 last_fight=ledger.last_fight,
                 last_result=ledger.last_result,
             )
         )
-
-    shared = Counter(entry.rank for entry in ranked)
-    for entry in ranked:
-        entry.tied = shared[entry.rank] > 1
     return ranked
 
 
@@ -289,8 +259,8 @@ def rank_division(
     return _ordered(ledgers, division, on=on, include_women=include_women)[:depth]
 
 
-def career_score(ledger: Ledger) -> int:
-    """What a fighter did, as one number: how good they got, and what they won.
+def career_points(ledger: Ledger) -> float:
+    """What a fighter did, on the scale the strength fit works in.
 
     The fitted strength rather than the rating they ended on, because a career
     judged on its last day is judged on its decline -- Anderson Silva gave back
@@ -298,12 +268,45 @@ def career_score(ledger: Ledger) -> int:
     beaten in his sleep. And rather than any reading of the running rating,
     because that one starts everybody in the middle and takes a career to leave,
     so every summary of it pays for length. See :mod:`ufcbot.stats.strength`.
+
+    Unrounded, and in rating points rather than the score the boards print: a
+    score is six points wide, so ordering on it would tie fighters the record
+    separates.
     """
-    return round(
+    return (
         ledger.strength
         + TITLE_DEFENCE_POINTS * ledger.title_defences
         + TITLE_WIN_POINTS * ledger.title_wins
     )
+
+
+# How many rating points go into one point of career score. The all-time number
+# used to be on the rating scale and got read against the current board, which
+# is a comparison between two different measurements: Evloev shows 1160 now and
+# 1257 all time, and the 97 points between them are not 97 points of anything.
+# At six to one, Jones is on 99 today and the bottom of a divisional all-time
+# board is in the twenties, so nothing on either board reads as a rating.
+#
+# Nothing caps it, and it is not out of a hundred: whoever passes Jones scores
+# over 100, which is the scale working rather than breaking. Fixed rather than
+# fitted to the field, so a fighter's score does not move when somebody else
+# fights.
+RATING_POINTS_PER_SCORE = 6.0
+
+
+def career_score(ledger: Ledger) -> int:
+    """What a fighter did, as a score on its own scale. Higher is better.
+
+    Two figures rather than four so that it is visibly not the rating printed
+    above it, and open at the top: there is no best possible career to be a
+    fraction of, and whoever passes Jones goes over 100.
+
+    It is floored at zero, which is the one bound that is real. A board is cut
+    to fifteen long after this is computed, and in a division thin enough that
+    a losing record reaches the board, a negative reads as a broken number
+    rather than as a bad career.
+    """
+    return max(0, round((career_points(ledger) - CENTRE) / RATING_POINTS_PER_SCORE))
 
 
 def all_ranked(
@@ -347,7 +350,10 @@ def all_time(
         and (division is None or (ledger.home_division or ledger.division) == division)
         and (include_women or not is_womens(ledger.home_division or ledger.division))
     ]
-    entries.sort(key=lambda entry: (-entry[0], entry[2].name))
+    # Sorted on the unrounded points and printed as the score: two careers that
+    # print the same number are almost never equal underneath, and the points
+    # say which way round they go.
+    entries.sort(key=lambda entry: (-career_points(entry[2]), entry[2].name))
     return _ranked(entries, home=True, on=on, division=division)[:depth]
 
 

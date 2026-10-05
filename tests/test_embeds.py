@@ -204,18 +204,21 @@ def test_the_fighter_card_shows_the_rating_and_where_it_places():
     assert "1st at Welterweight" in fields["Bot Rating"].replace("\xa0", " ")
 
 
-def test_the_fighter_card_calls_a_shared_rank_joint():
+def test_the_fighter_card_gives_a_place_of_its_own():
+    """It used to read "joint 1st" off a shared rank. Nothing is shared now, so
+    a place is a place."""
     from ufcbot.embeds import fighter_embed
     from ufcbot.stats.career import Ledger
     from ufcbot.stats.service import FighterCareer
 
     ledger = Ledger(name="Kamaru Usman")
     ledger.fights, ledger.wins, ledger.elo = 20, 16, 1171.0
-    place = Ranked(rank=1, name=ledger.name, rating=1171, record="16-4-0", division="Middleweight", tied=True)
+    place = Ranked(rank=2, name=ledger.name, rating=1171, record="16-4-0", division="Middleweight")
 
     fields = {f.name: f.value for f in fighter_embed(None, FighterCareer(ledger, None), standing=place).fields}
 
-    assert "joint 1st at Middleweight" in fields["Bot Rating"].replace("\xa0", " ")
+    assert "2nd at Middleweight" in fields["Bot Rating"].replace("\xa0", " ")
+    assert "joint" not in fields["Bot Rating"]
 
 
 def badges_of(embed) -> list[str]:
@@ -223,43 +226,34 @@ def badges_of(embed) -> list[str]:
 
 
 def test_every_name_on_a_ratings_board_starts_in_the_same_column():
-    """A medal is a different width from a number, and a shared rank is a
-    character wider again. Mixing the three pushed the names out of line."""
+    """Three characters whatever the number, so the names line up down the
+    board rather than stepping in at ten."""
     entries = [
         Ranked(rank=1, name="A", rating=1200, record="10-0-0", division="Lightweight"),
-        Ranked(rank=3, name="B", rating=1171, record="9-1-0", division="Lightweight", tied=True),
-        Ranked(rank=3, name="C", rating=1171, record="9-1-0", division="Lightweight", tied=True),
+        Ranked(rank=2, name="B", rating=1171, record="9-1-0", division="Lightweight"),
+        Ranked(rank=3, name="C", rating=1171, record="9-1-0", division="Lightweight"),
         Ranked(rank=15, name="D", rating=1100, record="8-2-0", division="Lightweight"),
     ]
     divisional = badges_of(rankings_embed("Lightweight", entries))
     p4p = badges_of(rankings_embed("Pound for pound", entries, pound_for_pound=True))
 
     assert {len(b) for b in divisional + p4p} == {5}, f"badges differ in width: {divisional}"
-    assert p4p == ["`  1`", "`= 3`", "`= 3`", "` 15`"]
-    assert divisional == ["`  1`", "`  2`", "`  3`", "`  4`"]
+    assert divisional == p4p == ["`  1`", "`  2`", "`  3`", "` 15`"]
 
 
-def test_the_numbering_rule_is_the_board_and_not_whether_a_belt_is_vacant():
-    """The first version tied it to the odds column, which disappears when a
-    division has no champion -- so the same one-point gap would have read tied on
-    a board with a vacant belt and numbered on the one beside it, for a reason
-    with nothing to do with the gap."""
+def test_two_fighters_on_the_same_number_are_still_given_their_own_places():
+    """Which of them is above is settled before the board is drawn, by who got
+    to the number first. Here it is only shown."""
     entries = [
-        Ranked(rank=1, name="A", rating=1200, record="10-0-0", division="Lightweight",
-               key="a", champion=True),
-        Ranked(rank=2, name="B", rating=1171, record="9-1-0", division="Lightweight",
-               key="b", tied=True),
-        Ranked(rank=2, name="C", rating=1171, record="9-1-0", division="Lightweight",
-               key="c", tied=True),
+        Ranked(rank=1, name="Dricus Du Plessis", rating=1171, record="23-2-0",
+               division="Middleweight", key="ddp", champion=True),
+        Ranked(rank=2, name="Kamaru Usman", rating=1171, record="20-4-0",
+               division="Middleweight", key="usman"),
     ]
-    held = badges_of(rankings_embed("Lightweight", entries))
-    vacant = badges_of(rankings_embed("Lightweight", [e for e in entries if not e.champion]))
+    badges = badges_of(rankings_embed("Middleweight", entries))
 
-    assert held == ["`  1`", "`  2`", "`  3`"]
-    assert vacant == ["`  1`", "`  2`"], "numbered either way"
-
-
-# -- everyone's picks for a card -------------------------------------------------
+    assert badges == ["`  1`", "`  2`"]
+    assert "=" not in "".join(badges)
 
 
 def graded(record, result: str, points: int):
@@ -508,76 +502,24 @@ def board_row(i, name, rating, *, champion=False, key=None):
                   raw=rating, key=key or name, champion=champion)
 
 
-def test_a_divisional_line_says_what_the_gap_is_worth_against_the_champion():
-    """Instead of a tie band, which says two fighters cannot be told apart
-    without ever saying how far apart that is."""
-    from ufcbot.embeds import rankings_embed
-
+def test_no_board_puts_a_win_probability_on_a_line():
+    """A percentage against the champion reads as a forecast of a fight that is
+    not booked, and for most of a board the gap it comes out of is inside the
+    noise -- so it was a precise number standing on an imprecise one."""
     rows = [
         board_row(1, "Charles Oliveira", 1212),
         board_row(2, "Justin Gaethje", 1155, champion=True),
         board_row(3, "Paddy Pimblett", 1120),
     ]
-    lines = rankings_embed("Lightweight", rows).fields[0].value.replace(" ", " ").splitlines()
-
-    assert "58% vs Gaethje" in lines[0], "rated above the champion, so better than even"
-    assert "vs" not in lines[1], "the champion is not compared with himself"
-    assert "45% vs Gaethje" in lines[2]
-
-
-def test_pound_for_pound_carries_no_odds():
-    """A win probability between a flyweight and a heavyweight is a number about
-    a fight nobody can make."""
-    from ufcbot.embeds import rankings_embed
-
-    rows = [board_row(1, "Islam Makhachev", 1273, champion=True), board_row(2, "Max Holloway", 1206)]
-    value = rankings_embed("Pound for pound", rows, pound_for_pound=True).fields[0].value
-
-    assert "vs" not in value
-
-
-def test_a_fading_fighter_is_marked_inactive_rather_than_given_odds():
-    """The fade eases an absent fighter off the board. It is not a measured loss
-    of skill, so running it through a win probability would turn a display rule
-    into a claim about a fight -- and the number would tick down every day he
-    stayed retired."""
-    from ufcbot.embeds import rankings_embed
-
-    rows = [
-        board_row(1, "Justin Gaethje", 1155, champion=True),
-        board_row(2, "Dustin Poirier", 1137, key="poirier"),
-    ]
-    value = rankings_embed("Lightweight", rows, fading=frozenset({"poirier"})).fields[0].value
-
-    assert "inactive" in value and "% vs" not in value
-
-
-def test_the_tie_marker_goes_where_the_odds_are_shown():
-    """"=3" beside two different percentages is the board contradicting itself on
-    one line, and a shared 3 with nothing to explain it is worse than either."""
-    from ufcbot.embeds import rankings_embed
-    from ufcbot.stats.rankings import Ranked
-
-    tied = [
-        Ranked(rank=1, name="Champ", rating=1200, record="11-2-0", division="Lightweight",
-               raw=1200, key="champ", champion=True),
-        Ranked(rank=2, name="A", rating=1150, record="11-2-0", division="Lightweight",
-               raw=1150, key="a", tied=True),
-        Ranked(rank=2, name="B", rating=1148, record="11-2-0", division="Lightweight",
-               raw=1148, key="b", tied=True),
-    ]
-    divisional = rankings_embed("Lightweight", tied).fields[0].value
-    p4p = rankings_embed("Pound for pound", tied, pound_for_pound=True).fields[0].value
-
-    assert "=" not in divisional, "the percentages say how close they are"
-    assert [line.split("`")[1].strip() for line in divisional.splitlines()] == ["1", "2", "3"]
-    assert "=" in p4p, "pound for pound has no odds column, so the marker still earns its place"
+    for title, p4p in (("Lightweight", False), ("Pound for pound", True)):
+        value = rankings_embed(title, rows, pound_for_pound=p4p).fields[0].value
+        assert "%" not in value and " vs " not in value, title
 
 
 def test_an_oversized_board_gives_something_up_rather_than_not_posting():
     """Past 1024 characters in a field Discord refuses the whole embed, not the
     overflow, so a board that cannot be trimmed is a board that does not appear.
-    The real ones run to about 920, which is one long name away from trouble."""
+    The real ones run to about 750, which a long enough name still clears."""
     from ufcbot.embeds import rankings_embed
     from ufcbot.embeds.common import FIELD_LIMIT
     from ufcbot.stats.rankings import DEPTH, Ranked
@@ -617,7 +559,7 @@ def test_a_champion_of_another_division_is_not_this_division_s_champion():
     assert "🏆" in lines[1]
 
 
-def test_the_legend_says_which_belt_it_means():
+def test_the_legend_names_both_markers():
     from ufcbot.embeds import rankings_embed
     from ufcbot.stats.rankings import Ranked
 
@@ -625,5 +567,4 @@ def test_the_legend_says_which_belt_it_means():
     note = " ".join(f.value for f in rankings_embed("Pound for pound", rows,
                                                     pound_for_pound=True, note=True).fields)
 
-    assert "holds this division's belt" in note
-    assert "Pound for pound counts any of them" in note
+    assert "🏆 current champion · 🎖️ former champion" in note

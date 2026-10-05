@@ -35,7 +35,31 @@ if TYPE_CHECKING:  # pandas is a training dependency; the bot never imports it
 # how a fighter has done against the fighters they were in there with rather
 # than how many times they won. K is how far one fight can move it.
 ELO_START = 1000.0
+# How far one result moves a board rating. The boards' number, not the
+# model's: it sets how widely ratings spread, so the all-time title points and
+# the career-score divisor are both quoted against it.
 ELO_K = 32.0
+
+# And the model's, which is a different question with a different answer.
+#
+# Predictions depend only on K over the divisor, so with the divisor fixed at
+# 400 this one number covers the whole ridge. Rolling origin over 446 events
+# from 2016, every event scored once by a model that never saw it, puts 128
+# ahead of the boards' 32 by 0.00145 nats, 95% interval [-0.00285, -0.00005],
+# 97.9% of paired draws -- clear of zero, where a single held-out tail of 117
+# events could not separate them at all. 64 also beats 32 and sits between.
+#
+# Kept apart from ELO_K rather than replacing it because a board and a model
+# want different things from a rating: one a readable, stable ranking, the
+# other log loss. At 128 the spread of ratings roughly triples, which would
+# rewrite every board constant above for a gain nobody reading a board would
+# see. See ``evaluate.py`` to re-run the comparison as events accumulate.
+MODEL_ELO_K = 128.0
+
+# What a rating point is worth, in both systems. A gap of this many points is
+# ten to one in the odds. Only K over this ratio affects predictions, so this
+# is held still and K is the one that moves.
+ELO_DIVISOR = 400.0
 # A finish says more than a decision, so it moves the rating a little further.
 ELO_FINISH_BONUS = 1.15
 
@@ -185,6 +209,16 @@ class Ledger:
     best_win_elo: float = 0.0
     """The highest-rated fighter they have beaten, rated as they stood that night."""
 
+    # The same six again, walked at MODEL_ELO_K. These are what the model
+    # reads; the ones above are what the boards show. The counts are not
+    # repeated, being counts of fights rather than of rating points.
+    model_elo: float = ELO_START
+    model_finish_elo: float = ELO_START
+    model_opponent_elo_sum: float = 0.0
+    model_beaten_elo_sum: float = 0.0
+    model_lost_to_elo_sum: float = 0.0
+    model_best_win_elo: float = 0.0
+
     first_fight: date | None = None
     last_fight: date | None = None
     last_result: str | None = None
@@ -215,8 +249,17 @@ class Ledger:
     title_wins: int = 0
     """Undisputed title fights won. Interim belts and tournament finals are not
     counted: the first is not the belt and the second is not a title."""
-    title_defences: int = 0
-    """Title fights won while already holding that division's belt."""
+    defences_by_division: tuple[tuple[str, int], ...] = ()
+    """Title fights won while already holding that division's belt, per division.
+
+    Per division because the count is printed on a divisional board, where a
+    career total is the wrong number: Jones defended at light heavyweight
+    eleven times and at heavyweight once, and a career twelve on the light
+    heavyweight board credits that division with a reign it did not see.
+
+    Pairs rather than a dict, so the overwhelming majority of fighters -- who
+    have never defended anything -- carry an empty tuple and no dict at all."""
+
     champion_of: str | None = None
     """The division whose belt they hold, as the data last saw it.
 
@@ -243,6 +286,17 @@ class Ledger:
     loss_methods: dict[str, int] = field(default_factory=dict)
     win_techniques: dict[str, int] = field(default_factory=dict)
     loss_techniques: dict[str, int] = field(default_factory=dict)
+
+    @property
+    def title_defences(self) -> int:
+        """Defences across every division, which is what a career is scored on."""
+        return sum(count for _, count in self.defences_by_division)
+
+    def defences_in(self, division: str | None) -> int:
+        """Defences of one division's belt, or of all of them for ``None``."""
+        if division is None:
+            return self.title_defences
+        return next((n for d, n in self.defences_by_division if d == division), 0)
 
     def snapshot(self) -> Ledger:
         copy = replace(self)
@@ -351,6 +405,23 @@ class Ledger:
     def best_win(self) -> float:
         return self.best_win_elo if self.beaten_count else float("nan")
 
+    @property
+    def avg_model_opponent_elo(self) -> float:
+        """The same question as above, on the scale the model is fitted on."""
+        return _ratio(self.model_opponent_elo_sum, self.opponent_elo_count)
+
+    @property
+    def avg_model_beaten_elo(self) -> float:
+        return _ratio(self.model_beaten_elo_sum, self.beaten_count)
+
+    @property
+    def avg_model_lost_to_elo(self) -> float:
+        return _ratio(self.model_lost_to_elo_sum, self.lost_to_count)
+
+    @property
+    def model_best_win(self) -> float:
+        return self.model_best_win_elo if self.beaten_count else float("nan")
+
     def days_since_last_fight(self, on: date) -> float:
         if self.last_fight is None:
             return float("nan")
@@ -379,6 +450,8 @@ class Ledger:
         technique: str | None = None,
         opponent_elo: float | None = None,
         opponent_finish_elo: float | None = None,
+        opponent_model_elo: float | None = None,
+        opponent_model_finish_elo: float | None = None,
     ) -> None:
         """Fold one fight into the totals. ``result`` is win, loss, draw or nc.
 
@@ -389,8 +462,14 @@ class Ledger:
         self.fights += 1
         if opponent_elo is not None:
             self._rate(result, opponent_elo, method_class)
+        if opponent_model_elo is not None:
+            self._rate_for_model(result, opponent_model_elo, method_class)
         if opponent_finish_elo is not None:
             self._rate_finishing(result, opponent_finish_elo, method_class)
+        if opponent_model_finish_elo is not None:
+            self.model_finish_elo = _finish_step(
+                self.model_finish_elo, opponent_model_finish_elo, result, method_class, MODEL_ELO_K
+            )
         if result in ("win", "loss") and method_detail in METHODS:
             methods = self.win_methods if result == "win" else self.loss_methods
             methods[method_detail] = methods.get(method_detail, 0) + 1
@@ -484,10 +563,23 @@ class Ledger:
             self.lost_to_elo_sum += opponent_elo
             self.lost_to_count += 1
 
-        expected = 1.0 / (1.0 + 10.0 ** ((opponent_elo - self.elo) / 400.0))
-        score = {"win": 1.0, "loss": 0.0}.get(result, 0.5)
-        k = ELO_K * (ELO_FINISH_BONUS if method_class in ("ko", "sub") else 1.0)
-        self.elo += k * (score - expected)
+        self.elo = _elo_step(self.elo, opponent_elo, result, method_class, ELO_K)
+
+    def _rate_for_model(self, result: str, opponent_elo: float, method_class: str) -> None:
+        """The same walk at MODEL_ELO_K, which is what the features are built from.
+
+        A separate pass rather than a rescaling of the one above: changing K
+        changes the path the ratings take, not the units they are quoted in.
+        """
+        if result == "nc":
+            return
+        self.model_opponent_elo_sum += opponent_elo
+        if result == "win":
+            self.model_beaten_elo_sum += opponent_elo
+            self.model_best_win_elo = max(self.model_best_win_elo, opponent_elo)
+        elif result == "loss":
+            self.model_lost_to_elo_sum += opponent_elo
+        self.model_elo = _elo_step(self.model_elo, opponent_elo, result, method_class, MODEL_ELO_K)
 
     def _rate_finishing(self, result: str, opponent_elo: float, method_class: str) -> None:
         """Rate how the fight ended rather than who won.
@@ -498,15 +590,45 @@ class Ledger:
         """
         if result == "nc":
             return
-        stopped = method_class in ("ko", "sub")
-        if result == "win" and stopped:
-            score = 1.0
-        elif result == "loss" and stopped:
-            score = 0.0
-        else:
-            score = 0.5
-        expected = 1.0 / (1.0 + 10.0 ** ((opponent_elo - self.finish_elo) / 400.0))
-        self.finish_elo += ELO_K * (score - expected)
+        self.finish_elo = _finish_step(
+            self.finish_elo, opponent_elo, result, method_class, ELO_K
+        )
+
+
+def _elo_step(rating: float, opponent: float, result: str, method_class: str, k: float) -> float:
+    """One Elo update at learning rate ``k``. A finish moves it a little further.
+
+    Written once because it is walked twice, at two different ``k``. The
+    divisor stays 400 in both: predictions depend only on k over the divisor,
+    so one of the two is free to be fixed and this is the one everything else
+    is quoted against."""
+    expected = 1.0 / (1.0 + 10.0 ** ((opponent - rating) / ELO_DIVISOR))
+    score = {"win": 1.0, "loss": 0.0}.get(result, 0.5)
+    moved = k * (ELO_FINISH_BONUS if method_class in ("ko", "sub") else 1.0)
+    return rating + moved * (score - expected)
+
+
+def _finish_step(rating: float, opponent: float, result: str, method_class: str, k: float) -> float:
+    """One update of the finishing rating, which scores how a fight ended.
+
+    A stoppage scores a win, being stopped scores a loss, and a fight that
+    reaches the judges scores half for both, which is what it was: neither
+    could put the other away. No finish bonus -- the finish is the score.
+
+    A no contest rates nothing, the same as the ratings above. The guard belongs
+    here rather than at the call sites: there are two of them now, and the one
+    that was added second did not have it."""
+    if result == "nc":
+        return rating
+    stopped = method_class in ("ko", "sub")
+    if result == "win" and stopped:
+        score = 1.0
+    elif result == "loss" and stopped:
+        score = 0.0
+    else:
+        score = 0.5
+    expected = 1.0 / (1.0 + 10.0 ** ((opponent - rating) / ELO_DIVISOR))
+    return rating + k * (score - expected)
 
 
 # An interim belt is not the belt and a tournament final is not a title.
@@ -696,11 +818,19 @@ def build_history(dataset: Dataset, *, keep_snapshots: bool = True) -> History:
         # against the opponent as they stood walking in.
         elo_a, elo_b = ledger_a.elo, ledger_b.elo
         finish_a, finish_b = ledger_a.finish_elo, ledger_b.finish_elo
+        model_a, model_b = ledger_a.model_elo, ledger_b.model_elo
+        model_finish_a, model_finish_b = ledger_a.model_finish_elo, ledger_b.model_finish_elo
         ledger_a.record_fight(
-            result=result_a, own=own_a, opp=own_b, opponent_elo=elo_b, opponent_finish_elo=finish_b, **common
+            result=result_a, own=own_a, opp=own_b,
+            opponent_elo=elo_b, opponent_finish_elo=finish_b,
+            opponent_model_elo=model_b, opponent_model_finish_elo=model_finish_b,
+            **common,
         )
         ledger_b.record_fight(
-            result=result_b, own=own_b, opp=own_a, opponent_elo=elo_a, opponent_finish_elo=finish_a, **common
+            result=result_b, own=own_b, opp=own_a,
+            opponent_elo=elo_a, opponent_finish_elo=finish_a,
+            opponent_model_elo=model_a, opponent_model_finish_elo=model_finish_a,
+            **common,
         )
 
         division = division_name(str(fight.weight_class))
@@ -734,7 +864,9 @@ def build_history(dataset: Dataset, *, keep_snapshots: bool = True) -> History:
             if is_lineal_title(True, str(fight.weight_class)):
                 winner.title_wins += 1
                 if lineal.get(division) == champ:
-                    winner.title_defences += 1
+                    counts = dict(winner.defences_by_division)
+                    counts[division] = counts.get(division, 0) + 1
+                    winner.defences_by_division = tuple(sorted(counts.items()))
                 lineal[division] = champ
             champion[division] = champ
             history.last_title_fight[division] = on

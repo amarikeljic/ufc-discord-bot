@@ -37,8 +37,8 @@ def _ordinal(number: int) -> str:
 
 
 def _place(entry: Ranked) -> str:
-    """Where a fighter stands: "4th", or "joint 4th" when the rating is too close to call."""
-    return f"joint {_ordinal(entry.rank)}" if entry.tied else _ordinal(entry.rank)
+    """Where a fighter stands on their division's board: "4th"."""
+    return _ordinal(entry.rank)
 
 def fighter_embed(
     profile: Fighter | None,
