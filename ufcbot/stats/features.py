@@ -85,14 +85,16 @@ def fighter_features(ledger: Ledger, info: FighterInfo | None, on: date) -> dict
         "striking_differential": _diff_or_nan(ledger.slpm, ledger.sapm),
         # Who they have been in there with. A 10-0 record against nobody and a
         # 10-0 record through contenders read the same in every feature above.
-        "elo": ledger.elo,
-        "opponent_elo": ledger.avg_opponent_elo,
-        "beaten_elo": ledger.avg_beaten_elo,
-        "lost_to_elo": ledger.avg_lost_to_elo,
-        "best_win_elo": ledger.best_win,
-        "elo_over_opponents": _diff_or_nan(ledger.elo, ledger.avg_opponent_elo),
+        # The model's ratings, not the boards'. Same fights, a different
+        # learning rate; see MODEL_ELO_K for what decided it.
+        "elo": ledger.model_elo,
+        "opponent_elo": ledger.avg_model_opponent_elo,
+        "beaten_elo": ledger.avg_model_beaten_elo,
+        "lost_to_elo": ledger.avg_model_lost_to_elo,
+        "best_win_elo": ledger.model_best_win,
+        "elo_over_opponents": _diff_or_nan(ledger.model_elo, ledger.avg_model_opponent_elo),
         # Finishing power against the durability it has met, rated the same way.
-        "finish_elo": ledger.finish_elo,
+        "finish_elo": ledger.model_finish_elo,
     }
 
 

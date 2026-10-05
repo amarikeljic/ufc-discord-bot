@@ -45,9 +45,52 @@ from .techniques import FINISHES, METHODS, same_technique
 log = logging.getLogger(__name__)
 
 # Fights before unified rules finished very differently; leave them out of the method model.
+#
+# Everything from there on is kept, and so is the whole history for the winner
+# model. Both were checked: trained on the most recent 25, 50, 75 and 100% of
+# what they are allowed, every half that ships is still improving at 100%.
+# Only the winner model's boosted half got worse as older fights were added,
+# which is an argument about that half and not about the window -- and it is
+# the half that no longer ships. Shortening either window would cut data from
+# a model that is still learning from it.
 METHOD_TRAINING_START = date(2001, 1, 1)
 # Technique base rates come from the modern era only.
 PRIOR_START = date(2015, 1, 1)
+# How much of the winner model's probability comes from the boosted half.
+#
+# None of it. On a 2024-onward holdout of 1,452 fights over 117 events the
+# boosted half scored 0.674 against the logistic half's 0.635, and blending it
+# in at the 0.35 this used to be made the pair worse than the logistic half
+# alone -- 0.637 against 0.635, with 77% of paired event-level bootstrap draws
+# favouring removal. It also degraded as older fights were added, 0.648 to
+# 0.674, where the logistic half improved throughout.
+#
+# The interval straddles zero, so this is a choice between two candidates and
+# not a measured result. Switching costs nothing -- both halves are fitted on
+# the same features, so this removes a model and not a dependency -- so it goes
+# where the evidence points, and goes back if a rolling-origin harness scoring
+# every event once says otherwise on more than 117 of them.
+WINNER_BOOST_WEIGHT = 0.0
+
+# And how much of the method model's. Not the same number, and the difference is
+# measured rather than left over: on that same holdout, dropping the boosted
+# half here made method prediction *worse*, 1.1670 against 1.1633, with 87% of
+# paired draws favouring keeping it. Its own sweep bottoms out around 0.25-0.30,
+# so this sits just inside the flat part of the curve.
+#
+# How a half scores alone says nothing about what it adds in combination. The
+# boosted half is the weaker of the two in isolation in both models -- by 0.039
+# nats for the winner, 0.024 for the method -- and only one of them hurts the
+# blend it is part of. Which is why these are two constants. Do not reconcile
+# them without re-running both measurements.
+METHOD_BOOST_WEIGHT = 0.35
+
+# How hard the logistic half is held back, searched over 108 combinations by
+# time-series cross-validation inside the training period. Named rather than
+# inline so the rolling-origin walk can select over it without a second copy
+# of the pipeline drifting away from this one.
+LOGISTIC_C = 0.02
+
 # A compiled model must agree with the estimator it came from this closely.
 PARITY_TOLERANCE = 1e-9
 # How many held-out rows the parity check scores through both paths.
@@ -70,37 +113,43 @@ def _boost(seed: int, *, iterations: int = 500, min_leaf: int = 100) -> HistGrad
     )
 
 
-def _linear():
+def _linear(c: float = LOGISTIC_C):
     return make_pipeline(
         SimpleImputer(strategy="median"),
         StandardScaler(),
-        LogisticRegression(C=0.02, max_iter=3000),
+        LogisticRegression(C=c, max_iter=3000),
     )
 
 
 class BlendModel(ClassifierMixin, BaseEstimator):
     """Who wins: gradient boosting blended with logistic regression.
 
-    On held-out fights boosting is the more accurate of the two and logistic
-    regression the better calibrated. Averaging their probabilities beat both
-    on accuracy, log loss and Brier score, and produced probabilities that
-    track real win rates bin for bin.
+    Blending the two beat both halves when it was first measured. It no longer
+    does for this model: see ``WINNER_BOOST_WEIGHT``, which is zero, so what
+    ships is the logistic half and the boosted one is never fitted. The blend
+    stays because the weight is the thing under test, not the structure.
     """
 
-    def __init__(self, boost_weight: float = 0.35, seed: int = 7) -> None:
+    def __init__(self, boost_weight: float = WINNER_BOOST_WEIGHT, seed: int = 7) -> None:
         self.boost_weight = boost_weight
         self.seed = seed
 
     def fit(self, X, y):
         self.classes_ = np.array([0, 1])
-        self.boost_ = _boost(self.seed).fit(X, y)
+        # Not fitted at all at a weight of zero: 500 boosting iterations over
+        # 17,556 rows, and every tree of them compiled into the saved model, to
+        # be multiplied by nothing.
+        self.boost_ = _boost(self.seed).fit(X, y) if self.boost_weight else None
         self.linear_ = _linear().fit(X, y)
         return self
 
     def predict_proba(self, X):
-        boosted = self.boost_.predict_proba(X)[:, 1]
         linear = self.linear_.predict_proba(X)[:, 1]
-        positive = self.boost_weight * boosted + (1 - self.boost_weight) * linear
+        if self.boost_ is None:
+            positive = linear
+        else:
+            boosted = self.boost_.predict_proba(X)[:, 1]
+            positive = self.boost_weight * boosted + (1 - self.boost_weight) * linear
         return np.column_stack([1 - positive, positive])
 
     def predict(self, X):
@@ -113,13 +162,14 @@ class MethodModel(ClassifierMixin, BaseEstimator):
     Classes follow ``METHODS``: KO/TKO, submission, unanimous and split decision.
     """
 
-    def __init__(self, boost_weight: float = 0.35, seed: int = 7) -> None:
+    def __init__(self, boost_weight: float = METHOD_BOOST_WEIGHT, seed: int = 7) -> None:
         self.boost_weight = boost_weight
         self.seed = seed
 
     def fit(self, X, y):
         self.classes_ = np.arange(len(METHODS))
-        self.boost_ = _boost(self.seed, iterations=300, min_leaf=80).fit(X, y)
+        boost = _boost(self.seed, iterations=300, min_leaf=80)
+        self.boost_ = boost.fit(X, y) if self.boost_weight else None
         self.linear_ = _linear().fit(X, y)
         return self
 
@@ -131,9 +181,10 @@ class MethodModel(ClassifierMixin, BaseEstimator):
         return out
 
     def predict_proba(self, X):
-        return self.boost_weight * self._aligned(self.boost_, X) + (1 - self.boost_weight) * self._aligned(
-            self.linear_, X
-        )
+        linear = self._aligned(self.linear_, X)
+        if self.boost_ is None:
+            return linear
+        return self.boost_weight * self._aligned(self.boost_, X) + (1 - self.boost_weight) * linear
 
     def predict(self, X):
         return self.predict_proba(X).argmax(axis=1)
@@ -189,7 +240,7 @@ def _compile_linear(pipeline) -> Linear:
 def _compile_blend(model: BlendModel | MethodModel, width: int) -> Blend:
     return Blend(
         boost_weight=float(model.boost_weight),
-        boost=_compile_boost(model.boost_),
+        boost=None if model.boost_ is None else _compile_boost(model.boost_),
         linear=_compile_linear(model.linear_),
         width=width,
     )

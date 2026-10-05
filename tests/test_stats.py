@@ -246,6 +246,48 @@ def test_a_missing_value_takes_the_branch_training_chose():
     assert tree.leaf_value([float("nan")]) == -1.0
 
 
+def test_a_blend_with_no_boosted_half_is_the_linear_half():
+    """At a weight of zero the boosted half is never fitted, so there is no
+    boosting to carry and nothing to multiply by nothing. The winner model ships
+    this way; see WINNER_BOOST_WEIGHT."""
+    linear = Linear(
+        medians=[0.0], means=[0.0], scales=[1.0], coefficients=[[2.0]],
+        intercepts=[0.5], classes=[0, 1],
+    )
+    from ufcbot.stats.scorer import _sigmoid
+
+    blend = Blend(boost_weight=0.0, boost=None, linear=linear, width=2)
+
+    assert blend.probabilities([1.0])[1] == pytest.approx(_sigmoid(2.5), abs=1e-12)
+
+
+def test_the_winner_model_fits_no_boosted_half_and_the_method_model_does():
+    """The two weights are separate measurements that came out differently, so a
+    change to one must not quietly follow the other. This is the guard against
+    somebody reconciling them."""
+    import numpy as np
+
+    from ufcbot.stats.model import (
+        METHOD_BOOST_WEIGHT,
+        WINNER_BOOST_WEIGHT,
+        BlendModel,
+        MethodModel,
+    )
+
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(400, 3))
+    winner = BlendModel().fit(X, (X[:, 0] > 0).astype(int))
+    method = MethodModel().fit(X, rng.integers(0, 4, size=400))
+
+    assert WINNER_BOOST_WEIGHT == 0.0 and winner.boost_ is None
+    assert METHOD_BOOST_WEIGHT > 0.0 and method.boost_ is not None
+
+    # And the winner model is then exactly its logistic half, not merely close.
+    assert np.array_equal(
+        winner.predict_proba(X)[:, 1], winner.linear_.predict_proba(X)[:, 1]
+    )
+
+
 def test_the_blend_averages_the_two_models_the_way_they_were_fitted():
     boost = Boost(baseline=[0.0], stages=[[stump(0.5, -10.0, 10.0)]], classes=[0, 1])
     linear = Linear(

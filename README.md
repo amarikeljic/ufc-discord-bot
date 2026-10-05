@@ -318,9 +318,9 @@ Inputs include age, height, reach and stance; record, streaks and layoff; the uf
 career rates; knockdowns, control time and finish rates; and the differences between the
 two fighters.
 
-Two models work together. A blend of gradient boosting and logistic regression predicts
-the winner. A second model, trained on how winners won, splits that probability into
-KO/TKO, submission, unanimous decision and split decision. The likeliest finishing
+Two models work together. Logistic regression predicts the winner. A second model, a
+blend of gradient boosting and logistic regression trained on how winners won, splits that
+probability into KO/TKO, submission, unanimous decision and split decision. The likeliest finishing
 technique comes from the winner's finishing history, how the opponent has been finished
 before, and the league-wide rate.
 
@@ -359,6 +359,81 @@ how often the opponent has been stopped, and so on, in both directions.
 The boosting and regularisation settings were searched over 108 combinations by
 time-series cross-validation inside the training period, never touching the holdout.
 Nothing beat what is here by more than rounding, so nothing was changed.
+
+**The winner model used to be a blend too, and the boosted half has been dropped.** Trained
+on the most recent 25, 50, 75 and 100% of history and scored on the same holdout, the two
+halves pull opposite ways: the logistic half improves throughout, 0.64175 to 0.63475 in log
+loss, while the boosted half gets *worse* as older fights are added, 0.64812 to 0.67697.
+Blended in at the weight it had, the pair came out behind the logistic half alone — 0.63661
+against 0.63475. A paired event-level bootstrap over the 117 holdout events put 77% of draws
+behind removal.
+
+Two things that nearly went wrong there are worth recording. The weight that minimises this
+holdout is about 0.1, not 0 — but the holdout both picked it and scored it, so that number
+is not an estimate of anything and 0 is the only point in the bowl choosable without looking
+at the test set. And the boosted half degrading is about *older* data, not more of it: fresh
+fights arrive at the recent end, where it was fine, so this is era-sensitivity being absorbed
+as signal rather than a trend that would continue.
+
+**The method model keeps its boosted half, at the same 0.35 the winner model used to have.**
+Measured the same way and the answer came out the other way round: dropping it makes method
+prediction worse, 1.1670 against 1.1633, with 87% of paired draws behind keeping it. Its own
+weight sweep bottoms out around 0.25–0.30. How a half performs alone settles nothing — the
+boosted half is the weaker of the two in isolation in *both* models, by 0.039 nats for the
+winner and 0.024 for the method — and only one of them hurts the blend it belongs to. The two
+weights are separate constants for that reason, and reconciling them without re-running both
+measurements would quietly undo one of these results.
+
+Neither interval excludes zero, so both are choices between candidates specified in advance
+rather than proven results: take the option the paired evidence favours, report it as
+provisional, and re-test when the evaluation can resolve differences this small.
+
+**That re-test is `python evaluate.py`,** and it is how everything below was decided. A single
+held-out tail could not settle these questions: 117 events gives a 95% interval of about
+±0.005 nats on an event-level bootstrap, and the differences worth deciding are a few
+thousandths. Making the holdout longer does not help, because the training set shrinks as it
+grows.
+
+So the origin walks instead. Train on everything before a block of ten cards, predict that
+block, move forward, refit, and repeat until every event since 2016 has exactly one
+prediction from a model that never saw it — 446 events and 5,316 fights, against 117 and
+1,452. Training sets overlap between steps, but no event is scored twice, which is the
+condition the bootstrap needs. The interval comes out at about ±0.0011, slightly better than
+halved.
+
+Two rules keep it honest. Hyperparameters are chosen inside each training window, on its most
+recent year, and the block being predicted never takes part in choosing anything — the
+validation score is optimistic, as any score used for selection is, and it is never reported.
+And after selecting, the model is refitted on the *whole* window, validation year included: a
+model that has not seen the fights immediately before a card is not the model the bot
+deploys, and scoring one would understate what the bot does. The recent-year slice is
+deliberate rather than a random sample, because its relationship to the next block is the one
+the deployed model has to the next card.
+
+**The model walks its own Elo, at a higher K than the boards.** Ratings move by `K` per
+result, and predictions depend only on `K` over the divisor — so with the divisor held at 400,
+`K` is the only free parameter in the rating, and the two sweeps that came before this were
+exploring one dimension twice. Over 446 events, K=128 beats the boards' K=32 by 0.00145 nats,
+95% interval [−0.00285, −0.00005], 97.9% of paired draws. K=64 also beats it, by 0.00091.
+Both intervals clear zero, where the old holdout could not separate them at all.
+
+Worth recording how nearly that went the other way. Letting each window pick its own K —
+which is the noisier form of the question, carrying 45 separate selections — gives only
+−0.00079 and straddles zero, and a short walk over 2023 onward looked conclusive at 98.2%
+before the full walk cut the effect to a third of that. Fixing the grid in advance and
+walking the whole period is what made it readable.
+
+The boards keep K=32. `K` sets how widely ratings spread, so at 128 the spread roughly
+triples and `TIE_GAP`, the all-time title points and the career-score divisor would all have
+to be re-derived — a visible change to every board for a gain of two thousandths of a nat
+that nobody reading one would see. A board wants a readable, stable ranking and the model
+wants log loss; those are different jobs, so the ledger walks both ratings over the same
+fights and each side reads its own. Nothing on a board moved.
+
+**Both models keep their full training window.** Every half that ships is still improving at
+100% of the data it is allowed, so there is nothing to be gained by shortening either one.
+The winner model's boosted half was the only thing that preferred recent fights, and it is
+the half that no longer ships.
 
 Accuracy on the most recent 18 months of fights, held out from training:
 
@@ -448,45 +523,31 @@ injuries included; past that, what a fighter holds over the starting rating halv
 every further year out, and past eighteen months they are off the board altogether. Only
 the margin fades, so sitting still can never drag anyone below where they began.
 
-**Each divisional line says what the gap is worth.** `56% vs Gaethje` — what these ratings
-give that fighter against the champion, on the scale the ratings actually fit. It replaces
-the tie marker on those boards, because a tie band says two fighters cannot be told apart
-without ever saying how far apart that is, and a percentage says it in a unit nobody needs
-a key for. Places are numbered straight through there: `=3` beside two different
-percentages is the board contradicting itself on one line.
+**Every fighter gets a place of their own,** and two on the same rating are separated by
+who got there first — the one who has been holding that number longest goes above, on the
+grounds that nobody has taken it off him since. Alphabetical order was the alternative, and
+that is about their parents.
 
-The percentages are on the scale the ratings are built with, and that is a deliberate
-refusal to fit one. Two attempts landed on opposite sides of it — 538 from the slope near
-zero, 350 from minimising bucket error — which says neither was measuring what it meant to
-rather than that the answer is in between. Bucket by bucket no single logistic scale fits at
-all: the implied scale runs 122, 383, 351, 415 and 285 across gaps of 0-15, 15-30, 30-50,
-50-80 and 80-120 points. The middle three agree with each other and with 400; the ends
-disagree with everything, and the 80-120 bucket is 177 fights.
+Fighters within five points used to share a place instead, marked `=`, on the argument that
+a gap that small is inside the noise of a single result. The argument is sound and the
+answer was not: the board still had to print one of the two above the other, so it claimed
+an order and disclaimed it on the same line. A ranking that will not rank is just a ranking
+with a footnote.
 
-Scored properly — log loss on fights after a date, with the scale chosen on the fights
-before it — the curve is flat. 350 is best on the held-out half at 0.68456, 400 costs 0.00016
-nats against it, and 538 costs 0.00109. The fights cannot tell 300 from 450, so picking a
-number from inside that band would be claiming a precision they do not support, on a board
-whose whole caption is about not doing that. The scale is downstream of the model, so
-anything that moves the ratings should see this refitted.
+There was a percentage on each divisional line for a while — `56% vs Gaethje`, what these
+ratings gave that fighter against the champion — on the theory that a tie band says two
+fighters cannot be told apart without ever saying how far apart that is, and that a
+percentage says it in a unit nobody needs a key for. It is gone. It answered in the wrong
+register: a precise number standing on an imprecise one, and it read as a forecast of a
+fight that is not booked. The scale it was computed on is the one the ratings are built
+with, and the fights cannot tell 300 from 450 — chosen on fights before a date and scored
+on the ones after, 350 is best on the held-out half at 0.68456 and 400 costs 0.00016 nats
+against it. Four significant figures of nothing.
 
 A board too long for one field gives something up rather than not posting. Past 1024
-characters Discord refuses the whole embed and not the overflow, so the record goes first
-and then the odds — the record because it is the one thing on the line that is also on the
-fighter's own card. The real boards run to about 920, which is one long name away from
-needing it.
-
-Against the champion rather than the board leader. The leader is whoever the rating puts
-first, which at featherweight is two fighters sharing the place, so "vs the leader" needs an
-arbitrary pick between two men the board calls equal — and "who beats the champion" is the
-question being asked anyway. The champion differs from the leader in five of eight men's
-divisions. Pound for pound carries no column: a win probability between a flyweight and a
-heavyweight is a number about a fight nobody can make.
-
-A fighter whose rating is fading reads **inactive** instead of a percentage. The fade eases
-an absent fighter off the board and is not a measured loss of skill, so putting it through a
-win probability would turn a display rule into a claim about a fight — and the number would
-tick down every day he stayed retired.
+characters Discord refuses the whole embed and not the overflow, so the record goes — the
+record because it is the one thing on the line that is also on the fighter's own card. The
+real boards run to about 750, which a long name still clears.
 
 **A belt is shown and never ranked on.** 🏆 holds this board's belt now, 🎖️ held it once.
 The belt meant is the division's own and not any belt the fighter has: Makhachev is
@@ -553,23 +614,43 @@ whom — but a net of two is not a wash, and the components are what matter:
 
 So of 130 reported moves, 112 were invented and 18 were real. That is a fault in the
 announcements rather than in the grouping, and it is [fixed where it belongs](#ratings-moves).
-Across the divisional boards
-the median gap between neighbours is under four points, and a single result moves a rating
-by up to 32, so most adjacent pairs are inside the noise of one fight. Sorting those into
-1st and 2nd claims a precision the number does not have. Fighters within five points share
-a place instead, on the board and on the fighter card, which reads "joint 4th".
+Across the divisional boards the median gap between neighbours is under four points, and a
+single result moves a rating by up to 32, so most adjacent pairs really are inside the noise
+of one fight. That is worth knowing when reading a board, and it is why the order here is a
+best guess rather than a measurement — but it is not a reason for the board to refuse to
+give one.
 
 **Under every board is the same division all time,** marked 🐐 — and it is not the board
-above with the filter taken off, because a rating cannot answer that question. A rating is
-transitive and cumulative: it adds up results, so a longer career outscores a better one.
-Left to the rating alone this board had Holloway above Volkanovski, who beat him three
-times for the featherweight title, and Du Plessis above Anderson Silva. Judged on the
+above with the filter taken off, because a rating cannot answer that question. A rating
+adds up results, so it pays for a long career over a good one, and it is transitive, so it
+cannot say *beat him three times*. Left to the rating alone this board had Holloway above
+Volkanovski, who beat him three times for the featherweight title, and Du Plessis above
+Anderson Silva. Judged on the
 rating a fighter *retired* with it is worse still, because that judges a career by its
 decline: Silva went 1-6 at the end and gave back 120 points, finishing below fighters he
 would have beaten in his sleep.
 
 So the all-time boards rank on a career score: how good a fighter was, plus 15 points for
-every title defence and 5 for every title won.
+every title defence and 5 for every title won — printed on **its own two-figure scale**, six
+rating points to the point, where Jones is on 99 and the bottom of a divisional board is in
+the twenties.
+
+**The score is not on the rating scale, deliberately.** It used to be, and the two numbers
+sat one above the other inviting a subtraction between two different measurements: Evloev
+showed 1160 on the current board and 1257 all time, and the 97 points between them are not
+97 points of anything — they are mostly the fit having no starting point to climb out of,
+which is the whole reason it is used. Undefeated fighters had the widest gaps (+97, +76,
++68) and Oliveira, with 36 fights, had +8. Divided by six the number cannot be read that
+way at all. The divisor is fixed rather than fitted to the field, so a fighter's score does
+not move when somebody else fights, and the order comes off the unrounded points — ranking
+on the score itself would tie everyone within six rating points.
+
+**It is not a mark out of a hundred,** and saying so would be claiming a ceiling the formula
+does not have. Nothing caps it: whoever eventually passes Jones scores over 100, which is
+the scale working rather than breaking. "Out of a hundred" also reads like an exam grade,
+which would make Khabib's 57 look like a fail when it is the eighth-best career in the
+sport. The one real bound is the floor at zero, which exists so that a division thin enough
+to put a losing record on its all-time board shows nothing rather than a negative.
 
 **How good he was is fitted, not accumulated.** The running rating starts everybody at 1000
 and moves them a little per fight, which is the right shape for "where does he stand today"
@@ -593,20 +674,27 @@ The boards move accordingly. Oliveira goes from first at lightweight to joint fo
 Makhachev, Nurmagomedov and Benson Henderson and level with Tsarukyan, who has thirteen
 fights to his thirty-seven. Topuria and Evloev reach featherweight on ten fights each, and
 Chimaev middleweight. No record shorter than nine fights is in the all-time top fifteen, and
-the best unbeaten five-fight career sits 34th, so it has not swung the other way. The defences are printed on each
-line, because that number is a career score and not a rating and the two boards sit one
-above the other.
+the best unbeaten five-fight career sits 34th, so it has not swung the other way.
+
+**Defences are counted against the division they happened in.** The count is printed on
+each line, because it is most of what the mark is made of and it is the other half of what
+stops the two boards reading as one quantity. A career total is the wrong number there:
+Jones defended at light heavyweight eleven times and at heavyweight once, and a career
+twelve on the light heavyweight board credits that division with a reign it never saw. He
+reads 11 there and 12 pound for pound, which counts any belt, being about no division in
+particular. Makhachev splits 4 and 1, Cormier 3 and 1, Nunes 6 and 2. The score itself
+stays a career score on every board — it is one question about one fighter — so only the
+count moves.
 
 That number used to be a reading of the running rating — the career best, after an average
-over the best few fights before that. Both are gone, because both paid for length. What is
-left of the argument is one property they had and this does not: a current rating could
-never come out above the all-time number printed under it. Now it can, and on the real
-boards it does once, to Joselyne Edwards, by two points. The case that prompted the rule was
-Gane at 1170 against 1157, which is thirteen. Three
-fights rather than one because a single upset is not a peak. The belt is in there because
-it is what the sport settles arguments with and the only thing the fighters are competing
-for, and it is worth about a tenth of a divisional board's spread. Every pairing that read
-wrong without it reads right with it:
+over the best few fights before that. Both are gone, because both paid for length. The one
+property they had and this does not is that a current rating could never come out above the
+all-time number printed beneath it; with the mark on its own scale there is no longer a
+comparison for that rule to protect.
+
+The belt is in the score because it is what the sport settles arguments with and the only
+thing the fighters are competing for. Every pairing that read wrong without it reads right
+with it:
 
 | | rating alone | career score |
 | --- | --- | --- |
@@ -841,6 +929,7 @@ keeps running without the affected feature.
 ```
 bot.py                  Start the bot
 train.py                Download fight data and train the model
+evaluate.py             Score the model by rolling origin, and pick its Elo K
 ufcbot/
   bot.py                Bot setup and shared services
   config.py             Settings from .env
@@ -871,7 +960,7 @@ ufcbot/
     common.py           Colours, limits and text helpers
     cards.py            Fight cards, the schedule and card changes
     fighters.py         The fighter profile card
-    picks.py            Picks, prediction, recap and scorecard embeds
+    picks.py            Picks, prediction and scorecard embeds
     ratings.py          Ratings boards and their moves
     health.py           What the bot says when something it depends on breaks
     events.py           Text for Discord scheduled events
@@ -889,6 +978,7 @@ ufcbot/
     model.py            Training the winner and method models
     scorer.py           The trained model, compiled to run without scikit-learn
     strength.py         How good a fighter was, fitted from every fight at once
+    rolling.py          Rolling-origin evaluation: every event scored once
     rankings.py         Division and pound-for-pound ratings boards
     prediction.py       A prediction and how it is put together
 ```

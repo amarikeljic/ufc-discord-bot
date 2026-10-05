@@ -30,7 +30,7 @@ from .prediction import (
 )
 from .techniques import FINISHES, METHODS
 
-MODEL_VERSION = 5
+MODEL_VERSION = 7
 MODEL_FILE = "ufc_model.pkl"
 
 
@@ -128,14 +128,18 @@ class Blend:
     """The two models' probabilities, averaged the way they were when fitted."""
 
     boost_weight: float
-    boost: Boost
+    boost: Boost | None
+    """Absent when the weight is zero, which is one way a blend ships: the half
+    was never fitted, so there is nothing to carry."""
     linear: Linear
     width: int
     """How many outcomes the blend reports, whether or not both models saw them all."""
 
     def probabilities(self, row: list[float]) -> list[float]:
-        boosted = self._spread(self._normalise(self.boost.raw(row)), self.boost.classes)
         linear = self._spread(self._normalise(self.linear.raw(row)), self.linear.classes)
+        if self.boost is None:
+            return linear
+        boosted = self._spread(self._normalise(self.boost.raw(row)), self.boost.classes)
         weight = self.boost_weight
         return [weight * a + (1 - weight) * b for a, b in zip(boosted, linear)]
 
