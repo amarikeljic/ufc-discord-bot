@@ -39,7 +39,6 @@ from .picks import (
     picks_board_embed,
     prediction_embed,
     predictions_embed,
-    recap_embed,
     scorecard_embed,
 )
 from .ratings import rankings_embed, ratings_changes_embed
@@ -66,7 +65,6 @@ __all__ = [
     "predictions_embed",
     "rankings_embed",
     "ratings_changes_embed",
-    "recap_embed",
     "schedule_embed",
     "scheduled_event_description",
     "scheduled_event_location",

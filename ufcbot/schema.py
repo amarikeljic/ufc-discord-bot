@@ -119,14 +119,6 @@ CREATE TABLE IF NOT EXISTS channel_posts (
     PRIMARY KEY (guild_id, kind, key)
 );
 
--- Cards whose recap has already been posted to a guild's picks channel.
-CREATE TABLE IF NOT EXISTS recaps_posted (
-    guild_id      INTEGER NOT NULL,
-    espn_event_id TEXT    NOT NULL,
-    posted_at     TEXT    NOT NULL,
-    PRIMARY KEY (guild_id, espn_event_id)
-);
-
 -- Live coverage: which updates have gone out for a bout, so restarts never repeat them.
 CREATE TABLE IF NOT EXISTS live_posts (
     bout_id   TEXT NOT NULL,

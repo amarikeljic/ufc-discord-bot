@@ -24,7 +24,6 @@ from ..embeds import (
     pickem_leaderboard_embed,
     picks_board_embed,
     rankings_embed,
-    recap_embed,
     schedule_embed,
     scorecard_embed,
 )
@@ -36,7 +35,6 @@ from ..stats.rankings import (
     POUND_FOR_POUND,
     all_time,
     divisions_with_fighters,
-    is_fading,
     rank_division,
 )
 from ..storage import Storage
@@ -113,7 +111,6 @@ class PublishResult:
     picks_boards: int = 0
     pickem_boards: int = 0
     rankings: int = 0
-    recaps: int = 0
     schedule: bool = False
     updated: int = 0
     """Messages sent, edited or deleted."""
@@ -131,8 +128,6 @@ class PublishResult:
             parts.append(f"{self.rankings} ratings boards")
         if self.schedule:
             parts.append("schedule board")
-        if self.recaps:
-            parts.append(f"{self.recaps} recaps")
         parts.append(f"{self.updated} messages updated, {self.unchanged} unchanged")
         if self.errors:
             parts.append(f"{len(self.errors)} errors")
@@ -295,41 +290,7 @@ class ChannelPublisher:
         # graded cards, and working it out means reading every graded pick the
         # bot has ever made.
         graded = await self.tracker.graded_events(settings.tracking_since)
-        recapped = await self._publish_recaps(guild, channel, settings, graded, result)
-        await self._publish_scorecard(
-            guild, channel, settings, graded, result, force or created or recapped
-        )
-
-    async def _publish_recaps(
-        self,
-        guild: discord.Guild,
-        channel: discord.TextChannel,
-        settings: GuildSettings,
-        events: list[GradedEvent],
-        result: PublishResult,
-    ) -> bool:
-        """How the model did on each card, once that card is fully graded.
-
-        One post per card, kept forever, under the picks it is grading. Returns
-        whether anything went up, so the scorecard can follow it down.
-        """
-        since = settings.tracking_since
-        already = await self.storage.recaps_posted(guild.id)
-        posted = False
-        # The scorecard shown with a recap counts only the cards up to that one,
-        # so it is built by walking forward rather than re-filtering per card.
-        running: list[GradedEvent] = []
-        for event in events:  # oldest first
-            running.append(event)
-            if event.espn_event_id in already:
-                continue
-            await channel.send(embed=recap_embed(event, build_scorecard(since, running)))
-            await self.storage.mark_recap_posted(guild.id, event.espn_event_id)
-            result.recaps += 1
-            result.updated += 1
-            posted = True
-            await asyncio.sleep(WRITE_SPACING)
-        return posted
+        await self._publish_scorecard(guild, channel, settings, graded, result, force or created)
 
     async def _publish_scorecard(
         self,
@@ -346,6 +307,11 @@ class ChannelPublisher:
         answer to "should I believe any of this", and that question is asked
         while reading the picks. ``moved`` re-sends it so a newly posted card's
         board never leaves it stranded halfway up the channel.
+
+        It is the only thing the bot says about its own record now. There used
+        to be a recap under every graded card as well, saying how that night
+        went and what the running record was after it -- which is the picks
+        above it and this board below it, told a third time.
         """
         await self._upsert(
             guild,
@@ -396,12 +362,6 @@ class ChannelPublisher:
                     pound_for_pound=p4p,
                     note=p4p,
                     all_time=all_time(ledgers, None if p4p else key, include_women=women),
-                    # A fading rating is a display rule for easing an absent
-                    # fighter off the board, so it is not run through a win
-                    # probability; those read "inactive" instead.
-                    fading=frozenset(
-                        e.key for e in entries if is_fading(ledgers[e.key], today)
-                    ),
                 ),
                 result,
                 force=force,

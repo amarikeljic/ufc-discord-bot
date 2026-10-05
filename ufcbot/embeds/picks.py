@@ -1,4 +1,4 @@
-"""Picks boards, head-to-head predictions, results recaps and the scorecard."""
+"""Picks boards, head-to-head predictions and the scorecard."""
 
 from __future__ import annotations
 
@@ -19,8 +19,6 @@ from .common import (
     PICKS_PURPLE,
     SHORT_TECHNIQUE,
     STANCE_SHORT,
-    UFC_RED,
-    add_chunked_fields,
     age,
     bar,
     code_table,
@@ -40,7 +38,7 @@ from .common import (
 )
 
 if TYPE_CHECKING:
-    from ..features.tracking import GradedEvent, Scorecard
+    from ..features.tracking import Scorecard
     from ..records import PredictionRecord
     from ..stats.prediction import Evaluation
     from ..stats.service import FighterCareer
@@ -293,45 +291,7 @@ def prediction_embed(
     return stamp(embed)
 
 
-# -- accuracy channel ------------------------------------------------------------------
-
-
-def recap_embed(event: GradedEvent, card: Scorecard) -> discord.Embed:
-    """Posted under the picks once a card is fully graded."""
-    embed = discord.Embed(title=truncate(f"Results: {event.name}", 256), colour=UFC_RED)
-    lines = [discord.utils.format_dt(event.start, "D")]
-    if event.total:
-        lines.append(f"Picks: **{event.correct}/{event.total}** correct ({event.correct / event.total:.0%})")
-    else:
-        lines.append("No scorable fights")
-    if event.method_total:
-        lines.append(f"Method: **{event.method_hits}/{event.method_total}** correct")
-    embed.description = "\n".join(lines)
-
-    fight_lines = []
-    for record in event.records:
-        if record.correct is None:
-            label = METHOD_LABELS.get(record.result_method or "", "no result")
-            fight_lines.append(f"➖ {join([record.matchup, label])}")
-            continue
-        mark = "✅" if record.correct else "❌"
-        # The winner is not always one of the two named here: a fighter who came
-        # in as a replacement wins a fight this record was never about. Naming
-        # nobody reads better than a line that begins with a space.
-        winner = surname(record.winner_name or "")
-        how = outcome_label(record.result_method, record.result_technique)
-        facts = [
-            f"{surname(record.favourite)} {record.confidence:.0%}",
-            f"{winner} by {how}" if winner else how,
-        ]
-        if record.method_correct:
-            facts.append("method ✅")
-        fight_lines.append(f"{mark} {join(facts)}")
-
-    add_chunked_fields(embed, "Fights", fight_lines or [DASH])
-
-    embed.add_field(name="Running scorecard", value=_scorecard_summary(card), inline=False)
-    return stamp(embed)
+# -- the scorecard under the picks -------------------------------------------------
 
 
 def _scorecard_summary(card: Scorecard) -> str:
