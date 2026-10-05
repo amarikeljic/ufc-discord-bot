@@ -115,7 +115,7 @@ def diff(
     and every place they climb inside it is the layoff ending, not the fight.
     """
     changes: list[RatingChange] = []
-    now_by_key = {entry.key: entry for entry in current}
+    here = {entry.key for entry in current}
     place = {entry.key: i for i, entry in enumerate(current, 1)}
     fought = {
         entry.key
@@ -123,7 +123,7 @@ def diff(
         if entry.key not in previous or entry.last_fight != previous[entry.key].last_fight
     }
 
-    def raw_before(key: str) -> int | None:
+    def starting_point(key: str) -> int | None:
         """Where this fighter stood before the pass, with nothing faded off.
 
         A fighter who fought and was not on the last board -- off the bottom of
@@ -135,11 +135,13 @@ def diff(
         was = previous.get(key)
         if was is not None and was.raw is not None:
             return was.raw
-        if key in fought:
-            ledger = ledgers.get(key)
-            if ledger is not None:
-                return round(ledger.elo_before_last)
-        return None
+        ledger = ledgers.get(key) if key in fought else None
+        return round(ledger.elo_before_last) if ledger is not None else None
+
+    # Once each rather than once per pair: the crossing test below is every
+    # fighter against every fighter who fought.
+    began = {key: starting_point(key) for key in here}
+    movers = [entry for entry in current if entry.key in fought and began[entry.key] is not None]
 
     def crossed_someone_who_fought(entry) -> bool:
         """Did this fighter change places with anybody who had a fight?
@@ -153,16 +155,13 @@ def diff(
         so a returning fighter being handed his layoff back does not read as
         having passed anyone he was already above.
         """
-        mine = raw_before(entry.key)
+        mine = began[entry.key]
         if mine is None:
             return False
-        for other in current:
-            if other.key == entry.key or other.key not in fought:
+        for other in movers:
+            if other.key == entry.key:
                 continue
-            theirs = raw_before(other.key)
-            if theirs is None:
-                continue
-            if (mine > theirs) != (place[entry.key] < place[other.key]):
+            if (mine > began[other.key]) != (place[entry.key] < place[other.key]):
                 return True
         return False
 
@@ -183,13 +182,13 @@ def diff(
         elif entry.rank == was.rank:
             continue
         elif _returning(entry, was, on) or was.raw is None:
-            # was.raw is None when the board was last written by another version
-            # of the ratings. The place it gives is not comparable with this
-            # one's, so a fighter who fought takes the comeback wording: his
-            # move would otherwise be his result plus the model's shift, and a
-            # loser the new model likes better reads "6 to 4, after a loss".
-            # No direction word: the place is where they are and the result is
-            # what happened, and the two are not joined the way "up to 4th" says.
+            # Two ways a from-place can be meaningless. A fighter back from a
+            # layoff is handed the fade back on top of his result; a board last
+            # written by another version of the ratings was measuring something
+            # else. Either way the move would be the result plus something that
+            # is not the result, and a loser can come out of it looking like he
+            # climbed. So: the place he is at and the thing that happened, with
+            # no direction word joining them.
             changes.append(RatingChange(RETURNED, entry.name, was.rank, entry.rank, entry.rating, reason))
         elif entry.rank < was.rank:
             changes.append(RatingChange(UP, entry.name, was.rank, entry.rank, entry.rating, reason))
@@ -199,7 +198,7 @@ def diff(
     for key, was in previous.items():
         # Gone from the ranked list altogether: eighteen months without a fight.
         # Everything else now leaves by crossing somebody, above.
-        if key not in now_by_key and was.rank <= depth:
+        if key not in here and was.rank <= depth:
             ledger = ledgers.get(key)
             name = ledger.name if ledger else key
             changes.append(RatingChange(LEFT, name, was.rank, None, None, _reason(None, was, ledger, on)))
