@@ -217,19 +217,19 @@ class Ledger:
     counted: the first is not the belt and the second is not a title."""
     title_defences: int = 0
     """Title fights won while already holding that division's belt."""
-    champion: bool = False
-    """Whether they hold their division's belt as the data last saw it."""
-    held_belt: bool = False
-    """Whether they ever won a title fight, interim ones included.
+    champion_of: str | None = None
+    """The division whose belt they hold, as the data last saw it.
 
-    Not ``title_wins > 0``, which counts the lineal belt only: Aspinall's two
-    heavyweight titles were both interim, and a fighter who held a belt held a
-    belt whatever the data calls it."""
+    A division and not a flag, because a fighter can hold one belt and appear on
+    another division's board: Makhachev is welterweight champion and the
+    lightweight boards are full of him, where the belt is Gaethje's."""
 
-    @property
-    def former_champion(self) -> bool:
-        """Held a belt once and does not now."""
-        return self.held_belt and not self.champion
+    belts_held: tuple[str, ...] = ()
+    """Every division whose belt they have ever won, interim ones included.
+
+    Not derived from ``title_wins``, which counts the lineal belt only:
+    Aspinall's two heavyweight titles were both interim, and a fighter who held
+    a belt held a belt whatever the data calls it."""
 
     home_division: str | None = None
     """The division they fought in most, which is not always the last one.
@@ -729,7 +729,8 @@ def build_history(dataset: Dataset, *, keep_snapshots: bool = True) -> History:
         if fight.winner in ("a", "b") and division and bool(fight.title_fight):
             champ = key_a if fight.winner == "a" else key_b
             winner = ledger_a if fight.winner == "a" else ledger_b
-            winner.held_belt = True
+            if division not in winner.belts_held:
+                winner.belts_held = (*winner.belts_held, division)
             if is_lineal_title(True, str(fight.weight_class)):
                 winner.title_wins += 1
                 if lineal.get(division) == champ:
@@ -756,7 +757,7 @@ def build_history(dataset: Dataset, *, keep_snapshots: bool = True) -> History:
     for key, value in strength.fit(decided).items():
         history.ledgers[key].strength = value
     history.champions = dict(champion)
-    for key in champion.values():
-        history.ledgers[key].champion = True
+    for division, key in champion.items():
+        history.ledgers[key].champion_of = division
 
     return history

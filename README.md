@@ -488,7 +488,11 @@ an absent fighter off the board and is not a measured loss of skill, so putting 
 win probability would turn a display rule into a claim about a fight — and the number would
 tick down every day he stayed retired.
 
-**A belt is shown and never ranked on.** 🏆 holds one now, 🎖️ held one once. A board that
+**A belt is shown and never ranked on.** 🏆 holds this board's belt now, 🎖️ held it once.
+The belt meant is the division's own and not any belt the fighter has: Makhachev is
+welterweight champion and the lightweight boards are full of him, where the belt is
+Gaethje's, so he reads as a former champion there and the current one next door. Pound for
+pound counts any of them, being about no division in particular. A board that
 reordered itself around the belt would be the UFC's ranking rather than this one's, but the
 belt is the thing a reader already knows and looks for, and its absence beside the top name
 was the question the boards kept getting asked. A champion can still sit below a contender.
@@ -906,7 +910,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-326 tests, a few seconds, no network and no Discord. One file per module it covers: they run against a real SQLite
+328 tests, a few seconds, no network and no Discord. One file per module it covers: they run against a real SQLite
 database in a temporary directory and fight cards built by hand. Most of them are about
 what happens when a card changes underneath the bot, because that is where the awkward
 cases live -- a fighter replaced, a fight cancelled, a card that only half-loaded -- and

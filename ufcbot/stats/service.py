@@ -196,8 +196,9 @@ class StatsService:
         )
         for complaint in warnings:
             log.warning("Belt override: %s", complaint)
+        holders = {key: division for division, key in champions.items()}
         for key, ledger in self.careers.ledgers.items():
-            ledger.champion = key in set(champions.values())
+            ledger.champion_of = holders.get(key)
         self.careers.champions = champions
 
     # -- refresh -------------------------------------------------------------

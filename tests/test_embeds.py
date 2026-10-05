@@ -431,21 +431,24 @@ def test_a_board_says_who_holds_a_belt_and_who_held_one():
 
 def test_a_champion_is_not_also_marked_as_a_former_one():
     from ufcbot.stats.career import Ledger
+    from ufcbot.stats.rankings import holds_belt
 
     champ = Ledger(name="Champ")
-    champ.held_belt, champ.champion = True, True
+    champ.belts_held, champ.champion_of = ("Lightweight",), "Lightweight"
     lost_it = Ledger(name="Lost it")
-    lost_it.held_belt, lost_it.champion = True, False
-    interim_only = Ledger(name="Interim only")
-    interim_only.held_belt, interim_only.title_wins = True, 0
+    lost_it.belts_held = ("Lightweight",)
+    moved_up = Ledger(name="Moved up")
+    moved_up.belts_held, moved_up.champion_of = ("Lightweight",), "Welterweight"
     never = Ledger(name="Never")
 
-    assert not champ.former_champion, "holding it now is not having held it"
-    assert lost_it.former_champion
-    # Aspinall's two heavyweight belts were both interim, so the lineal count is
-    # zero and he still held a belt.
-    assert interim_only.former_champion
-    assert not never.former_champion
+    assert holds_belt(champ, None, "Lightweight")
+    assert not holds_belt(lost_it, None, "Lightweight"), "held it, does not now"
+    # Makhachev is welterweight champion and the lightweight boards are full of
+    # him, where the belt is Gaethje's.
+    assert not holds_belt(moved_up, None, "Lightweight"), "his belt is another division's"
+    assert holds_belt(moved_up, None, "Welterweight")
+    assert holds_belt(moved_up, None), "and pound for pound, a champion is a champion"
+    assert not holds_belt(never, None)
 
 
 def test_a_full_ranking_is_never_split_across_two_fields():
@@ -591,3 +594,36 @@ def test_an_oversized_board_gives_something_up_rather_than_not_posting():
     assert len(embed.fields) == 1, "and still one field, not a ranking cut in half"
     assert "22-11-0" not in field, "the record is the first thing given up"
     assert all(f"`{i:>3}`" in field for i in (1, DEPTH)), "every place is still there"
+
+
+def test_a_champion_of_another_division_is_not_this_division_s_champion():
+    """Makhachev is welterweight champion and the lightweight boards are full of
+    him, where the belt is Gaethje's."""
+    from ufcbot.embeds import rankings_embed
+    from ufcbot.stats.rankings import Ranked
+
+    def row(i, name, *, champion=False, former=False):
+        return Ranked(rank=i, name=name, rating=1200 - i, record="18-1-0",
+                      division="Lightweight", key=name, champion=champion,
+                      former_champion=former)
+
+    # The board has already been told which of them holds its belt.
+    lines = rankings_embed("Lightweight", [
+        row(1, "Islam Makhachev", former=True),
+        row(2, "Justin Gaethje", champion=True),
+    ]).fields[0].value.splitlines()
+
+    assert "🎖️" in lines[0] and "🏆" not in lines[0], "his belt is another division's"
+    assert "🏆" in lines[1]
+
+
+def test_the_legend_says_which_belt_it_means():
+    from ufcbot.embeds import rankings_embed
+    from ufcbot.stats.rankings import Ranked
+
+    rows = [Ranked(rank=1, name="A", rating=1200, record="9-1-0", division="Lightweight", key="a")]
+    note = " ".join(f.value for f in rankings_embed("Pound for pound", rows,
+                                                    pound_for_pound=True, note=True).fields)
+
+    assert "holds this division's belt" in note
+    assert "Pound for pound counts any of them" in note

@@ -134,17 +134,18 @@ class Ranked:
     key: str = ""
     """The dataset key, which is what a board is remembered by between passes."""
     champion: bool = False
-    """Whether they hold the belt. Shown, never ranked on: the rating is the
-    rating, and a board that reordered itself around the belt would be the UFC's
-    ranking rather than this one's."""
+    """Whether they hold *this board's* belt. Shown, never ranked on: the rating
+    is the rating, and a board that reordered itself around the belt would be the
+    UFC's ranking rather than this one's."""
     defences: int = 0
     """Title defences, shown on the all-time boards. They are most of what the
     score there is made of, and printing them stops the number reading as a
     rating that can be compared with the board above."""
     former_champion: bool = False
-    """Held one once. On a current board it is most of the answer to why someone
-    is up there; on an all-time board the absence of it is the interesting half,
-    since it marks out the careers that never got the belt."""
+    """Held this board's belt once and does not now. On a current board it is
+    most of the answer to why someone is up there; on an all-time board the
+    absence of it is the interesting half, since it marks out the careers that
+    never got a belt."""
     last_fight: date | None = None
     last_result: str | None = None
     tied: bool = False
@@ -201,11 +202,15 @@ def _ordered(
     # Name breaks the remaining tie so the same board comes back the same way
     # twice running, which is what the change watcher compares against.
     entries.sort(key=lambda entry: (-entry[0], entry[2].name))
-    return _ranked(entries, on=on)
+    return _ranked(entries, on=on, division=division)
 
 
-def holds_belt(ledger: Ledger, on: date | None) -> bool:
-    """Whether to show this fighter as champion.
+def holds_belt(ledger: Ledger, on: date | None, division: str | None = None) -> bool:
+    """Whether to show this fighter as champion of ``division``.
+
+    ``division`` of None asks whether they hold any belt at all, which is what
+    pound for pound wants: that board is not about one division, so a champion
+    is a champion there.
 
     The data records that someone won a title fight. It never records a champion
     vacating, being stripped, or being elevated from interim, so the belt is left
@@ -215,11 +220,19 @@ def holds_belt(ledger: Ledger, on: date | None) -> bool:
     the last title fight said. That is what had Jon Jones showing as heavyweight
     champion two years after he last held it.
     """
-    return ledger.champion and (on is None or _eligible(ledger, on))
+    if ledger.champion_of is None:
+        return False
+    if division is not None and ledger.champion_of != division:
+        return False
+    return on is None or _eligible(ledger, on)
 
 
 def _ranked(
-    entries: list[tuple[int, str, Ledger]], *, home: bool = False, on: date | None = None
+    entries: list[tuple[int, str, Ledger]],
+    *,
+    home: bool = False,
+    on: date | None = None,
+    division: str | None = None,
 ) -> list[Ranked]:
     """Rated entries, best first, with ranks shared between those too close to separate.
 
@@ -240,8 +253,13 @@ def _ranked(
                 record=ledger.record,
                 division=(ledger.home_division or ledger.division) if home else ledger.division,
                 key=key,
-                champion=holds_belt(ledger, on),
-                former_champion=ledger.held_belt and not holds_belt(ledger, on),
+                champion=holds_belt(ledger, on, division),
+                former_champion=(
+                    bool(ledger.belts_held)
+                    if division is None
+                    else division in ledger.belts_held
+                )
+                and not holds_belt(ledger, on, division),
                 defences=ledger.title_defences,
                 last_fight=ledger.last_fight,
                 last_result=ledger.last_result,
@@ -330,7 +348,7 @@ def all_time(
         and (include_women or not is_womens(ledger.home_division or ledger.division))
     ]
     entries.sort(key=lambda entry: (-entry[0], entry[2].name))
-    return _ranked(entries, home=True, on=on)[:depth]
+    return _ranked(entries, home=True, on=on, division=division)[:depth]
 
 
 def standing(ledgers: dict[str, Ledger], key: str, *, on: date) -> Ranked | None:

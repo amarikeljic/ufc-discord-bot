@@ -629,10 +629,10 @@ def test_a_belt_held_only_as_interim_still_counts_as_having_held_one():
     from ufcbot.stats.career import Ledger
 
     interim_only = Ledger(name="Tom Aspinall")
-    interim_only.held_belt = True
+    interim_only.belts_held = ("Heavyweight",)
 
-    assert interim_only.title_wins == 0
-    assert interim_only.former_champion
+    assert interim_only.title_wins == 0, "both of them were interim"
+    assert "Heavyweight" in interim_only.belts_held
 
 
 def test_a_champion_who_has_aged_off_the_board_is_a_former_champion():
@@ -641,14 +641,16 @@ def test_a_champion_who_has_aged_off_the_board_is_a_former_champion():
     champion two years after he last held the belt."""
     from ufcbot.stats.rankings import holds_belt
 
-    led = rated("Jon Jones", 1296, fights=24, ago=700)
-    led.champion = led.held_belt = True
+    led = rated("Jon Jones", 1296, fights=24, ago=700, division="Light Heavyweight")
+    led.champion_of = "Light Heavyweight"
+    led.belts_held = ("Light Heavyweight",)
 
     assert not holds_belt(led, TODAY), "eighteen months without a fight"
     assert holds_belt(led, None), "with no date to check against, the flag stands"
 
     still_here = rated("Islam Makhachev", 1273, fights=19, ago=60)
-    still_here.champion = still_here.held_belt = True
+    still_here.champion_of = "Lightweight"
+    still_here.belts_held = ("Lightweight",)
     assert holds_belt(still_here, TODAY)
 
 
