@@ -66,13 +66,13 @@ def rated(
     fights: int = 6,
     division: str | None = "Lightweight",
     ago: int = 30,
-    peak: float | None = None,
+    strength: float | None = None,
     defences: int = 0,
     titles: int = 0,
 ) -> Ledger:
     ledger = Ledger(name=name)
     ledger.elo = elo
-    ledger.peak_elo = elo if peak is None else peak
+    ledger.strength = elo if strength is None else strength
     ledger.fights = fights
     ledger.wins = fights
     ledger.division = division
@@ -522,13 +522,16 @@ def test_the_all_time_board_does_not_fade_a_career_for_a_layoff():
     assert rating_on(led, TODAY) < 1207, "the current board does fade it"
 
 
-def test_a_career_is_scored_on_the_peak_held_not_the_rating_retired_with():
+def test_a_career_is_not_judged_on_the_rating_it_ended_with():
     """Anderson Silva gave back 120 points going 1-6 at the end. Judging a career
-    on its last day is judging it on its decline."""
+    on its last day is judging it on its decline, and the fitted strength reads
+    the whole record rather than where it stopped."""
     from ufcbot.stats.rankings import career_score
 
-    declined = rated("Anderson Silva", 1096, fights=25, peak=1216)
-    steady = rated("Someone Else", 1150, fights=12, peak=1150)
+    declined = rated("Anderson Silva", 1096, fights=25)
+    declined.strength = 1216
+    steady = rated("Someone Else", 1150, fights=12)
+    steady.strength = 1150
 
     assert career_score(declined) > career_score(steady)
 
@@ -540,11 +543,11 @@ def test_beating_the_same_man_for_the_belt_outranks_the_longer_career():
     from ufcbot.stats.rankings import all_time
 
     volk = rated("Volkanovski", 1186, fights=18, division="Featherweight",
-                 peak=1186, defences=5, titles=8)
+                 strength=1186, defences=5, titles=8)
     holloway = rated("Holloway", 1206, fights=33, division="Featherweight",
-                     peak=1206, defences=3, titles=5)
+                     strength=1206, defences=3, titles=5)
 
-    assert holloway.peak_elo > volk.peak_elo, "the rating alone has it the wrong way round"
+    assert holloway.strength > volk.strength, "the rating alone has it the wrong way round"
     assert [e.name for e in all_time({"v": volk, "h": holloway}, "Featherweight")][0] == "Volkanovski"
 
 
@@ -591,24 +594,20 @@ def test_a_tournament_final_is_not_a_title_defence():
     assert not is_lineal_title(False, "UFC Lightweight Bout"), "not a title fight at all"
 
 
-def test_an_all_time_score_is_never_below_the_current_rating_beside_it():
-    """The two boards sit one above the other, so an all-time number lower than
-    the current one reads as a bug rather than as a different quantity. It
-    cannot happen: a current rating is the rating faded by a layoff, the peak is
-    the highest that rating ever was, and title credit only adds."""
-    from ufcbot.stats.rankings import career_score, rating_on
+def test_a_career_is_scored_on_the_fitted_strength_not_the_running_rating():
+    """The running rating starts everybody in the middle and takes a career to
+    leave it, so every summary of it pays for length: ten more fights were worth
+    nearly twice what ten points of win rate were. The fitted strength has no
+    starting point, and the all-time boards rank on that."""
+    from ufcbot.stats.rankings import career_score
 
-    led = rated("Someone", 1150, fights=12, ago=900)
-    led.peak_elo = 1190
+    short_and_good = rated("Khabib", 1193, fights=13)
+    short_and_good.strength = 1276
+    long_and_decent = rated("Journeyman", 1212, fights=37)
+    long_and_decent.strength = 1150
 
-    assert rating_on(led, TODAY) <= led.elo <= led.peak_elo <= career_score(led)
-
-
-def test_the_peak_is_the_best_rating_ever_held():
-    from ufcbot.stats.career import _peak
-
-    assert _peak([1000, 1180, 1050]) == 1180
-    assert _peak([]) == 1000.0
+    assert long_and_decent.elo > short_and_good.elo, "the running rating has it this way"
+    assert career_score(short_and_good) > career_score(long_and_decent)
 
 
 def test_the_belt_goes_to_the_last_title_fight_won_not_the_last_lineal_one():
@@ -651,3 +650,47 @@ def test_a_champion_who_has_aged_off_the_board_is_a_former_champion():
     still_here = rated("Islam Makhachev", 1273, fights=19, ago=60)
     still_here.champion = still_here.held_belt = True
     assert holds_belt(still_here, TODAY)
+
+
+def test_the_strength_fit_puts_the_better_record_above_the_longer_one():
+    """The whole point of fitting instead of walking. Both beat the same man;
+    one of them did it four times and lost twice, the other twice and never."""
+    from ufcbot.stats.strength import fit
+
+    bouts = [("better", "journeyman")] * 2
+    bouts += [("longer", "journeyman")] * 4 + [("journeyman", "longer")] * 2
+
+    rated = fit(bouts)
+
+    assert rated["better"] > rated["longer"]
+    assert rated["longer"] > rated["journeyman"]
+
+
+def test_an_unbeaten_record_does_not_run_away_to_infinity():
+    """Nothing in a perfect record contradicts "infinitely good", so the pull
+    toward the middle is what makes a short unbeaten career merely very good."""
+    from ufcbot.stats.strength import CENTRE, fit
+
+    five_oh = fit([("perfect", f"opponent{i}") for i in range(5)])
+    twenty_oh = fit([("perfect", f"opponent{i}") for i in range(20)])
+
+    assert CENTRE < five_oh["perfect"] < twenty_oh["perfect"] < CENTRE + 1000
+    assert all(v < CENTRE for k, v in five_oh.items() if k != "perfect")
+
+
+def test_beating_a_better_fighter_is_worth_more():
+    from ufcbot.stats.strength import fit
+
+    # One man beats the fighter everybody loses to; the other beats a nobody.
+    bouts = [("strong", f"victim{i}") for i in range(6)]
+    bouts += [("beat_the_strong", "strong"), ("beat_a_nobody", "victim0")]
+
+    rated = fit(bouts)
+
+    assert rated["beat_the_strong"] > rated["beat_a_nobody"]
+
+
+def test_no_fights_is_no_ratings():
+    from ufcbot.stats.strength import fit
+
+    assert fit([]) == {}

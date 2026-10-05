@@ -28,7 +28,7 @@ from .scorer import MODEL_FILE
 log = logging.getLogger(__name__)
 
 CAREER_FILE = "career.pkl"
-CAREER_VERSION = 11
+CAREER_VERSION = 12
 
 # How far back the honest evaluation window reaches when training.
 HOLDOUT_MONTHS = 18

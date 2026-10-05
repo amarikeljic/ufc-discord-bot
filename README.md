@@ -564,8 +564,32 @@ rating a fighter *retired* with it is worse still, because that judges a career 
 decline: Silva went 1-6 at the end and gave back 120 points, finishing below fighters he
 would have beaten in his sleep.
 
-So the all-time boards rank on a career score: the best rating a fighter ever held, plus 15
-points for every title defence and 5 for every title won. The defences are printed on each
+So the all-time boards rank on a career score: how good a fighter was, plus 15 points for
+every title defence and 5 for every title won.
+
+**How good he was is fitted, not accumulated.** The running rating starts everybody at 1000
+and moves them a little per fight, which is the right shape for "where does he stand today"
+and the wrong one for "how good was he" — a fighter who wins 70% of the time settles 147
+points up, and at 32 points a fight he cannot get there in five. So every summary of that
+rating pays for length. Holding the win rate *and* the quality of opposition fixed, ten more
+fights were worth **+25** rating points where ten points of win rate were worth **+14**:
+length counted nearly twice what winning did, on the board that is supposed to be about how
+good somebody was. That is inherited from the starting point rather than from taking a
+maximum, so the career best, the best run of three or five, the 90th percentile and the
+plain average all came out between +14 and +27.
+
+`stats/strength.py` fits every fighter at once instead. One number each, chosen so the whole
+record is as likely as possible, with a pull toward the middle that is strong where there is
+little evidence and fades as it mounts — which is also what stops an unbeaten five-fight
+record running away to infinity. Measured the same way it pays **+13** for ten fights against
+**+33** for ten points of win rate. Winning is worth two and a half times fighting often,
+which is the way round it should be.
+
+The boards move accordingly. Oliveira goes from first at lightweight to joint fourth, behind
+Makhachev, Nurmagomedov and Benson Henderson and level with Tsarukyan, who has thirteen
+fights to his thirty-seven. Topuria and Evloev reach featherweight on ten fights each, and
+Chimaev middleweight. No record shorter than nine fights is in the all-time top fifteen, and
+the best unbeaten five-fight career sits 34th, so it has not swung the other way. The defences are printed on each
 line, because that number is a career score and not a rating and the two boards sit one
 above the other.
 
@@ -861,6 +885,7 @@ ufcbot/
     features.py         Model inputs
     model.py            Training the winner and method models
     scorer.py           The trained model, compiled to run without scikit-learn
+    strength.py         How good a fighter was, fitted from every fight at once
     rankings.py         Division and pound-for-pound ratings boards
     prediction.py       A prediction and how it is put together
 ```
@@ -882,7 +907,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-323 tests, a few seconds, no network and no Discord. One file per module it covers: they run against a real SQLite
+326 tests, a few seconds, no network and no Discord. One file per module it covers: they run against a real SQLite
 database in a temporary directory and fight cards built by hand. Most of them are about
 what happens when a card changes underneath the bot, because that is where the awkward
 cases live -- a fighter replaced, a fight cancelled, a card that only half-loaded -- and

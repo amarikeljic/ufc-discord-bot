@@ -284,7 +284,7 @@ def career_score(ledger: Ledger) -> int:
     number printed beneath it.
     """
     return round(
-        ledger.peak_elo
+        ledger.strength
         + TITLE_DEFENCE_POINTS * ledger.title_defences
         + TITLE_WIN_POINTS * ledger.title_wins
     )

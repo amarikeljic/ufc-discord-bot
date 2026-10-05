@@ -24,6 +24,7 @@ from datetime import date
 from typing import TYPE_CHECKING
 
 from ..util import normalise
+from . import strength
 from .techniques import METHODS
 
 if TYPE_CHECKING:  # pandas is a training dependency; the bot never imports it
@@ -202,12 +203,14 @@ class Ledger:
     in. The ledger otherwise only keeps the rating after the fight, and the delta
     is gone."""
 
-    peak_elo: float = ELO_START
-    """The best rating they ever held.
+    strength: float = ELO_START
+    """How good they were, fitted from every fight at once rather than walked.
 
-    The rating a career is judged on, where ``elo`` is the rating a fighter
-    carries now. Final rating punishes anyone who fought past their peak:
-    Anderson Silva finished 1-6 and gave back 120 points of it."""
+    What the all-time boards rank on. See ``stats.strength``: the running rating
+    starts everybody in the middle and takes a career to leave it, so every
+    summary of it pays for length -- ten more fights were worth nearly twice what
+    ten points of win rate were, on the board that is about how good somebody
+    was."""
 
     title_wins: int = 0
     """Undisputed title fights won. Interim belts and tournament finals are not
@@ -522,20 +525,6 @@ def is_lineal_title(title_fight: bool, weight_class: str) -> bool:
     """
     return bool(title_fight) and not _NOT_THE_BELT.search(weight_class or "")
 
-def _peak(ratings: list[float]) -> float:
-    """The best rating a fighter ever held.
-
-    This was an average over three fights, to stop one good night counting as a
-    peak. It is a plain maximum now for a reason that outweighs that: a current
-    rating is this rating faded by a layoff, so it can never exceed the highest
-    it has been -- but it can easily exceed a three-fight average of it, and a
-    board showing an all-time number *below* the current one beside it reads as
-    a bug rather than as a different quantity. Smoothing turned out not to be
-    what kept the one-good-run careers down anyway; the title credit was.
-    """
-    return max(ratings, default=ELO_START)
-
-
 @dataclass(frozen=True, slots=True)
 class Rematch:
     """What has passed between two fighters, from the first one's side.
@@ -646,10 +635,12 @@ def build_history(dataset: Dataset, *, keep_snapshots: bool = True) -> History:
     # field, and a counter per fighter would outlive the build inside what the
     # bot then holds in memory.
     division_fights: dict[str, Counter[str]] = defaultdict(Counter)
+    # (winner, loser) for every decided fight, which is all the strength fit
+    # needs: it has no notion of when a fight happened.
+    decided: list[tuple[str, str]] = []
     # The rating after each fight, for the sustained peak, and who holds each
     # belt, for defences. Both are only needed to settle a field, so neither
     # lives on the ledgers the bot then keeps in memory.
-    rating_path: dict[str, list[float]] = defaultdict(list)
     champion: dict[str, str] = {}
     lineal: dict[str, str] = {}
 
@@ -722,8 +713,6 @@ def build_history(dataset: Dataset, *, keep_snapshots: bool = True) -> History:
         # what each fighter carried in. The path below is read after, so it is
         # where the fight left them.
         ledger_a.elo_before_last, ledger_b.elo_before_last = elo_a, elo_b
-        rating_path[key_a].append(ledger_a.elo)
-        rating_path[key_b].append(ledger_b.elo)
 
         # Two different questions, so two different rules.
         #
@@ -750,6 +739,9 @@ def build_history(dataset: Dataset, *, keep_snapshots: bool = True) -> History:
             champion[division] = champ
             history.last_title_fight[division] = on
 
+        if fight.winner in ("a", "b"):
+            decided.append((key_a, key_b) if fight.winner == "a" else (key_b, key_a))
+
         met = history.meetings.setdefault(pair_key(key_a, key_b), Meeting())
         met.fights += 1
         met.last_on = on
@@ -762,8 +754,8 @@ def build_history(dataset: Dataset, *, keep_snapshots: bool = True) -> History:
 
     for key, counts in division_fights.items():
         history.ledgers[key].home_division = counts.most_common(1)[0][0]
-    for key, ratings in rating_path.items():
-        history.ledgers[key].peak_elo = _peak(ratings)
+    for key, value in strength.fit(decided).items():
+        history.ledgers[key].strength = value
     history.champions = dict(champion)
     for key in champion.values():
         history.ledgers[key].champion = True
