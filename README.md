@@ -8,10 +8,12 @@ have done.
 ## Features
 
 - **Fight cards and schedule.** Upcoming cards, full fight cards, results and venues.
-- **Fighter stats.** The same career numbers ufcstats.com publishes, such as strikes
-  landed per minute, striking and takedown accuracy and defence, and submission average.
-  Also shows record, reach, stance, headshot, and the fighter's rating and where it
-  places them in their division.
+- **Fighter cards.** Three pages behind one command. The first is the page ESPN itself
+  leads with — both records, division, bio, gym, headshot — plus the bot's rating and
+  where it places them. Behind buttons: the career numbers ufcstats.com publishes, and
+  the full fight history, which is the only page that knows about the fights before the
+  UFC. Patricio Pitbull reads 38-9 professionally and 1-1 in the UFC, and the ratings
+  have only ever seen the second number.
 - **Predictions.** Win probability for any matchup, plus how the fight is likely to end:
   KO/TKO, submission, unanimous or split decision, with the likeliest finishing technique.
 - **Picks board.** One auto-updating message per upcoming card with every pick and the
@@ -53,7 +55,7 @@ have done.
 | Command | What it does |
 | --- | --- |
 | `/ufc results [event]` | Results from the latest or a named card |
-| `/ufc fighter <name>` | Fighter profile and career stats |
+| `/ufc fighter <name>` | Fighter profile, career stats and fight history |
 | `/ufc predict <a> <b> [rounds] [title]` | Head-to-head prediction |
 | `/ufc predictions [event]` | Picks for every fight on a card |
 | `/ufc pickem stats [member]` | Points, rank, win rate and card history |
@@ -956,10 +958,11 @@ ufcbot/
     pickem.py           Pick'em rules: scoring, locks, saving and grading picks
   ui/
     pickem.py           Pick'em buttons and the private picker
+    fighter.py          The buttons under a fighter card
   embeds/
     common.py           Colours, limits and text helpers
     cards.py            Fight cards, the schedule and card changes
-    fighters.py         The fighter profile card
+    fighters.py         The fighter card: overview, stats and fight history
     picks.py            Picks, prediction and scorecard embeds
     ratings.py          Ratings boards and their moves
     health.py           What the bot says when something it depends on breaks

@@ -21,7 +21,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from urllib.parse import quote
 
-from ..models import Bout, Event, Fighter, segment_rank
+from ..models import Bout, Event, Fighter, FightHistoryEntry, segment_rank
 from ..util import https, normalise, parse_api_datetime
 from .http import HttpClient, HttpError
 from .polymarket import PROVIDER as POLYMARKET
@@ -32,6 +32,10 @@ log = logging.getLogger(__name__)
 CORE = "https://sports.core.api.espn.com/v2/sports/mma"
 LEAGUE = f"{CORE}/leagues/ufc"
 SEARCH = "https://site.web.api.espn.com/apis/search/v2"
+# The site's own fighter page, which the core feed has no equivalent of: the
+# gym, and every fight of a career rather than every UFC fight. A debutant is
+# a blank to the ratings and 13 fights deep here.
+PROFILE = "https://site.web.api.espn.com/apis/common/v3/sports/mma/ufc/athletes"
 
 # The events endpoint rejects ranges longer than about a year.
 MAX_RANGE_DAYS = 364
@@ -510,7 +514,7 @@ class UFCData:
         return (items[0].get("summary") if items else None) or None
 
     async def get_fighter(self, athlete_id: str) -> Fighter | None:
-        """Full profile for one athlete, including their record."""
+        """Full profile for one athlete, including their record and gym."""
         try:
             payload = await self.http.get_json(f"{CORE}/athletes/{athlete_id}", ttl=STATIC_TTL)
         except HttpError:
@@ -519,7 +523,35 @@ class UFCData:
         if fighter is None:
             return None
         fighter.record = await self._load_record(f"{CORE}/athletes/{athlete_id}/records")
+        # The gym is only on the site's own page, and the call is the same one
+        # the history comes from, so it is cached by the time anyone asks.
+        profile = await self._profile(athlete_id)
+        if profile:
+            athlete = profile.get("athlete") or {}
+            fighter.team = ((athlete.get("association") or {}).get("name")) or None
+            fighter.record = fighter.record or _summary_record(athlete)
         return fighter
+
+    async def _profile(self, athlete_id: str) -> dict | None:
+        """The site feed's fighter page, which carries the gym and the career."""
+        try:
+            return await self.http.get_json(f"{PROFILE}/{athlete_id}", ttl=STATIC_TTL)
+        except HttpError:
+            return None
+
+    async def fighter_history(self, athlete_id: str) -> list[FightHistoryEntry]:
+        """Every fight of a career, newest first.
+
+        ESPN counts the whole professional record where ufcstats counts the UFC
+        part, so this is the only place the bot can see what a fighter did
+        before they arrived."""
+        payload = await self._profile(athlete_id)
+        if not payload:
+            return []
+        entries = [_history_entry(raw) for raw in (payload.get("eventsMap") or {}).values()]
+        found = [e for e in entries if e is not None]
+        found.sort(key=lambda e: e.on or datetime.min.replace(tzinfo=UTC), reverse=True)
+        return found
 
     async def search_fighters(self, query: str, *, limit: int = 5) -> list[Fighter]:
         """Search fighters by name. Returns lightweight stubs, id plus display name."""
@@ -568,6 +600,35 @@ def _athlete_id_from_uid(uid: str | None) -> str | None:
         if part.startswith("a:"):
             return part[2:]
     return None
+
+
+def _summary_record(athlete: dict) -> str | None:
+    """The W-L-D line from the site feed, as a fallback for the core records."""
+    for stat in ((athlete.get("statsSummary") or {}).get("statistics") or []):
+        if stat.get("name") == "wins-losses-draws":
+            return stat.get("displayValue") or None
+    return None
+
+
+def _history_entry(raw: dict) -> FightHistoryEntry | None:
+    """One fight from the site feed's event map."""
+    if not isinstance(raw, dict):
+        return None
+    opponent = raw.get("opponent") or {}
+    status = raw.get("status") or {}
+    result = status.get("result") or {}
+    period = status.get("period")
+    return FightHistoryEntry(
+        on=parse_api_datetime(raw.get("gameDate")),
+        event=raw.get("name") or raw.get("shortName"),
+        opponent=opponent.get("displayName") or opponent.get("fullName"),
+        opponent_id=str(opponent.get("id")) if opponent.get("id") else None,
+        result=(raw.get("gameResult") or "").strip().upper() or None,
+        method=result.get("displayName") or result.get("shortDisplayName"),
+        rounds=period if isinstance(period, int) else None,
+        clock=status.get("displayClock"),
+        title_fight=bool(raw.get("titleFight")),
+    )
 
 
 def _fighter_from_payload(payload: dict) -> Fighter | None:

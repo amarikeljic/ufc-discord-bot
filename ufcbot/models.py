@@ -36,8 +36,30 @@ class Fighter:
     stance: str | None = None
     age: int | None = None
     citizenship: str | None = None
+    team: str | None = None
+    """The gym they fight out of, as ESPN names it."""
     headshot_url: str | None = None
     profile_url: str | None = None
+
+
+@dataclass(slots=True)
+class FightHistoryEntry:
+    """One fight on a fighter's record, from ESPN rather than ufcstats.
+
+    ESPN carries a fighter's whole professional career, not just the UFC part,
+    so this reaches the fights the ratings cannot see.
+    """
+
+    on: datetime | None = None
+    event: str | None = None
+    opponent: str | None = None
+    opponent_id: str | None = None
+    result: str | None = None
+    """W, L or D, from the fighter's own side."""
+    method: str | None = None
+    rounds: int | None = None
+    clock: str | None = None
+    title_fight: bool = False
 
 
 @dataclass(slots=True)

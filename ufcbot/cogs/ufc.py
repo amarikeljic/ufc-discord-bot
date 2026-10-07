@@ -19,7 +19,6 @@ from ..config import VALID_ANCHORS
 from ..embeds import (
     UFC_RED,
     event_embed,
-    fighter_embed,
     pickem_picks_embed,
     pickem_stats_embed,
     prediction_embed,
@@ -31,6 +30,7 @@ from ..features.sync import MissingPermissions
 from ..models import Event
 from ..records import GuildSettings
 from ..stats.rankings import Ranked, pound_for_pound_rank, standing
+from ..ui.fighter import FighterView
 from ..util import central_time, format_duration, resident_memory_mb, truncate
 
 if TYPE_CHECKING:
@@ -116,7 +116,7 @@ class UFCCog(commands.Cog):
             return
         await interaction.followup.send(embed=await self._card_embed(found, with_picks=False))
 
-    @ufc.command(name="fighter", description="Fighter profile with exact ufcstats.com career numbers")
+    @ufc.command(name="fighter", description="Fighter profile, career numbers and fight history")
     @app_commands.describe(name="Fighter name, for example 'Alexa Grasso'")
     async def fighter(self, interaction: discord.Interaction, name: str) -> None:
         await interaction.response.defer()
@@ -137,9 +137,24 @@ class UFCCog(commands.Cog):
             return
 
         place, p4p = self._standing(career)
-        await interaction.followup.send(
-            embed=fighter_embed(profile, career, standing=place, pound_for_pound=p4p)
+        athlete_id = profile.id if profile else None
+
+        async def history() -> list:
+            # Only when somebody opens the page: it is a second call to ESPN,
+            # and most lookups never leave the first page.
+            if not athlete_id:
+                return []
+            return await self.bot.data.fighter_history(athlete_id)
+
+        view = FighterView(
+            profile=profile,
+            career=career,
+            standing=place,
+            pound_for_pound=p4p,
+            history=history,
+            owner_id=interaction.user.id,
         )
+        await interaction.followup.send(embed=view.embed(), view=view)
 
     def _standing(self, career) -> tuple[Ranked | None, Ranked | None]:
         """Where this fighter sits in their division and pound for pound."""

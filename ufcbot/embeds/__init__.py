@@ -19,7 +19,7 @@ from .events import (
     scheduled_event_location,
     scheduled_event_name,
 )
-from .fighters import fighter_embed
+from .fighters import fighter_embed, fighter_history_embed, fighter_stats_embed
 from .health import api_outage_embed, api_restored_embed, stale_data_embed
 from .live import (
     live_open_embed,
@@ -51,6 +51,8 @@ __all__ = [
     "event_embed",
     "fight_day_embed",
     "fighter_embed",
+    "fighter_history_embed",
+    "fighter_stats_embed",
     "live_open_embed",
     "live_result_embed",
     "live_round_embed",
