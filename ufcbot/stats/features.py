@@ -95,6 +95,11 @@ def fighter_features(ledger: Ledger, info: FighterInfo | None, on: date) -> dict
         "elo_over_opponents": _diff_or_nan(ledger.model_elo, ledger.avg_model_opponent_elo),
         # Finishing power against the durability it has met, rated the same way.
         "finish_elo": ledger.model_finish_elo,
+        # What every professional fight says, and how much of it happened
+        # outside the UFC. The second is what lets the model discount the
+        # first; see ufcbot.stats.graph for why it needs discounting.
+        "graph_elo": ledger.graph_elo,
+        "graph_fights": float(ledger.graph_fights),
     }
 
 
@@ -209,6 +214,8 @@ FEATURE_LABELS = {
     "best_win_elo": "best win",
     "elo_over_opponents": "rating above their opposition",
     "finish_elo": "finishing rating",
+    "graph_elo": "rating across every pro fight",
+    "graph_fights": "pro fights behind that rating",
     "prior_meetings": "times they have met",
     "prior_wins": "wins over this opponent",
     "prior_losses": "losses to this opponent",

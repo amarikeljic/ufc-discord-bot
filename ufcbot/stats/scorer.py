@@ -30,7 +30,7 @@ from .prediction import (
 )
 from .techniques import FINISHES, METHODS
 
-MODEL_VERSION = 7
+MODEL_VERSION = 8
 MODEL_FILE = "ufc_model.pkl"
 
 

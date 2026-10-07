@@ -25,6 +25,8 @@ from typing import TYPE_CHECKING
 
 from ..util import normalise
 from . import strength
+from .graph import SAFE_GAP as GRAPH_SAFE_GAP
+from .graph import Graph
 from .techniques import METHODS
 
 if TYPE_CHECKING:  # pandas is a training dependency; the bot never imports it
@@ -273,6 +275,20 @@ class Ledger:
     Not derived from ``title_wins``, which counts the lineal belt only:
     Aspinall's two heavyweight titles were both interim, and a fighter who held
     a belt held a belt whatever the data calls it."""
+
+    graph_elo: float = ELO_START
+    """What every professional fight says about them, not just the UFC ones.
+
+    Left at the starting rating when no career cache is present, which is a
+    supported way to run: see :mod:`ufcbot.stats.graph`."""
+    graph_fights: int = 0
+    """How many fights are behind ``graph_elo``.
+
+    A feature in its own right rather than bookkeeping. The graph is selected
+    on its outcome -- a regional fight is in it because somebody later reached
+    the UFC -- so it overrates arrivals, and worst those with the longest
+    records outside. This is what lets the model discount the rating in
+    proportion to how much of it was earned out there."""
 
     home_division: str | None = None
     """The division they fought in most, which is not always the last one.
@@ -745,8 +761,15 @@ class History:
     lists would."""
 
 
-def build_history(dataset: Dataset, *, keep_snapshots: bool = True) -> History:
-    """Replay every fight in order, collecting pre-fight snapshots and final totals."""
+def build_history(
+    dataset: Dataset, *, keep_snapshots: bool = True, graph: Graph | None = None
+) -> History:
+    """Replay every fight in order, collecting pre-fight snapshots and final totals.
+
+    ``graph`` is every professional fight ESPN has, walked alongside the UFC
+    ones so that a fighter arrives with a rating rather than at the starting
+    number. Optional: without it the two graph fields stay where they began
+    and the features built from them are empty."""
     stats_by_fight: dict[tuple[int, str], dict] = {
         (int(row.fight_id), row.side): row._asdict()
         for row in dataset.fight_stats.itertuples(index=False)
@@ -770,6 +793,13 @@ def build_history(dataset: Dataset, *, keep_snapshots: bool = True) -> History:
         ledger_a = history.ledgers.setdefault(key_a, Ledger(name=fight.fighter_a))
         ledger_b = history.ledgers.setdefault(key_b, Ledger(name=fight.fighter_b))
         on = fight.date.date()
+        if graph is not None:
+            # Every professional fight that is safely in the past, including
+            # this card's own UFC bouts from earlier years. The margin keeps
+            # tonight's fight out of the rating that is about to predict it.
+            graph.advance_to(on - GRAPH_SAFE_GAP)
+            ledger_a.graph_elo, ledger_a.graph_fights = graph.standing(key_a)
+            ledger_b.graph_elo, ledger_b.graph_fights = graph.standing(key_b)
         # Missing techniques come back from pandas as NaN, not None.
         technique = fight.technique if isinstance(fight.technique, str) else None
         # Read before this fight is added, so a snapshot only ever sees meetings

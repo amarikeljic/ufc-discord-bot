@@ -326,6 +326,51 @@ probability into KO/TKO, submission, unanimous decision and split decision. The 
 technique comes from the winner's finishing history, how the opponent has been finished
 before, and the league-wide rate.
 
+**The model also rates fights that did not happen in the UFC.** ufcstats publishes UFC
+fights, which is 8,935 of them, so a fighter arriving from anywhere else used to start level
+with everyone — and a quarter of all fights have somebody the ratings had never seen. ESPN
+publishes whole careers; walked as one Elo in date order that is **56,080 decided fights**,
+and a debutant arrives with a rating earned against real opponents. It propagates, too:
+beating someone who beat a UFC fighter carries through the graph, which no summary of a
+record can say. Patricio Pitbull reads 1006 on the UFC rating and 1285 across 46 professional
+fights.
+
+Measured on rolling origin over 446 events, against the same model without it:
+
+| | change in log loss | 95% interval | |
+| --- | --- | --- | --- |
+| fights with a debutant | −0.01114 | [−0.01731, −0.00517] | better |
+| between established fighters | −0.00229 | [−0.00565, +0.00119] | no measurable change |
+| overall | −0.00498 | [−0.00764, −0.00250] | better |
+
+For scale, the largest other change this model has had was −0.0015. Eight earlier designs
+that summarised the same careers into columns all failed the same way — every one helped
+debutants and hurt everybody else by about as much, netting to nothing. The difference is
+that the rating system walks the fights instead of being told about them afterwards.
+
+**The graph is selected on its outcome, and that bias is real.** A regional fight is in the
+data because one of the two later reached the UFC, and fighters reach the UFC by winning, so
+arrivals are selected for luck as well as skill. On UFC debuts the graph over-predicts the
+winner by 3.4 points — and worst for the *longest* records outside, not the shortest:
+
+| pro fights behind the rating | n | predicted | actual | gap |
+| --- | --- | --- | --- | --- |
+| 0–5 | 396 | 0.434 | 0.399 | +0.035 |
+| 5–10 | 861 | 0.478 | 0.472 | +0.006 |
+| 10–20 | 795 | 0.506 | 0.467 | +0.040 |
+| 20+ | 217 | 0.534 | 0.415 | +0.120 |
+
+Elo accumulates and regional opponents sit near the starting rating, so the longer somebody
+fought out there the more inflation they bring. That is why the *count* of professional
+fights is a feature beside the rating: it lets the model fit the discount rather than have
+one imposed.
+
+`python careers.py` builds the cache and is incremental — a first run is a few thousand
+requests, afterwards a handful per card. It is a separate job because the refresh runs on a
+timer and this does not belong on one. **The bot runs without it**: the two features go
+constant and carry nothing. And none of it reaches the boards, which say UFC fights only and
+still mean it.
+
 Ratings carry strength of schedule. Every fighter starts at 1000 and each result moves
 both fighters by how surprising it was, so beating a contender is worth more than beating
 a debutant, and a record built against nobody reads differently from the same record built
@@ -931,6 +976,7 @@ keeps running without the affected feature.
 ```
 bot.py                  Start the bot
 train.py                Download fight data and train the model
+careers.py              Fetch professional careers from ESPN for the model
 evaluate.py             Score the model by rolling origin, and pick its Elo K
 ufcbot/
   bot.py                Bot setup and shared services
@@ -981,6 +1027,7 @@ ufcbot/
     model.py            Training the winner and method models
     scorer.py           The trained model, compiled to run without scikit-learn
     strength.py         How good a fighter was, fitted from every fight at once
+    graph.py            Every professional fight, not just the UFC ones
     rolling.py          Rolling-origin evaluation: every event scored once
     rankings.py         Division and pound-for-pound ratings boards
     prediction.py       A prediction and how it is put together

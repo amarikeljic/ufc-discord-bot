@@ -28,7 +28,7 @@ from .scorer import MODEL_FILE
 log = logging.getLogger(__name__)
 
 CAREER_FILE = "career.pkl"
-CAREER_VERSION = 15
+CAREER_VERSION = 16
 
 # How far back the honest evaluation window reaches when training.
 HOLDOUT_MONTHS = 18
@@ -168,6 +168,8 @@ def refresh(data_dir: str, model_dir: str, *, force_retrain: bool = False, downl
     # Imported here rather than at module scope so that merely importing this
     # module, which the bot does to read the file formats, costs nothing.
     from . import dataset as ds
+    from ..util import normalise
+    from . import graph
     from .career import build_history
     from .model import train
     from .scorer import CompiledModel
@@ -238,7 +240,11 @@ def refresh(data_dir: str, model_dir: str, *, force_retrain: bool = False, downl
 
     dataset = ds.load(data_path)
     newest = dataset.newest_event
-    history = build_history(dataset, keep_snapshots=needs_retrain)
+    # Every professional fight, when the cache is there; the build carries on
+    # without it and the features it feeds simply arrive empty.
+    history = build_history(
+        dataset, keep_snapshots=needs_retrain, graph=graph.load(data_path, normalise=normalise)
+    )
 
     if needs_retrain:
         holdout = date.today() - timedelta(days=30 * HOLDOUT_MONTHS)
