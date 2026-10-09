@@ -300,12 +300,11 @@ class UFCCog(commands.Cog):
             await interaction.followup.send(f"No event matched **{truncate(event, 80)}**.", ephemeral=True)
             return
         picks = await self.bot.storage.pickem_card_picks(interaction.guild_id or 0, found.id)
-        # A pick is nobody's business until its fight locks, or the card would be
-        # a list of answers for whoever asks last.
-        now = discord.utils.utcnow()
-        visible = [pick for pick in picks if pick.locks_at <= now]
-        embed = pickem_picks_embed(found.name, visible, hidden=len(picks) - len(visible))
-        await interaction.followup.send(embed=embed)
+        # Every pick, locked or not. They used to be held back until each fight
+        # locked, so the card could not be read as a list of answers -- but the
+        # board already shows the share behind each fighter as people vote, so
+        # the only thing the delay bought was not saying who was who.
+        await interaction.followup.send(embed=pickem_picks_embed(found.name, picks))
 
     @pickem_picks.autocomplete("event")
     async def pickem_card_autocomplete(

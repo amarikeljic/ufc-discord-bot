@@ -353,16 +353,19 @@ def _card_scores(picks: list[PickemRecord]) -> list[str]:
     ]
 
 
-def pickem_picks_embed(event_name: str, picks: list[PickemRecord], *, hidden: int = 0) -> discord.Embed:
-    """Everyone's picks for one card, fight by fight, so they can be compared."""
+def pickem_picks_embed(event_name: str, picks: list[PickemRecord]) -> discord.Embed:
+    """Everyone's picks for one card, fight by fight, so they can be compared.
+
+    Including the fights that have not locked yet. The board beside this one
+    already shows how the room is split on every bout as people vote, so
+    holding these back only hid who was on which side, not what the room
+    thought."""
     embed = discord.Embed(title=truncate(f"🎯 Everyone's picks: {event_name}", 256), colour=PICKEM_TEAL)
 
     players = {pick.user_id for pick in picks}
     header = [f"👥 {plural(len(players), 'player')} · {plural(len(picks), 'pick')}"]
-    if hidden:
-        header.append(f"🔒 {plural(hidden, 'pick')} stay hidden until those fights lock")
     if not picks:
-        header = ["Picks appear here once their fights lock." if hidden else "Nobody picked this card."]
+        header = ["Nobody picked this card."]
     embed.description = "\n".join(header)
 
     # Grouped in one pass. Picks arrive in fight order, so a dict keeps that

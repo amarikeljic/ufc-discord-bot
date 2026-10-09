@@ -278,11 +278,22 @@ def test_a_cards_picks_are_grouped_by_fight_with_who_backed_whom(soon):
     assert embed.fields[0].name == "Fighter A vs. Fighter B"
 
 
-def test_picks_still_to_lock_are_counted_but_not_shown():
-    embed = pickem_picks_embed("UFC 331", [], hidden=7)
+def test_picks_are_shown_before_their_fights_lock():
+    """They used to be held back until each fight locked. The board beside this
+    one already shows how the room is split as people vote, so the delay only
+    hid who was on which side."""
+    unlocked = datetime.now(UTC) + timedelta(days=5)
+    early = PickemRecord(
+        guild_id=1, user_id=11, espn_event_id="EV", bout_id="B1", event_name="UFC 331",
+        event_start=unlocked, athlete_id="1", athlete_name="Fighter A",
+        opponent_id="2", opponent_name="Fighter B",
+        odds=-150, points_if_right=67, locks_at=unlocked, picked_at=datetime.now(UTC),
+    )
+    embed = pickem_picks_embed("UFC 331", [early])
 
-    assert not embed.fields
-    assert "lock" in embed.description
+    assert embed.fields, "a fight that has not locked is still listed"
+    assert "<@11>" in embed.fields[0].value
+    assert "lock" not in embed.description
 
 
 def test_a_card_nobody_played_says_so():
