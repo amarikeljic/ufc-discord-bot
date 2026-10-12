@@ -112,9 +112,28 @@ class Graph:
     rating: dict[str, float] = field(default_factory=lambda: defaultdict(lambda: GRAPH_START))
     seen: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     _next: int = 0
+    _cursor: date = date.min
+    """How far ``advance_to`` has been asked to go. Only ever forward."""
 
     def advance_to(self, cutoff: date) -> None:
-        """Apply every fight before ``cutoff``. Cheap to call per bout."""
+        """Apply every fight before ``cutoff``. Cheap to call per bout.
+
+        The cursor only moves forward, so asking for an earlier cutoff than the
+        last one cannot be served: the ratings already hold later fights and
+        there is no going back. That is a mistake worth a crash rather than an
+        answer, because the answer is every fight rated by its own result.
+
+        It happens when one graph is handed to two passes over the dataset --
+        building a design matrix per candidate K, say. The second pass finds the
+        graph already at the end of the data, every advance a no-op, and trains
+        on the future. The numbers that come out are not slightly optimistic;
+        they beat the closing line by eleven points of accuracy."""
+        if cutoff < self._cursor:
+            raise ValueError(
+                f"graph already advanced to {self._cursor}, cannot rewind to {cutoff}; "
+                "build a fresh Graph per pass rather than reusing one"
+            )
+        self._cursor = cutoff
         while self._next < len(self.fights):
             on, winner, loser = self.fights[self._next]
             if on >= cutoff:

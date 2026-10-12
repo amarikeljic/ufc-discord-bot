@@ -194,6 +194,33 @@ def test_a_placeholder_never_reaches_the_newcomers():
     assert graph.newcomers(set()) == {}, "four fights against a phantom is no fighter"
 
 
+def test_a_graph_cannot_be_rewound():
+    """One graph handed to two passes over the dataset is the way this goes
+    wrong: the second pass finds it already at the end of the data, every
+    advance a no-op, and every fight rated by its own result. It is worth a
+    crash, because the numbers it produces look like a breakthrough -- eleven
+    points of accuracy over the closing line -- rather than like a bug."""
+    import pytest
+
+    graph = load_from(careers(
+        Ann=[("2020-01-01", "W", "Bob"), ("2021-01-01", "W", "Cal")],
+    ))
+    graph.advance_to(date(2022, 1, 1))
+
+    with pytest.raises(ValueError, match="cannot rewind"):
+        graph.advance_to(date(2020, 6, 1))
+
+
+def test_the_same_cutoff_twice_is_fine():
+    """The replay asks per bout, and two bouts on one card share a date."""
+    graph = load_from(careers(Ann=[("2020-01-01", "W", "Bob")]))
+
+    graph.advance_to(date(2021, 1, 1))
+    graph.advance_to(date(2021, 1, 1))
+
+    assert graph.seen["ann"] == 1, "not applied twice either"
+
+
 def load_from(data: dict) -> Graph:
     from ufcbot.stats.graph import _fights_from
 
