@@ -298,11 +298,20 @@ where they are the closing price on a fight about to happen. The picks board car
 it is the model's opinion, and a price next to it only invites the two to be confused.
 
 All of them come from [Polymarket](https://gamma-api.polymarket.com). ESPN carries a
-sportsbook line too, but only DraftKings and only patchily — checked across 63 bouts on ten
-cards it was the only book ESPN offered at all, and it priced one fight of thirteen on a
-numbered card and none at all on Contender Series, where the market priced every one. UFC's
-official betting partner is bet365, which publishes no public API and does not appear
-anywhere in ESPN's odds feed, so it is not an option.
+sportsbook line too, but not in time to be useful: checked across 63 bouts on ten
+*upcoming* cards it priced one fight of thirteen on a numbered card and none at all on
+Contender Series, where the market priced every one. UFC's official betting partner is
+bet365, which publishes no public API and does not appear anywhere in ESPN's odds feed, so
+it is not an option.
+
+**ESPN's archive of cards that already happened is a different matter,** and the sentence
+above was read as covering it for longer than it should have been. Once a card is over,
+ESPN carries an opening and a closing moneyline for close to every bout on it — 1,062 of
+them from 2024 on. That is no use to a live board and it is the whole basis of
+`benchmark.py` below, which is the only thing that could ever tell us whether the model is
+any good. Coverage follows who ESPN was in business with rather than anything about the
+fights: ESPN BET priced 2024 and 2025 almost completely, then shut down, so there is
+nothing from January to August 2026, and DraftKings picks up from that September.
 
 A prediction market price is a probability rather than a bookmaker's line: 0.545 means a
 54.5% favourite, which reads as -120. Because the two sides sum to 1 it carries no
@@ -555,6 +564,49 @@ If the fight data stops arriving — upstream moves, a download keeps failing �
 carry on drawing from whatever was last downloaded, which looks exactly like everything
 working. So once the newest card has been missing for four days the bot says so once, in
 the same channel as the rest of its news, and says what still works meanwhile.
+
+### Against the market
+
+Every other measurement here compares one version of the model with another, which cannot
+say whether the thing is any good — only whether it moved. `python odds.py` then `python
+benchmark.py` compares it with the closing price, which is thousands of people with money
+at stake. On 910 fights across 85 cards from 2024, scored under the same rolling origin as
+everything else:
+
+| | log loss | accuracy | mean distance from even money |
+| --- | --- | --- | --- |
+| Model | 0.6254 | 64.8% | 0.124 |
+| Opening line | 0.6001 | 67.7% | 0.158 |
+| Closing line | **0.5931** | **69.7%** | 0.175 |
+
+The market wins, and not marginally: **+0.0323 nats, 95% [+0.0132, +0.0513]**, with 999 of
+1,000 paired draws against the model. Blending the two at any weight from 10% to 50% is
+indistinguishable from the closing line alone, so the model carries nothing the price does
+not already have.
+
+The whole deficit sits in lopsided fights — **+0.0726 nats, 95% [+0.0392, +0.1040]** where
+the market is past 70%, the only band that separates — and the reason is in the last
+column. The model will not commit. Where the market says 85% it says 74%, and the market is
+right to. Neither a regularisation grid extended down to 0.0002 nor Platt scaling fixed
+that; both came back worse. What is missing is information, not tuning: late money,
+injuries, a camp that went badly, a weight cut that did not.
+
+**So there is no value pick, and pick'em should not offer one.** Staking wherever the model
+disagrees with the price loses 5 to 7% of everything staked and is right on 38% of the 184
+fights the two disagree about. It finds fights the model is wrong about, not mispriced ones.
+
+Two things in the model's favour, neither of them an edge yet. Pick'em pays the price when
+a pick was made and its board opens days before a card is sharply priced, and at the
+opening price backing the model returned **+2.29%** where backing the favourite returned
+-1.91% — the only positive figure anywhere here, and still inside its own interval at 95%
+[-3.21%, +7.90%]. And on the 529 fights where the line moved more than three points, the
+model leaned the way it went **54.4% of the time, 95% [50.5%, 58.5%]**. That one is
+conclusive, if small: the model holds a little that the opening price has not absorbed.
+
+The archive is also what makes any of this auditable. `odds.py` stores the raw payload per
+bout rather than parsed numbers, because the first pass read the moneyline one level too
+shallow, concluded the archive was empty, and the only way to find out was to crawl the
+whole thing again.
 
 ### When ESPN stops answering
 
@@ -1015,6 +1067,8 @@ bot.py                  Start the bot
 train.py                Download fight data and train the model
 careers.py              Fetch professional careers from ESPN for the model
 evaluate.py             Score the model by rolling origin, and pick its Elo K
+odds.py                 Fetch the sportsbook archive ESPN keeps for past cards
+benchmark.py            Score the model against the closing line
 ufcbot/
   bot.py                Bot setup and shared services
   config.py             Settings from .env
