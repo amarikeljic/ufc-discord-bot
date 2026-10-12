@@ -12,6 +12,13 @@ Incremental: the cache is keyed by fighter and only the missing ones are asked
 for. A first run over an empty cache is a few thousand requests and the better
 part of an hour; afterwards it is a handful per card.
 
+It goes round until nothing new is wanted, which takes three or four passes from
+cold. One pass is not the crawl: the regional opponents are read out of the
+careers already cached, so an empty cache has none to read and the first pass
+fetches the UFC and the booked cards alone -- about 2,700 of an eventual 5,000.
+Their opponents are what the graph is for, and they only become visible once
+those fights have been fetched.
+
 Three sources, because the first two cannot see a debutant. Everyone with a UFC
 record, then the regional opponents who keep coming up, then everyone booked on
 a card that has not happened yet -- that last one by id straight off the card,
@@ -50,6 +57,11 @@ UPCOMING_DAYS = 120
 UPCOMING_CARDS = 12
 AT_ONCE = 4
 CHUNK = 50
+# How many times to go round before giving up. Each pass can only see the
+# opponents of careers already fetched, so the frontier moves outwards one
+# step at a time and settles after three or four; the cap is here so that a
+# cycle in the data cannot keep it going all night.
+PASSES = 6
 
 log = logging.getLogger("careers")
 
@@ -244,12 +256,6 @@ async def main(refresh: bool) -> int:
             log.warning("%s was unreadable; starting again.", CAREERS_FILE)
 
     history = build_history(ds.load(data_dir), keep_snapshots=False)
-    # Name -> (name, ESPN id or None). Keyed so the people who turn up from more
-    # than one direction are asked for once.
-    todo: dict[str, tuple[str, str | None]] = {
-        normalise(name): (name, None)
-        for name in _wanted(cached, history, refresh=refresh)
-    }
 
     http = HttpClient()
     await http.start()
@@ -261,29 +267,49 @@ async def main(refresh: bool) -> int:
         except Exception as exc:  # noqa: BLE001 - a bad schedule read is not fatal
             log.warning("Could not read the upcoming cards: %r", exc)
             announced = {}
-        booked = 0
-        for key, pair in announced.items():
-            if cached.get(key):
-                continue
-            if key not in todo:
-                booked += 1
-            # The id wins even where a name search was already queued: it cannot
-            # fetch the wrong man, and it retries whoever the search failed on.
-            todo[key] = pair
 
-        jobs = list(todo.values())
-        print(f"{len(cached)} cached, {len(jobs)} to fetch ({booked} booked but unseen)")
-        if not jobs:
-            return 0
-        for start in range(0, len(jobs), CHUNK):
-            for key, got in await asyncio.gather(
-                *(_one(data, name, espn_id, sem) for name, espn_id in jobs[start : start + CHUNK])
-            ):
-                cached[key] = got
-            tmp = path.with_suffix(path.suffix + ".part")
-            tmp.write_text(json.dumps(cached), encoding="utf-8")
-            tmp.replace(path)
-            print(f"  {min(start + CHUNK, len(jobs))}/{len(jobs)}", flush=True)
+        # Pass after pass until nothing new is wanted.
+        #
+        # One pass is not the crawl. The regional opponents are read out of the
+        # careers already cached, so on an empty cache there are none to read and
+        # the first pass fetches the UFC and the booked cards alone -- about
+        # 2,700 of an eventual 5,000. Their opponents are what the graph is for,
+        # and they only become visible once their fights have been fetched. Run
+        # once and stopped, this left a UFC-only rating that mostly repeats the
+        # ledger's own, and said nothing about it.
+        for attempt in range(1, PASSES + 1):
+            todo: dict[str, tuple[str, str | None]] = {
+                normalise(name): (name, None)
+                for name in _wanted(cached, history, refresh=refresh and attempt == 1)
+            }
+            booked = 0
+            for key, pair in announced.items():
+                if cached.get(key):
+                    continue
+                if key not in todo:
+                    booked += 1
+                # The id wins even where a name search was already queued: it
+                # cannot fetch the wrong man, and it retries a failed search.
+                todo[key] = pair
+
+            jobs = list(todo.values())
+            print(f"pass {attempt}: {len(cached)} cached, {len(jobs)} to fetch "
+                  f"({booked} booked but unseen)")
+            if not jobs:
+                print("nothing left to ask for")
+                break
+            for start in range(0, len(jobs), CHUNK):
+                for key, got in await asyncio.gather(
+                    *(_one(data, name, espn_id, sem)
+                      for name, espn_id in jobs[start : start + CHUNK])
+                ):
+                    cached[key] = got
+                tmp = path.with_suffix(path.suffix + ".part")
+                tmp.write_text(json.dumps(cached), encoding="utf-8")
+                tmp.replace(path)
+                print(f"  {min(start + CHUNK, len(jobs))}/{len(jobs)}", flush=True)
+        else:
+            print(f"stopped after {PASSES} passes; run it again to carry on")
     finally:
         await http.close()
 

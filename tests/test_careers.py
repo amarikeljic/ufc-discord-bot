@@ -190,3 +190,57 @@ def test_an_unreadable_cache_is_left_alone(tmp_path):
 
     assert asyncio.run(top_up_booked(data, tmp_path)) == 0
     assert (tmp_path / "espn_careers.json").read_text(encoding="utf-8") == "{not json"
+
+
+# -- why one pass is not the crawl -------------------------------------------
+
+
+def a_history(**fighters):
+    """Stands in for build_history: UFC fighters and when they last fought."""
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        ledgers={
+            key: SimpleNamespace(name=name, last_fight=None)
+            for key, name in fighters.items()
+        }
+    )
+
+
+def test_a_regional_opponent_is_invisible_until_his_rival_is_cached():
+    """The opponents are read out of the careers already cached, so on an empty
+    cache there are none to read. That is why the crawl goes round more than
+    once: the first pass fetches the UFC and the booked cards, and only then can
+    it see who those fighters came up through. Run once and stopped, it leaves a
+    UFC-only rating that mostly repeats the ledger's own."""
+    from careers import OPPONENT_SEEN, _wanted
+
+    history = a_history(ann="Ann")
+
+    cold = _wanted({}, history, refresh=False)
+
+    assert cold == ["Ann"], "nobody to ask about but the UFC fighter"
+
+    # Now Ann's career is in, and she came up fighting the same man repeatedly.
+    cached = {
+        "ann": {"fights": [
+            {"on": f"20{i:02d}-01-01", "result": "W", "opponent": "Regional Guy"}
+            for i in range(OPPONENT_SEEN)
+        ]},
+    }
+
+    warm = _wanted(cached, history, refresh=False)
+
+    assert "Regional Guy" in warm, "visible only on the pass after Ann was fetched"
+
+
+def test_an_opponent_seen_once_is_left_in_the_long_tail():
+    """Below the threshold it is 14,000 fighters seen once each."""
+    from careers import _wanted
+
+    history = a_history(ann="Ann")
+    cached = {"ann": {"fights": [
+        {"on": "2020-01-01", "result": "W", "opponent": "Passing Stranger"},
+    ]}}
+
+    assert "Passing Stranger" not in _wanted(cached, history, refresh=False)

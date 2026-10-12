@@ -396,7 +396,13 @@ backup. It is the one thing in the data directory that cannot be rebuilt from up
 a volume is not a backup — point it off the host.
 
 `python careers.py` builds the cache and is incremental — a first run is a few thousand
-requests, afterwards a handful per card. It is a separate job because the refresh runs on a
+requests, afterwards a handful per card. **It goes round until nothing new is wanted**,
+three or four passes from cold, because one pass is not the crawl: the regional opponents
+are read out of the careers already cached, so an empty cache has none to read and the
+first pass fetches the UFC fighters and the booked cards alone — about 2,700 of an
+eventual 5,000. Their opponents are the whole point, and they only become visible once
+those fights have been fetched. Stopped after one pass it leaves a UFC-only rating that
+largely repeats the one the ledger already carries. It is a separate job because the refresh runs on a
 timer and this does not belong on one. **The bot runs without it**: the two features go
 constant and carry nothing. And none of it reaches the boards, which say UFC fights only and
 still mean it.
