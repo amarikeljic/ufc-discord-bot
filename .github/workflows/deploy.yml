@@ -17,6 +17,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Before the build, because a push to main is the deploy and until now a red
+      # suite shipped exactly like a green one.
+      #
+      # In a container, on the same base image the bot ships on, rather than in a
+      # virtualenv on the runner. The runner is somebody's server: it is known to
+      # have Docker, because the next step builds an image with it, where assuming
+      # a python3 that can make a venv would turn one missing apt package into a
+      # deploy that cannot run at all. The pip cache is a named volume, so numpy
+      # and scikit-learn are fetched once rather than once a push.
+      #
+      # It writes nothing into the checkout. The container is root and the
+      # checkout is the runner's, so a .pytest_cache or a __pycache__ left behind
+      # belongs to root, and the next run's actions/checkout cannot clean it --
+      # which fails a deploy days later for no reason anybody would connect to
+      # this step.
+      - name: Run the tests
+        run: |
+          docker run --rm \
+            -v "$PWD":/src \
+            -w /src \
+            -v ufcbot-pip-cache:/root/.cache/pip \
+            -e PYTHONDONTWRITEBYTECODE=1 \
+            python:3.13-slim \
+            sh -ec 'pip install --quiet -r requirements-dev.txt
+                    python -m pytest -q -p no:cacheprovider'
+
       - name: Build the image
         run: docker build -t ufc-discord-bot .
 
