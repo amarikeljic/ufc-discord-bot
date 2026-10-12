@@ -310,6 +310,23 @@ class StatsService:
     def suggest(self, name: str, limit: int = 5) -> list[str]:
         return self.names.suggest(name, limit) if self.names else []
 
+    def _newcomer(self, name: str) -> FighterCareer | None:
+        """A stand-in for a fighter with no UFC record, carrying what the graph knows.
+
+        Every UFC-derived feature is simply absent, which the model imputes; what
+        it does have is the rating earned everywhere else. Without that rating
+        there is nothing here the model has not already got from the opponent, so
+        an unrecognised name still gets no pick.
+        """
+        if self.careers is None:
+            return None
+        standing = self.careers.graph_standing.get(normalise(name))
+        if standing is None:
+            return None
+        ledger = Ledger(name=name)
+        ledger.graph_elo, ledger.graph_fights = standing
+        return FighterCareer(ledger=ledger, info=None)
+
     def career(self, name: str) -> FighterCareer | None:
         if self.careers is None:
             return None
@@ -338,12 +355,27 @@ class StatsService:
         on: date | None = None,
         weight_class: str | None = None,
     ) -> Prediction | None:
-        """Win probability for A over B, or None if either fighter is unknown."""
+        """Win probability for A over B, or None when there is too little to go on.
+
+        A fighter the UFC has never seen has no ledger, and until the bot could
+        read a professional record that was the end of it -- two to four fights
+        a card showed no pick at all. The graph knows those careers now, so one
+        newcomer is answerable: called on the 2024-onward holdout a fight with a
+        debutant on one side comes out at 62.5%, against 65.0% for a fight
+        between two established men.
+
+        Both men new is a different matter. Those land at exactly 50.0% over 50
+        fights -- a coin flip -- and the model is no less confident for it, so a
+        pick there would be stated as firmly as any other and wrong half the
+        time. Those still get nothing.
+        """
         if not self.can_predict:
             return None
-        a = self.career(name_a)
-        b = self.career(name_b)
+        a = self.career(name_a) or self._newcomer(name_a)
+        b = self.career(name_b) or self._newcomer(name_b)
         if a is None or b is None:
+            return None
+        if a.ledger.fights == 0 and b.ledger.fights == 0:
             return None
         on = on or date.today()
         key_a, key_b = self.resolve(name_a), self.resolve(name_b)
@@ -366,7 +398,7 @@ class StatsService:
         )
 
     def predict_event(self, event: Event) -> dict[str, Prediction]:
-        """Picks for every bout on a card that has two known fighters, keyed by bout id.
+        """Picks for every bout on a card the model can speak to, keyed by bout id.
 
         A card's picks only change when its fights or the model change, so they are
         remembered: board refreshes and card commands would otherwise re-run the

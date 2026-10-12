@@ -685,6 +685,75 @@ def a_service(tmp_path):
     return service
 
 
+def with_a_newcomer(tmp_path):
+    """A service that knows one UFC fighter and one man who has never been in it."""
+    from ufcbot.stats.names import NameIndex
+    from ufcbot.stats.worker import CareerData
+
+    service = a_service(tmp_path)
+    service.names = NameIndex(["Arnold Allen", "Fresh Signing"])
+    veteran = rated("Arnold Allen", 1180, fights=12, division="Featherweight")
+    service.careers = CareerData(
+        ledgers={"arnold allen": veteran},
+        graph_standing={"fresh signing": (1240.0, 18)},
+    )
+    return service  # ready follows from careers being set
+
+
+def test_a_fighter_the_ufc_has_not_seen_still_has_a_record_somewhere(tmp_path):
+    """No UFC ledger means no UFC features, which the model imputes. What the
+    stand-in carries is the rating earned everywhere else, which is the whole
+    reason a debut can be called at all."""
+    service = with_a_newcomer(tmp_path)
+
+    stand_in = service._newcomer("Fresh Signing")
+
+    assert stand_in is not None
+    assert stand_in.ledger.graph_elo == 1240.0
+    assert stand_in.ledger.graph_fights == 18
+    assert stand_in.ledger.fights == 0, "the UFC really has not seen him"
+    assert stand_in.info is None
+
+
+def test_a_name_nobody_has_heard_of_is_still_nobody(tmp_path):
+    """Without a professional record there is nothing here the model has not
+    already got from the opponent."""
+    service = with_a_newcomer(tmp_path)
+
+    assert service._newcomer("Someone Entirely Invented") is None
+
+
+def test_two_debutants_are_not_worth_calling(tmp_path):
+    """A fight between two men the UFC has never seen comes out at exactly 50.0%
+    over the fifty such fights in the holdout -- a coin flip -- and the model is
+    no less confident for it, so a pick would be stated as firmly as any other
+    and be wrong half the time."""
+    service = with_a_newcomer(tmp_path)
+    service.careers.graph_standing["other newcomer"] = (1190.0, 11)
+    service.names = __import__(
+        "ufcbot.stats.names", fromlist=["NameIndex"]
+    ).NameIndex(["Arnold Allen", "Fresh Signing", "Other Newcomer"])
+    service.model = object()  # far enough in to reach the gate
+
+    assert service.predict("Fresh Signing", "Other Newcomer") is None
+
+
+def test_the_graph_keeps_only_newcomers_worth_keeping():
+    """Every fighter remembered is weight carried for the life of the process,
+    and at one professional fight it is 22,320 of them. Nobody arrives in the
+    UFC on a 2-0 record."""
+    from ufcbot.stats.graph import Graph
+
+    graph = Graph(fights=[])
+    graph.rating.update({"veteran": 1200.0, "journeyman": 980.0, "barely": 1010.0})
+    graph.seen.update({"veteran": 20, "journeyman": 8, "barely": 2})
+
+    kept = graph.newcomers({"veteran"})
+
+    assert set(kept) == {"journeyman"}, "the UFC fighter and the 2-fight man both left out"
+    assert kept["journeyman"] == (980.0, 8)
+
+
 def test_the_name_cache_cannot_be_grown_without_limit(tmp_path):
     """Every name a command is given is remembered, matched or not, and the only
     thing that emptied it was a dataset refresh. A person typing is not a reason
@@ -803,11 +872,11 @@ def test_an_all_time_score_is_not_on_the_rating_scale():
     anything. Two figures on their own scale cannot be read against a rating."""
     from ufcbot.stats.rankings import career_score
 
-    best = rated("Jon Jones", 1300, fights=22, strength=1346, defences=12, titles=14)
-    ordinary = rated("Journeyman", 1030, fights=12, strength=1030)
+    best = rated("Jon Jones", 1300, fights=22, strength=1546, defences=12, titles=14)
+    ordinary = rated("Journeyman", 1030, fights=12, strength=1045)
     poor = rated("Also Ran", 900, fights=12, strength=900)
 
-    assert career_score(best) == 99
+    assert career_score(best) == 88
     assert career_score(ordinary) == 5
     assert career_score(poor) == 0, "floored rather than negative"
 
@@ -818,7 +887,7 @@ def test_nothing_caps_a_career_score():
     a ceiling the scale was never given."""
     from ufcbot.stats.rankings import career_score
 
-    beyond = rated("Someone Better", 1400, fights=30, strength=1500, defences=15, titles=16)
+    beyond = rated("Someone Better", 1400, fights=30, strength=1600, defences=16, titles=18)
 
     assert career_score(beyond) > 100
 

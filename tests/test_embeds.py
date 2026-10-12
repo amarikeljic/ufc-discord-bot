@@ -350,8 +350,10 @@ def test_the_card_scores_only_appear_once_something_has_been_graded(soon):
 
 
 def test_the_picks_board_names_the_fights_it_cannot_call():
-    """A debut has no UFC history to predict from. Dropping the fight silently
-    leaves a board missing a bout with no hint it was ever on the card."""
+    """Two men with no record anywhere leave the model nothing but the base rate,
+    and it is no less confident for it, so it says nothing at all. Dropping the
+    fight silently would leave a board missing a bout with no hint it was ever on
+    the card."""
     embed = picks_board_embed(
         "UFC 333", START, [record("B1", ALLEN, PICO)], locked=False,
         unpicked=[(1, "Mehemmedeli Osmanli vs. Ilimbek Akylbek Uulu")],
@@ -360,7 +362,7 @@ def test_the_picks_board_names_the_fights_it_cannot_call():
 
     assert "Picks for 1 of 2 fights" in text
     assert "Mehemmedeli Osmanli vs. Ilimbek Akylbek Uulu" in text
-    assert "UFC debut" in text
+    assert "No pick" in text and "record to go on" in text
     names = [f.name for f in embed.fields]
     assert names.index("Mehemmedeli Osmanli vs. Ilimbek Akylbek Uulu") == 1, "in its place on the card"
 

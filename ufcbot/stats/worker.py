@@ -28,7 +28,7 @@ from .scorer import MODEL_FILE
 log = logging.getLogger(__name__)
 
 CAREER_FILE = "career.pkl"
-CAREER_VERSION = 16
+CAREER_VERSION = 17
 
 # How far back the honest evaluation window reaches when training.
 HOLDOUT_MONTHS = 18
@@ -53,6 +53,11 @@ class CareerData:
     """Division -> whoever the data last saw win its belt. Thirteen entries."""
     last_title_fight: dict[str, date] = field(default_factory=dict)
     """Division -> when it last had a title fight, for ageing out belt overrides."""
+    graph_standing: dict[str, tuple[float, int]] = field(default_factory=dict)
+    """Rating and fight count for fighters the UFC has never seen.
+
+    Only for them: anybody with a UFC record has a ledger carrying the same
+    two numbers. This is what lets a debut be called at all."""
     fight_count: int = 0
     newest_event: date | None = None
     fingerprint: str = ""
@@ -242,9 +247,8 @@ def refresh(data_dir: str, model_dir: str, *, force_retrain: bool = False, downl
     newest = dataset.newest_event
     # Every professional fight, when the cache is there; the build carries on
     # without it and the features it feeds simply arrive empty.
-    history = build_history(
-        dataset, keep_snapshots=needs_retrain, graph=graph.load(data_path, normalise=normalise)
-    )
+    professional = graph.load(data_path, normalise=normalise)
+    history = build_history(dataset, keep_snapshots=needs_retrain, graph=professional)
 
     if needs_retrain:
         holdout = date.today() - timedelta(days=30 * HOLDOUT_MONTHS)
@@ -271,6 +275,9 @@ def refresh(data_dir: str, model_dir: str, *, force_retrain: bool = False, downl
         meetings=history.meetings,
         champions=history.champions,
         last_title_fight=history.last_title_fight,
+        graph_standing=(
+            professional.newcomers(set(history.ledgers)) if professional is not None else {}
+        ),
         fight_count=dataset.fight_count,
         newest_event=newest,
         fingerprint=digest,

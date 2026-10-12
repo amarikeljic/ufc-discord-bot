@@ -17,8 +17,8 @@ have done.
 - **Predictions.** Win probability for any matchup, plus how the fight is likely to end:
   KO/TKO, submission, unanimous or split decision, with the likeliest finishing technique.
 - **Picks board.** One auto-updating message per upcoming card with every pick and the
-  method it is likely to come by. Fights the model cannot call — a debut has no UFC history
-  to predict from — are named rather than dropped, so the card reads as complete. Picks
+  method it is likely to come by. The few it cannot call — both men new, with no record
+  anywhere — are named rather than dropped, so the card reads as complete. Picks
   lock when the card starts and are graded afterwards. No betting lines: those belong in
   pick'em.
 - **Scorecard.** A running record of the model's accuracy, split by confidence, with the
@@ -1092,12 +1092,17 @@ time. Stop the other one first.
 **"The model is still downloading data and training."** First start takes a minute or
 two. Run `python train.py` beforehand to skip the wait.
 
-**A fighter has no pick or stats.** Every input the model has is built from a fighter's
-UFC record, so a debutant leaves it nothing to work from — not a low confidence, no opinion
-at all. Those fights still appear on the picks board, in their place on the card, reading
-"UFC debut, no fight data yet" instead of a pick. The same goes for a short-notice
-replacement: the fight keeps its place and loses its pick until the new fighter has UFC
-history.
+**A fighter has no pick or stats.** A debutant used to leave the model nothing to work
+from, because every input came from a UFC record. The professional graph changed that: a
+fighter with no UFC history still carries a rating earned everywhere else, so one newcomer
+is answerable. On the 2024-onward holdout a fight with a debutant on one side comes out at
+62.5% accuracy, against 65.0% between two established men.
+
+Both men new is a different matter. Those land at exactly 50.0% over the fifty such fights,
+and the model is no less confident for it, so a pick would be stated as firmly as any other
+and wrong half the time. Those still appear on the board in their place on the card,
+reading "nobody here has a record to go on" instead of a pick — as does any fight where
+neither name is recognised at all.
 
 **A card still shows a fight that was changed.** Fight cards come from ESPN, which can be
 a day or more behind on withdrawals and replacements. The boards follow within about an

@@ -43,10 +43,12 @@ if TYPE_CHECKING:
     from ..stats.prediction import Evaluation
     from ..stats.service import FighterCareer
 
-# Shown in place of a pick for a fight the model cannot call. Every input it has
-# is built from a fighter's UFC record, so a debutant leaves it nothing to work
-# from -- not a low confidence, no opinion at all.
-NO_DATA = "🆕 No pick · UFC debut, no fight data yet"
+# Shown in place of a pick for a fight the model cannot call. One debutant is
+# answerable now -- the professional record carries the rating the UFC ledger
+# cannot -- so this is for the fights where both men are new, or where nobody
+# has a record anywhere. Those come out at a coin flip, and the model is no less
+# confident for it, so saying nothing is the honest answer rather than a timid one.
+NO_DATA = "🆕 No pick · nobody here has a record to go on"
 
 
 def pick_value(

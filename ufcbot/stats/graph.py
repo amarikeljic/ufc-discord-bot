@@ -70,6 +70,12 @@ GRAPH_DIVISOR = 400.0
 # and on exactly the fights being scored. Nobody fights twice inside three days.
 SAFE_GAP = timedelta(days=3)
 
+# Professional fights a newcomer needs before the bot bothers to remember
+# them. At one it is 22,320 fighters and 2.2 MB held for the life of the
+# process; at three it is 4,568 and 457 KB, and nobody arrives in the UFC on
+# a 2-0 record.
+NEWCOMER_FLOOR = 3
+
 
 @dataclass(slots=True)
 class Graph:
@@ -108,6 +114,20 @@ class Graph:
     def standing(self, key: str) -> tuple[float, int]:
         """This fighter's rating and how many graph fights are behind it."""
         return self.rating[key], self.seen[key]
+
+    def newcomers(self, known: set[str], *, floor: int = NEWCOMER_FLOOR) -> dict[str, tuple[float, int]]:
+        """What is known about fighters who have never been in the UFC.
+
+        Carried into the bot so a debut can be called at all: a fighter with
+        no UFC record has no ledger to read, and without this the only honest
+        answer was no answer. The floor keeps the regional journeymen out --
+        the UFC does not sign anybody at two professional fights, and every
+        one of them kept is weight the bot carries for the life of a run."""
+        return {
+            key: (value, self.seen[key])
+            for key, value in self.rating.items()
+            if key not in known and self.seen[key] >= floor
+        }
 
 
 def load(data_dir: Path | str, *, normalise) -> Graph | None:
