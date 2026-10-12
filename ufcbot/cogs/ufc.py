@@ -8,7 +8,6 @@ import logging
 import math
 import sys
 from datetime import date, timedelta
-from datetime import time as time_of_day
 from typing import TYPE_CHECKING
 
 import discord
@@ -31,7 +30,7 @@ from ..models import Event
 from ..records import GuildSettings
 from ..stats.rankings import Ranked, pound_for_pound_rank, standing
 from ..ui.fighter import FighterView
-from ..util import central_time, format_duration, resident_memory_mb, truncate
+from ..util import format_duration, resident_memory_mb, truncate
 
 if TYPE_CHECKING:
     from ..bot import UFCBot
@@ -44,13 +43,6 @@ LIVE_HISTORY = timedelta(days=14)
 
 # The boards are rebuilt on the hour rather than on a timer from start-up, so
 # "last updated" means the same thing whenever the bot was last restarted.
-ON_THE_HOUR = [time_of_day(hour=hour) for hour in range(24)]
-
-# Scheduled events are mirrored once a night, on Central time. A card being added
-# to the calendar is days-ahead news, so the only thing the hour decides is that
-# it does not arrive in the middle of a card.
-MIDNIGHT_CENTRAL = [time_of_day(hour=0, tzinfo=central_time())]
-
 # How long the newest card can be missing upstream before the bot says so. Two
 # days is ordinary lateness; beyond that something is wrong worth knowing about.
 STALE_DATA_AFTER = timedelta(days=4)

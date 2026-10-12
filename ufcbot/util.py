@@ -14,8 +14,10 @@ log = logging.getLogger(__name__)
 
 _TRAILING_OFFSET = re.compile(r"([+-]\d{2})(\d{2})$")
 
-# Where the daily jobs are scheduled from. Not a display setting: everything a
-# member reads is a Discord timestamp, shown in their own timezone.
+# The zone the once-a-night step of the hourly pass is timed against: the
+# scheduled-event sync, which runs when that pass lands at midnight here. Not a
+# display setting -- everything a member reads is a Discord timestamp, shown in
+# their own timezone.
 CENTRAL = "America/Chicago"
 
 
@@ -151,7 +153,7 @@ def central_time() -> tzinfo:
     """US Central time, following daylight saving.
 
     Falls back to a fixed CST offset where the machine has no timezone database,
-    which puts the nightly jobs an hour out over the summer but never stops the
+    which puts the midnight sync an hour out over the summer but never stops the
     bot from starting over it.
     """
     try:

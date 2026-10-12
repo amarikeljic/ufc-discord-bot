@@ -232,7 +232,7 @@ class EventSyncer:
         """Post newly added cards to the configured channel, if there is one.
 
         Lives here rather than in a cog because it describes a sync result, and
-        both the nightly job and ``/ufc sync now`` have one to describe.
+        both the midnight pass and ``/ufc sync now`` have one to describe.
         """
         if not settings.announce_channel_id or not result.new_events:
             return

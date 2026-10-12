@@ -297,8 +297,6 @@ def pickem_card_embed(
     user: discord.abc.User,
     event_name: str,
     picks: list[PickemRecord],
-    *,
-    hidden: int = 0,
 ) -> discord.Embed:
     """One member's picks for one card, with each result."""
     embed = discord.Embed(title=truncate(f"🎯 {user.display_name}: {event_name}", 256), colour=PICKEM_TEAL)
@@ -310,9 +308,7 @@ def pickem_card_embed(
     summary = [f"Record: **{wins}-{losses}** · **{points:,}** pts"]
     if pending:
         summary.append(f"Pending: {plural(len(pending), 'pick')} · up to {sum(p.points_if_right for p in pending):,} pts to win")
-    if hidden:
-        summary.append(f"🔒 {hidden} more picks hidden until those fights lock")
-    if not picks and not hidden:
+    if not picks:
         summary = ["No picks on this card."]
     embed.description = "\n".join(summary)
 

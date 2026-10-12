@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 
 
 def main(force: bool) -> int:
+    from ufcbot.stats.features import describe_feature
     from ufcbot.stats.scorer import MODEL_FILE, CompiledModel
     from ufcbot.stats.worker import refresh
 
@@ -45,7 +46,7 @@ def main(force: bool) -> int:
     if model.importances:
         print("\nMost influential differences between fighters:")
         for name, value in model.importances[:10]:
-            print(f"  {name[2:]:<26} {value:+.4f}")
+            print(f"  {describe_feature(name):<30} {value:+.4f}")
     return 0
 
 

@@ -572,17 +572,21 @@ def test_every_fighter_gets_a_place_of_their_own():
     assert [entry.rank for entry in board] == [1, 2, 3]
 
 
-def test_the_same_rating_goes_to_whoever_got_there_first():
-    """Two fighters on the same number are not equal: one of them has been
-    holding it since before the other arrived, which is to say nobody has taken
-    it off him since."""
+def test_the_same_rating_goes_to_whoever_showed_it_most_recently():
+    """The first version of this rule went the other way -- longest holder
+    first, on the grounds that nobody had taken the number off him -- and it
+    fought the fade. A board that eases absent fighters down was lifting them
+    back up over men who had just fought, and did so in eight of the nine ties
+    on the real boards. Sorting on the name instead would order them
+    alphabetically, which is about their parents."""
     ledgers = {
         "late": rated("Zane Newcomer", 1150, ago=10),
         "early": rated("Adam Holder", 1150, ago=300),
     }
     board = rank_division(ledgers, "Lightweight", on=TODAY)
 
-    assert [entry.name for entry in board] == ["Adam Holder", "Zane Newcomer"]
+    assert [entry.name for entry in board] == ["Zane Newcomer", "Adam Holder"]
+    assert [entry.rank for entry in board] == [1, 2]
     assert board[0].rating == board[1].rating, "the ratings really are equal"
 
 

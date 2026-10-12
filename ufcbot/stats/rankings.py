@@ -168,11 +168,19 @@ def _ordered(
         and (division is None or ledger.division == division)
         and (include_women or not is_womens(ledger.division))
     ]
-    # Equal ratings go to whoever got there first: the fighter who has been
-    # holding that number longest is the one who has not had it taken off him
-    # since. Name breaks what is left, so the same board comes back the same
-    # way twice running, which is what the change watcher compares against.
-    entries.sort(key=lambda entry: (-entry[0], entry[2].last_fight or date.min, entry[2].name))
+    # Equal ratings go to whoever showed it most recently. The first rule here
+    # was the opposite -- longest holder first, on the grounds that nobody had
+    # taken the number off him -- and it fought the fade: a board that eases
+    # absent fighters down was then lifting them back up over the men who had
+    # just fought. It put Gutierrez, last seen in October 2025, above Martinez,
+    # who had fought a fortnight earlier, on the same 1086. Eight of the nine
+    # ties on the boards went that way.
+    #
+    # Name breaks what is left, so the same board comes back the same way twice
+    # running, which is what the change watcher compares against.
+    entries.sort(
+        key=lambda entry: (-entry[0], -(entry[2].last_fight or date.min).toordinal(), entry[2].name)
+    )
     return _ranked(entries, on=on, division=division)
 
 

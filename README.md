@@ -42,10 +42,11 @@ have done.
   underdogs pay more; a wrong pick costs 100 points. The channel keeps an all-time
   leaderboard and one for the card being fought, and both show what the model and the
   favourites scored on the same fights, so you can see whether you beat them.
-- **Ratings.** A board per division and a pound-for-pound board, ranked by the rating the
-  model itself trains on: everyone starts level and a win moves it by how good the fighter
-  beaten was. A rating fades once a fighter has been out over a year, and fighters too
-  close to separate share a rank.
+- **Ratings.** A board per division and a pound-for-pound board. Everyone starts level and
+  a win moves it by how good the fighter beaten was. A rating fades once a fighter has
+  been out over a year, every fighter gets a place of their own, and two on the same
+  number go to whoever showed it most recently. The model walks its own copy of this
+  rating at a different learning rate; the boards are not what it trains on.
 - **Discord scheduled events.** Every upcoming card mirrored into your server's events,
   and ended as soon as the card's last result is in rather than hours later. A card with
   nobody named yet is left off until a fighter is announced.
@@ -177,7 +178,7 @@ and has to survive whatever it finds. Anything that happens once a day is a step
 hourly pass rather than a loop of its own — mirroring the calendar runs on the one pass a
 day that lands at midnight Central.
 
-Everything but live coverage and the nightly sync happens in one pass on the hour, in the
+Everything but live coverage happens in one pass on the hour, in the
 order the steps depend on each other: check for new fight data, grade what has finished,
 then announce what changed and redraw the boards. New ratings are therefore announced and
 drawn by the same pass that downloaded them. The pass is on the hour rather than on a
@@ -405,7 +406,9 @@ how often the opponent has been stopped, and so on, in both directions.
 
 The boosting and regularisation settings were searched over 108 combinations by
 time-series cross-validation inside the training period, never touching the holdout.
-Nothing beat what is here by more than rounding, so nothing was changed.
+Nothing beat what is here by more than rounding, so nothing was changed. That search
+predates both the rolling-origin harness and the dropping of the boosted half, so it is
+history rather than a current claim about the model that ships.
 
 **The winner model used to be a blend too, and the boosted half has been dropped.** Trained
 on the most recent 25, 50, 75 and 100% of history and scored on the same holdout, the two
@@ -471,7 +474,7 @@ before the full walk cut the effect to a third of that. Fixing the grid in advan
 walking the whole period is what made it readable.
 
 The boards keep K=32. `K` sets how widely ratings spread, so at 128 the spread roughly
-triples and `TIE_GAP`, the all-time title points and the career-score divisor would all have
+triples and the all-time title points and the career-score divisor would both have
 to be re-derived — a visible change to every board for a gain of two thousandths of a nat
 that nobody reading one would see. A board wants a readable, stable ranking and the model
 wants log loss; those are different jobs, so the ledger walks both ratings over the same
@@ -498,8 +501,8 @@ raw data are won by the first-listed corner**. A model trained on those rows as 
 scores in the high sixties before it has looked at a single statistic, and cannot be used
 to predict a fight, because you would have to know which fighter to call red.
 
-Win probabilities are close to calibrated as they come out of the blend, and are used as
-they come. Isotonic and Platt calibration were both tried and both made log loss worse on
+Win probabilities are close to calibrated as they come out of the logistic fit, and are
+used as they come. Isotonic and Platt calibration were both tried and both made log loss worse on
 cross-validation: the model is mildly under-confident, but by an amount that moves from
 one period to the next, so a correction fitted on past fights misleads on future ones.
 
@@ -614,15 +617,13 @@ vacated, so on the lineal chain alone the heavyweight belt sat with Jon Jones fr
 years earlier, and Aspinall, whose two heavyweight titles were both interim, showed as
 having never held one.
 
-**The order is a best guess, not a measurement.** Measured across every fight on record,
-100 rating points is worth about 11 points of win rate, so two fighters within about 45
-points of each other are inside a 55/45 edge — and most of a divisional board sits inside
-that. A
-board grouped honestly at that threshold is three tiers rather than fifteen ranks, with
-nine fighters sharing third at flyweight and thirteen of fifteen in one tier at
-welterweight. The ranks are kept because the ordering is still the best available guess and
-a board of three tiers is not one anybody can read, but the note on the board says plainly
-that it is a guess.
+**The order is a best guess, not a measurement.** On the 400-point scale the ratings are
+built with, 100 points is worth about 14 points of win rate, so two fighters within about
+35 points of each other are inside a 55/45 edge — and most of a divisional board sits
+inside that. Grouped honestly at that threshold a board is a handful of tiers rather than
+fifteen ranks. The ranks are kept because the ordering is still the best available guess
+and a board of three tiers is not one anybody can read, but the note on the board says
+plainly that it is a guess.
 
 The 400-point scale the ratings are built on is calibrated, within noise. Tested bucket by
 bucket against what it predicts, in standard errors: 1.7, 0.1, 0.5, 0.2 and 1.4 across gaps
@@ -636,8 +637,9 @@ and a long argument was had about which was right. Both were reading noise. An i
 computed per bucket divides by tiny deviations near zero, which turns that 1.7-sigma bucket
 into a scale of 122 and makes a flat picture look like a broken one.
 
-**Pound for pound shares ranks within five points,** marked `=`; the divisional boards
-number straight through, because each of their lines already says what the gap is worth.
+**Every board numbers straight through.** Fighters within a few points used to share a
+place, marked `=`, and the boards and the fighter card disagreed about when: one numbered
+straight through while the other said "joint 3rd" off the same data.
 The rule is the board and not whether a belt happens to be vacant — tying it to the odds
 column, which disappears when a division has no champion, would have shown the same
 one-point gap as a tie on one board and as two places on the one beside it.
