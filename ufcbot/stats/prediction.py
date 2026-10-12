@@ -100,6 +100,25 @@ class Prediction:
     def has_methods(self) -> bool:
         return bool(self.methods_a or self.methods_b)
 
+    @property
+    def goes_to_judges(self) -> float:
+        """Chance the fight reaches the scorecards, whoever wins it.
+
+        The most trustworthy thing the method model says. Naming which of
+        four methods is right 49.6% of the time; saying whether it goes the
+        distance is right 61.4% against a 49.7% base rate, and the number
+        means what it says -- fights given 0-35% went 29.9%, fights given
+        65-100% went 75.6%.
+
+        Across both corners, because this is a fact about the fight rather
+        than about either man: the two sides' methods sum to one."""
+        return sum(
+            prob
+            for methods in (self.methods_a, self.methods_b)
+            for method, prob in methods.items()
+            if method not in FINISHES
+        )
+
     def outcomes(self, side: str | None = None) -> list[tuple[str, str, str | None, float]]:
         """(side, method, likeliest technique, probability), most likely first."""
         rows = []

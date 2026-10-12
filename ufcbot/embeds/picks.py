@@ -64,6 +64,14 @@ def pick_value(
     """
     lines = [f"🎯 **{keep(favourite)}** {confidence:.0%}  {bar(confidence, 8)}"]
     if prediction is not None and prediction.has_methods:
+        # The distance call first: it is the half of the method model worth
+        # trusting, and it used to be buried inside a four-way guess that is
+        # right half the time and never once says "split decision".
+        judges = prediction.goes_to_judges
+        lines.append(
+            f"{'Distance' if judges >= 0.5 else 'Finish'} "
+            f"**{max(judges, 1 - judges):.0%}**"
+        )
         routes = prediction.outcomes(prediction.favourite_side)
         if routes:
             _, method, technique, prob = routes[0]
@@ -251,6 +259,13 @@ def prediction_embed(
         f"{keep(surname(a.name))} {prediction.prob_a:.0%} {bar(prediction.prob_a)} {prediction.prob_b:.0%} {keep(surname(b.name))}",
         f"Pick: **{keep(prediction.favourite)}**",
     ]
+    if prediction.has_methods:
+        judges = prediction.goes_to_judges
+        lines.append(
+            f"Goes the distance: **{judges:.0%}**"
+            if judges >= 0.5
+            else f"Ends inside the distance: **{1 - judges:.0%}**"
+        )
     outcome = prediction.pick_outcome
     if outcome:
         method, technique, prob = outcome

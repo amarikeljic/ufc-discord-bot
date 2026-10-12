@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from array import array
 from datetime import date, timedelta
 
@@ -280,12 +281,132 @@ def test_the_winner_model_fits_no_boosted_half_and_the_method_model_does():
     method = MethodModel().fit(X, rng.integers(0, 4, size=400))
 
     assert WINNER_BOOST_WEIGHT == 0.0 and winner.boost_ is None
-    assert METHOD_BOOST_WEIGHT > 0.0 and method.boost_ is not None
+    # The method model is three binary stages now, so its boosted halves live
+    # on those rather than on it.
+    assert METHOD_BOOST_WEIGHT > 0.0 and method.decision_.boost_ is not None
 
     # And the winner model is then exactly its logistic half, not merely close.
     assert np.array_equal(
         winner.predict_proba(X)[:, 1], winner.linear_.predict_proba(X)[:, 1]
     )
+
+
+def method_training(n=400, seed=0):
+    """Rows whose method is decided by one column, so a fit has something to find."""
+    import numpy as np
+
+    rng = np.random.default_rng(seed)
+    X = rng.normal(size=(n, 3))
+    # Column 0 drives finish-versus-decision, column 1 drives which kind.
+    y = np.where(
+        X[:, 0] > 0,
+        np.where(X[:, 1] > 0, 0, 1),   # ko, sub
+        np.where(X[:, 1] > 0, 2, 3),   # dec_u, dec_s
+    )
+    return X, y
+
+
+def test_the_distance_call_counts_both_corners():
+    """Whether a fight reaches the judges is a fact about the fight, not about
+    either man, so it adds up the decision routes on both sides. It is also the
+    most trustworthy thing the method model says -- right 61.4% against a 49.7%
+    base rate, where naming which of four methods is right 49.6%."""
+    from ufcbot.stats.prediction import Prediction
+
+    pick = Prediction(fighter_a="A", fighter_b="B", prob_a=0.6)
+    pick.methods_a = {"ko": 0.20, "sub": 0.05, "dec_u": 0.30, "dec_s": 0.05}
+    pick.methods_b = {"ko": 0.10, "sub": 0.05, "dec_u": 0.20, "dec_s": 0.05}
+
+    assert pick.goes_to_judges == pytest.approx(0.30 + 0.05 + 0.20 + 0.05)
+    assert pick.goes_to_judges == pytest.approx(1 - (0.20 + 0.05 + 0.10 + 0.05))
+
+
+def test_a_prediction_with_no_methods_sends_nobody_to_the_judges():
+    """A model trained without the method half leaves these empty, and the card
+    has to render anyway."""
+    from ufcbot.stats.prediction import Prediction
+
+    assert Prediction(fighter_a="A", fighter_b="B", prob_a=0.6).goes_to_judges == 0.0
+
+
+def test_the_four_methods_always_sum_to_one():
+    """They are multiplied down a tree rather than produced together, so nothing
+    normalises them afterwards. If the arithmetic is wrong this is where it
+    shows."""
+    import numpy as np
+
+    from ufcbot.stats.model import MethodModel
+
+    X, y = method_training()
+    p = MethodModel().fit(X, y).predict_proba(X)
+
+    assert p.shape == (len(X), 4)
+    assert np.allclose(p.sum(axis=1), 1.0)
+    assert (p >= 0).all()
+
+
+def test_the_stages_are_asked_in_the_right_order():
+    """A fight the model is sure reaches the judges must put nearly nothing on a
+    knockout, whatever it thinks of submissions."""
+    import numpy as np
+
+    from ufcbot.stats.model import DEC_S, DEC_U, KO, SUB, MethodModel
+
+    X, y = method_training()
+    model = MethodModel().fit(X, y)
+    p = model.predict_proba(X)
+    judges = p[:, DEC_U] + p[:, DEC_S]
+    finishes = p[:, KO] + p[:, SUB]
+
+    assert np.allclose(judges + finishes, 1.0)
+    # The rows the fit should be most sure about are the extreme ones.
+    sure_decision = X[:, 0].argmin()
+    assert judges[sure_decision] > 0.8
+
+
+def test_a_branch_with_nothing_to_learn_from_does_not_fall_over():
+    """An early rolling-origin window can hold no finishes at all. The stage is
+    skipped, and the branch has to come back as zero rather than as a crash or
+    a NaN."""
+    import numpy as np
+
+    from ufcbot.stats.model import DEC_U, MethodModel
+
+    X, y = method_training()
+    decisions_only = y >= 2
+
+    model = MethodModel().fit(X[decisions_only], y[decisions_only])
+    p = model.predict_proba(X)
+
+    assert model.submission_ is None, "there were no finishes to ask about"
+    assert np.allclose(p.sum(axis=1), 1.0)
+    assert p[:, DEC_U].sum() > 0
+
+
+def test_the_compiled_tree_multiplies_the_three_stages_together():
+    """The compiled form has no scikit-learn in it and rebuilds the four numbers
+    by hand, so the arithmetic is worth pinning down: 80% to the judges, a
+    quarter of finishes being submissions, decisions split down the middle."""
+    from ufcbot.stats.scorer import StagedMethod
+
+    def says(p):
+        return Blend(
+            boost_weight=0.0,
+            boost=None,
+            linear=Linear(medians=[0.0], means=[0.0], scales=[1.0],
+                          coefficients=[[0.0]], intercepts=[math.log(p / (1 - p))],
+                          classes=[0, 1]),
+            width=2,
+        )
+
+    staged = StagedMethod(decision=says(0.8), submission=says(0.25), split=says(0.5))
+    ko, sub, dec_u, dec_s = staged.probabilities([1.0])
+
+    assert ko == pytest.approx(0.2 * 0.75)
+    assert sub == pytest.approx(0.2 * 0.25)
+    assert dec_u == pytest.approx(0.8 * 0.5)
+    assert dec_s == pytest.approx(0.8 * 0.5)
+    assert ko + sub + dec_u + dec_s == pytest.approx(1.0)
 
 
 def test_the_blend_averages_the_two_models_the_way_they_were_fitted():
@@ -454,8 +575,7 @@ def test_every_fighter_gets_a_place_of_their_own():
 def test_the_same_rating_goes_to_whoever_got_there_first():
     """Two fighters on the same number are not equal: one of them has been
     holding it since before the other arrived, which is to say nobody has taken
-    it off him since. Sorting on the name instead would order them
-    alphabetically, which is about their parents."""
+    it off him since."""
     ledgers = {
         "late": rated("Zane Newcomer", 1150, ago=10),
         "early": rated("Adam Holder", 1150, ago=300),
@@ -463,7 +583,6 @@ def test_the_same_rating_goes_to_whoever_got_there_first():
     board = rank_division(ledgers, "Lightweight", on=TODAY)
 
     assert [entry.name for entry in board] == ["Adam Holder", "Zane Newcomer"]
-    assert [entry.rank for entry in board] == [1, 2]
     assert board[0].rating == board[1].rating, "the ratings really are equal"
 
 

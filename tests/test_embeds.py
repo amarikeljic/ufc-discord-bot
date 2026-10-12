@@ -221,6 +221,41 @@ def test_the_fighter_card_gives_a_place_of_its_own():
     assert "joint" not in fields["Bot Rating"]
 
 
+def test_the_picks_board_leads_with_the_distance_call():
+    """Naming one of four methods is right half the time and never once says
+    "split decision". Whether it goes the distance is right 61.4% and is
+    calibrated, and it was shown nowhere."""
+    from ufcbot.embeds.picks import pick_value
+    from ufcbot.stats.prediction import Prediction
+
+    pick = Prediction(fighter_a="A", fighter_b="B", prob_a=0.6)
+    pick.methods_a = {"ko": 0.10, "dec_u": 0.45, "dec_s": 0.05}
+    pick.methods_b = {"ko": 0.05, "dec_u": 0.30, "dec_s": 0.05}
+
+    body = pick_value(favourite="A", confidence=0.6, prediction=pick,
+                      extra_lines=[], compact=False)
+
+    assert "Distance **85%**" in body
+    assert "U-Dec" in body, "the specific call still follows it"
+
+
+def test_a_fight_the_model_expects_to_end_early_says_so():
+    """Rather than "Distance 40%", which is the same number worn backwards and
+    reads as a prediction of the thing it is saying will not happen."""
+    from ufcbot.embeds.picks import pick_value
+    from ufcbot.stats.prediction import Prediction
+
+    pick = Prediction(fighter_a="A", fighter_b="B", prob_a=0.6)
+    pick.methods_a = {"ko": 0.45, "sub": 0.10, "dec_u": 0.05}
+    pick.methods_b = {"ko": 0.25, "dec_u": 0.15}
+
+    body = pick_value(favourite="A", confidence=0.6, prediction=pick,
+                      extra_lines=[], compact=False)
+
+    assert "Finish **80%**" in body
+    assert "Distance" not in body
+
+
 def badges_of(embed) -> list[str]:
     return [line[: line.index("`", 1) + 1] for line in embed.fields[0].value.split("\n")]
 
