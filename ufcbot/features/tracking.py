@@ -79,6 +79,15 @@ class Scorecard:
     confidence_sum: float = 0.0
     method_hits: int = 0
     method_total: int = 0
+    method_unnameable: int = 0
+    """Graded fights that ended in a split decision, which no pick can name.
+
+    The method pick is the likeliest of four, and the two decisions come out
+    of one stage as judges*(1-split) and judges*split, so a split is named
+    only where it is the likelier decision. It is 20% of them, so it never
+    is. These are counted rather than excused: the pick really was wrong,
+    but it could not have been right, and a bare 4/10 reads as though it
+    could have been 10/10."""
     technique_hits: int = 0
     technique_total: int = 0
     market_hits: int = 0
@@ -301,6 +310,8 @@ def build_scorecard(since: date | None, events: list[GradedEvent]) -> Scorecard:
             if record.method_correct is not None:
                 card.method_total += 1
                 card.method_hits += int(record.method_correct)
+                if record.result_method == "dec_s":
+                    card.method_unnameable += 1
             if record.technique_correct is not None:
                 card.technique_total += 1
                 card.technique_hits += int(record.technique_correct)

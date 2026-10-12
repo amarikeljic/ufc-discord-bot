@@ -550,6 +550,15 @@ used as they come. Isotonic and Platt calibration were both tried and both made 
 cross-validation: the model is mildly under-confident, but by an amount that moves from
 one period to the next, so a correction fitted on past fights misleads on future ones.
 
+**A split decision is a miss the pick cannot avoid, and the scorecard says so.** The
+method pick is the likeliest of four, and the two decision kinds come out of one stage as
+`judges x (1 - split)` and `judges x split`, so a split is named only where it is the
+likelier decision. It is 838 of 8,935 fights and a fifth of all decisions, so it never is.
+That makes every fight ending in a split an automatic method miss, and "4/10" read as
+though 10 was available when it was 9. The scorecard now counts them and says what the most
+it could have got was. They are counted rather than excused: calling a split decision
+unanimous really is wrong, it just could not have been right.
+
 A disqualification is read as its own result rather than as nothing. It is shown with the
 round it happened in, like any stoppage, but it is not a finish: the model predicts a
 technique for knockouts and submissions only, and nobody finishes anybody by being

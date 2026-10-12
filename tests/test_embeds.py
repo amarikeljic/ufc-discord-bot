@@ -616,3 +616,48 @@ def test_the_legend_names_both_markers():
                                                     pound_for_pound=True, note=True).fields)
 
     assert "🏆 current champion · 🎖️ former champion" in note
+
+
+# -- the method pick's blind spot ---------------------------------------------
+
+
+def a_scorecard(**kwargs):
+    from datetime import date
+
+    from ufcbot.features.tracking import Scorecard
+
+    fields = {"since": date(2026, 1, 1), "correct": 7, "total": 10, "confidence_sum": 6.5}
+    return Scorecard(**{**fields, **kwargs})
+
+
+def test_the_scorecard_says_what_the_method_pick_could_not_have_got():
+    """A split decision is never the likeliest of the four methods -- the two
+    decisions come out of one stage and a split is a fifth of them -- so a fight
+    that ended in one is a miss no pick could have avoided. Four out of ten with
+    nothing said reads as though ten was available."""
+    from ufcbot.embeds.picks import _scorecard_summary
+
+    text = _scorecard_summary(a_scorecard(method_hits=4, method_total=10, method_unnameable=2))
+
+    assert "Winner + method: **4/10**" in text
+    assert "2 split decisions" in text
+    assert "8 was the most it could get" in text
+
+
+def test_a_card_with_no_split_decisions_says_nothing_extra():
+    """The note is about a thing that happened, not a disclaimer."""
+    from ufcbot.embeds.picks import _scorecard_summary
+
+    text = _scorecard_summary(a_scorecard(method_hits=4, method_total=10))
+
+    assert "Winner + method: **4/10**" in text
+    assert "split decision" not in text
+
+
+def test_one_split_decision_is_singular():
+    from ufcbot.embeds.picks import _scorecard_summary
+
+    text = _scorecard_summary(a_scorecard(method_hits=6, method_total=9, method_unnameable=1))
+
+    assert "1 split decision in there" in text, "singular, not '1 split decisions'"
+    assert "8 was the most it could get" in text

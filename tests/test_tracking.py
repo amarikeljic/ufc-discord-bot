@@ -139,3 +139,42 @@ async def test_the_line_is_kept_with_the_pick(storage, soon):
     stored = (await track.records_for("EV1"))[0]
     assert (stored.odds_a, stored.odds_b) == (-160, 135)
     assert stored.market_favourite_athlete == ALLEN.id
+
+
+# -- the method pick's blind spot ---------------------------------------------
+
+
+def graded(bout_id: str, *, method_correct: bool, result_method: str):
+    """One graded prediction, with how the fight actually ended."""
+    from ufcbot.records import PredictionRecord
+
+    return PredictionRecord(
+        espn_event_id="E1", bout_id=bout_id, event_name="UFC 333",
+        event_start=datetime(2026, 5, 1, tzinfo=UTC),
+        athlete_a="A", name_a="Fighter A", athlete_b="B", name_b="Fighter B",
+        prob_a=0.7, weight_class="Lightweight", position=0,
+        winner_athlete="A", correct=True,
+        method="dec_u", method_correct=method_correct, result_method=result_method,
+    )
+
+
+def test_a_split_decision_is_counted_as_a_miss_nobody_could_have_avoided():
+    """Graded wrong, because "unanimous" was wrong. Counted separately, because
+    the four-way pick cannot name a split: the two decisions come out of one
+    stage and a split is a fifth of them, so it is never the likelier one."""
+    from ufcbot.features.tracking import GradedEvent, build_scorecard
+
+    event = GradedEvent(
+        espn_event_id="E1", name="UFC 333", start=datetime(2026, 5, 1, tzinfo=UTC),
+        records=[
+            graded("B1", method_correct=True, result_method="dec_u"),
+            graded("B2", method_correct=False, result_method="dec_s"),
+            graded("B3", method_correct=False, result_method="ko"),
+        ],
+    )
+
+    card = build_scorecard(None, [event])
+
+    assert card.method_total == 3
+    assert card.method_hits == 1
+    assert card.method_unnameable == 1, "the split, and not the knockout it missed"

@@ -319,7 +319,21 @@ def _scorecard_summary(card: Scorecard) -> str:
         lines.append(f"Since {card.since:%b %d, %Y}")
     lines.append(f"Avg confidence: {card.avg_confidence:.0%}")
     if card.method_total:
-        lines.append(f"Winner + method: **{card.method_hits}/{card.method_total}** ({card.method_hits / card.method_total:.0%})")
+        line = (
+            f"Winner + method: **{card.method_hits}/{card.method_total}** "
+            f"({card.method_hits / card.method_total:.0%})"
+        )
+        # A split decision is never the likeliest of the four, so a fight that
+        # ended in one is a miss the pick could not have avoided. Said out
+        # loud, because the fraction on its own reads as if it could have been
+        # whole.
+        if card.method_unnameable:
+            reachable = card.method_total - card.method_unnameable
+            line += (
+                f"\n-# {plural(card.method_unnameable, 'split decision')} in there, "
+                f"which no pick can name, so {reachable} was the most it could get"
+            )
+        lines.append(line)
     if card.market_total:
         lines.append(f"Betting favourites: **{card.market_hits}/{card.market_total}** ({card.market_hits / card.market_total:.0%})")
     if card.disagree_total:
