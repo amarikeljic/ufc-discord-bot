@@ -8,6 +8,7 @@ winner menu per fight, four fights to a page.
 
 from __future__ import annotations
 
+import asyncio
 import math
 from typing import TYPE_CHECKING
 
@@ -54,6 +55,13 @@ class PickerView(discord.ui.View):
         self.guild_id = guild_id
         self.page = page
         self.notice: str | None = None
+        # One interaction at a time. Every callback below rebuilds the view in
+        # place -- clear_items() then add them back -- while awaiting a database
+        # read and, on a pick, a fetch to ESPN. Two clicks landing inside that
+        # window used to interleave: one coroutine emptying the components while
+        # another was halfway through rebuilding them, and both then racing to
+        # edit the same message. That is what picking or paging quickly broke.
+        self._turn_lock = asyncio.Lock()
         self.set_event(event)
 
     def set_event(self, event: Event) -> None:
@@ -77,10 +85,14 @@ class PickerView(discord.ui.View):
             self.add_item(BoutSelect(self, bout, picks.get(bout.id), now))
 
         if self.pages > 1:
-            back = discord.ui.Button(label="◀ Back", style=discord.ButtonStyle.secondary, disabled=self.page == 0, row=4)
+            back = discord.ui.Button(
+                label="◀ Back", style=discord.ButtonStyle.secondary,
+                disabled=self.page == 0, row=4, custom_id="pickem:back",
+            )
             back.callback = self._back
             forward = discord.ui.Button(
-                label="Next ▶", style=discord.ButtonStyle.secondary, disabled=self.page >= self.pages - 1, row=4
+                label="Next ▶", style=discord.ButtonStyle.secondary,
+                disabled=self.page >= self.pages - 1, row=4, custom_id="pickem:next",
             )
             forward.callback = self._forward
             self.add_item(back)
@@ -89,10 +101,14 @@ class PickerView(discord.ui.View):
         return pickem_picker_embed(self.event, picks, page=self.page, pages=self.pages, now=now, notice=self.notice)
 
     async def _turn(self, interaction: discord.Interaction, step: int) -> None:
-        self.page = max(0, min(self.pages - 1, self.page + step))
-        self.notice = None
-        embed = await self.refresh()
-        await interaction.response.edit_message(embed=embed, view=self)
+        # Acknowledged before any work: rebuilding the page reads the database,
+        # and Discord gives an interaction three seconds to be answered at all.
+        await interaction.response.defer()
+        async with self._turn_lock:
+            self.page = max(0, min(self.pages - 1, self.page + step))
+            self.notice = None
+            embed = await self.refresh()
+            await interaction.edit_original_response(embed=embed, view=self)
 
     async def _back(self, interaction: discord.Interaction) -> None:
         await self._turn(interaction, -1)
@@ -134,20 +150,30 @@ class BoutSelect(discord.ui.Select):
             min_values=1,
             max_values=1,
             disabled=status != OPEN,
+            custom_id=f"pickem:bout:{bout.id}"[:100],
+            # Named after the fight, not left to chance. Without this every menu
+            # gets a fresh random id each time the view is rebuilt, and the view
+            # is rebuilt after every pick and every page turn -- so a click made
+            # while the last redraw was still in flight arrived carrying an id
+            # the view had just thrown away, and discord.py discarded it. That
+            # is picking "too fast" and nothing happening.
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer()
         picker = self.picker
+        # The pick itself is saved before queueing, so picking two fights in
+        # quick succession records both even though the view redraws in turn.
         outcome = await picker.service.make_pick(
             picker.guild_id, picker.user_id, picker.event.id, self.bout.id, self.values[0]
         )
-        fresh = await picker.service.load_event(picker.event.id)
-        if fresh is not None:
-            picker.set_event(fresh)  # show the latest odds
-        picker.notice = ("✅ " if outcome.ok else "⚠️ ") + outcome.message
-        embed = await picker.refresh()
-        await interaction.edit_original_response(embed=embed, view=picker)
+        async with picker._turn_lock:
+            fresh = await picker.service.load_event(picker.event.id)
+            if fresh is not None:
+                picker.set_event(fresh)  # show the latest odds
+            picker.notice = ("✅ " if outcome.ok else "⚠️ ") + outcome.message
+            embed = await picker.refresh()
+            await interaction.edit_original_response(embed=embed, view=picker)
         if outcome.ok:
             # The board shows how the room is split, so a pick has just made it
             # wrong. Redrawn once the picking settles rather than on every pick.

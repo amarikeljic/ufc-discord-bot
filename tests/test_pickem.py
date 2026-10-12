@@ -21,6 +21,7 @@ from ufcbot.features.pickem import (
     points_for,
 )
 from ufcbot.records import PredictionRecord
+from ufcbot.ui.pickem import PAGE_SIZE, PickerView
 
 MOICANO = fighter("20", "Renato Moicano")
 ORTEGA = fighter("21", "Brian Ortega")
@@ -284,3 +285,101 @@ def test_the_win_rate_board_ranks_a_better_percentage_above_a_bigger_record():
 
     assert by_win_rate([prolific, accurate])[0] is accurate
     assert by_record([accurate, prolific])[0] is prolific, "the two tables disagree, which is the point"
+
+
+# -- clicking faster than the view can redraw --------------------------------
+
+
+class SlowStorage:
+    """Storage whose reads take long enough for a second click to arrive."""
+
+    def __init__(self, delay=0.02):
+        self.delay = delay
+
+    async def pickem_user_picks(self, guild_id, user_id, event_id):
+        import asyncio
+
+        await asyncio.sleep(self.delay)
+        return []
+
+
+class Recorder:
+    """Stands in for the interaction, remembering what the view looked like."""
+
+    def __init__(self, seen):
+        self.seen = seen
+        self.response = self
+
+    async def defer(self):
+        return None
+
+    async def edit_original_response(self, *, embed, view):
+        self.seen.append(len(view.children))
+
+    async def edit_message(self, *, embed, view):
+        self.seen.append(len(view.children))
+
+
+async def test_the_components_keep_their_names_across_a_redraw():
+    """The view is rebuilt from scratch after every pick and every page turn.
+    Left to itself discord.py gives each menu and button a fresh random
+    custom_id every time, and it looks interactions up by that id -- so a click
+    made while the previous redraw was still in flight arrived naming a
+    component the view had just thrown away, and was discarded without a word.
+    That is what picking or paging too quickly looked like from the outside."""
+    a, b = fighter("1", "Arnold Allen"), fighter("2", "Aaron Pico")
+    start = datetime.now(UTC) + timedelta(days=5)
+    bouts = [bout(f"B{i}", a, b, match=i) for i in range(1, PAGE_SIZE * 3 + 1)]
+    event = card(*bouts, start=start)
+
+    class Service:
+        storage = SlowStorage(delay=0)
+
+        def now(self):
+            return datetime.now(UTC)
+
+    view = PickerView(Service(), event, user_id=1, guild_id=1)
+    await view.refresh()
+    first = [item.custom_id for item in view.children]
+    await view.refresh()
+    again = [item.custom_id for item in view.children]
+
+    assert first == again, "a redraw renamed the components out from under the user"
+    assert len(set(first)) == len(first), "two components cannot share a name"
+    assert any(name == "pickem:next" for name in first)
+
+
+async def test_paging_faster_than_the_redraw_still_leaves_a_whole_view():
+    """Every callback rebuilds the view in place -- clear_items() and then add
+    them back -- while awaiting a database read. Two clicks inside that window
+    used to interleave, so one coroutine emptied the components while another
+    was halfway through putting them back, and the message went out short of
+    its menus."""
+    import asyncio
+
+
+    a, b = fighter("1", "Arnold Allen"), fighter("2", "Aaron Pico")
+    start = datetime.now(UTC) + timedelta(days=5)
+    bouts = [bout(f"B{i}", a, b, match=i) for i in range(1, PAGE_SIZE * 3 + 1)]
+    event = card(*bouts, start=start)
+
+    class Service:
+        storage = SlowStorage()
+
+        def now(self):
+            return datetime.now(UTC)
+
+    view = PickerView(Service(), event, user_id=1, guild_id=1)
+    assert view.pages > 1, "the fixture needs more than one page to have buttons"
+
+    seen: list[int] = []
+    await asyncio.gather(
+        view._turn(Recorder(seen), 1),
+        view._turn(Recorder(seen), 1),
+        view._turn(Recorder(seen), -1),
+    )
+
+    assert len(seen) == 3, "every click answered"
+    # A page always carries its menus; a half-rebuilt view carries fewer.
+    assert all(count >= PAGE_SIZE for count in seen), f"a view went out short: {seen}"
+    assert 0 <= view.page < view.pages
