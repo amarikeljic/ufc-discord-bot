@@ -1100,3 +1100,34 @@ def test_the_dataset_still_counts(tmp_path):
     (tmp_path / FILES[0]).write_text("a,b\n1,3\n", encoding="utf-8")
 
     assert fingerprint(tmp_path) != before
+
+
+def test_a_build_with_no_careers_says_it_had_none():
+    """Nought means the crawl has never run here. The graph is optional and fails
+    safe -- its two features go constant and carry nothing -- so a bot without it
+    looks identical from the outside while being measurably worse, and the only
+    way to tell used to be grepping the logs for it."""
+    from ufcbot.stats.worker import CareerData
+
+    assert CareerData().professional_fights == 0, "nothing claimed when nothing was read"
+
+
+def test_a_build_counts_the_professional_fights_it_read(tmp_path):
+    """What the health line reports, so it has to come from the graph that was
+    actually handed to the build rather than from whether a file exists."""
+    import json
+
+    from ufcbot.stats.graph import CAREERS_FILE, load
+    from ufcbot.util import normalise
+
+    (tmp_path / CAREERS_FILE).write_text(json.dumps({
+        normalise("Ann"): {"espn_id": "1", "name": "Ann", "fights": [
+            {"on": "2020-01-01", "result": "W", "opponent": "Bob", "event": "X"},
+            {"on": "2021-01-01", "result": "W", "opponent": "Cal", "event": "X"},
+        ]},
+    }), encoding="utf-8")
+
+    graph = load(tmp_path, normalise=normalise)
+
+    assert graph is not None
+    assert len(graph.fights) == 2, "two decided fights is what a build would report"

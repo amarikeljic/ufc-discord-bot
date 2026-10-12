@@ -365,6 +365,18 @@ class UFCCog(commands.Cog):
                 health.append("Ratings **up to date**" if not stats.is_behind else "Ratings **behind**")
             else:
                 health.append("Model **ready**")
+            # Whether the professional careers are here, because without them the
+            # bot looks identical from the outside and is measurably worse: the
+            # two graph features go constant and no debut can be called at all.
+            # It shipped that way once and took half an hour of log-reading to
+            # notice, which is what this line is for.
+            if stats.careers is not None:
+                fights = stats.careers.professional_fights
+                health.append(
+                    f"Careers **{fights:,}** fights"
+                    if fights
+                    else "Careers **missing** · run careers.py"
+                )
         embed.add_field(name="Health", value="\n".join(health), inline=True)
 
         if "pandas" in sys.modules:

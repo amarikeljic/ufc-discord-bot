@@ -28,7 +28,7 @@ from .scorer import MODEL_FILE
 log = logging.getLogger(__name__)
 
 CAREER_FILE = "career.pkl"
-CAREER_VERSION = 18
+CAREER_VERSION = 19
 
 # How far back the honest evaluation window reaches when training.
 HOLDOUT_MONTHS = 18
@@ -53,6 +53,14 @@ class CareerData:
     """Division -> whoever the data last saw win its belt. Thirteen entries."""
     last_title_fight: dict[str, date] = field(default_factory=dict)
     """Division -> when it last had a title fight, for ageing out belt overrides."""
+    professional_fights: int = 0
+    """Decided fights the professional graph held when this was built.
+
+    Nought means the crawl has never run here, which is a thing worth being
+    able to see. The graph is optional and fails safe -- the two features it
+    feeds go constant and carry nothing -- so a bot without it looks exactly
+    like a bot with it from the outside, and cost 0.00577 nats and a point of
+    accuracy before anybody thought to grep the logs for it."""
     graph_standing: dict[str, tuple[float, int]] = field(default_factory=dict)
     """Rating and fight count for fighters the UFC has never seen.
 
@@ -293,6 +301,7 @@ def refresh(data_dir: str, model_dir: str, *, force_retrain: bool = False, downl
         graph_standing=(
             professional.newcomers(set(history.ledgers)) if professional is not None else {}
         ),
+        professional_fights=len(professional.fights) if professional is not None else 0,
         fight_count=dataset.fight_count,
         newest_event=newest,
         fingerprint=digest,
