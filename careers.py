@@ -169,6 +169,61 @@ async def _announced(data) -> dict[str, tuple[str, str]]:
     return found
 
 
+# The most fighters the nightly top-up will ask about in one pass. A card
+# announcement brings a handful; this is here so that a bad schedule read or
+# an empty cache cannot turn the bot's housekeeping into the full crawl.
+BOOKED_AT_MOST = 40
+
+
+async def top_up_booked(data, data_dir, *, at_most: int = BOOKED_AT_MOST) -> int:
+    """Fetch careers for fighters booked on a card who have none cached.
+
+    The part of this crawl that cannot wait. Everything else here is built
+    out of fights that already happened and is as true next month as tonight,
+    but a fighter signed from outside the UFC is missing until his debut is
+    over, which is when a rating for him stops being any use.
+
+    Bounded and incremental, so it belongs on a timer where the full crawl
+    does not: a warm cache makes this a handful of requests a week.
+
+    Returns how many careers were added. A non-zero answer changes the
+    dataset fingerprint, so the next refresh rebuilds and the newcomers
+    reach the bot before the card rather than after it.
+    """
+    from ufcbot.stats.graph import CAREERS_FILE
+
+    path = Path(data_dir) / CAREERS_FILE
+    cached: dict = {}
+    if path.exists():
+        try:
+            cached = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            log.warning("%s was unreadable; leaving the nightly top-up alone.", CAREERS_FILE)
+            return 0
+
+    booked = await _announced(data)
+    wanted = [pair for key, pair in booked.items() if not cached.get(key)][:at_most]
+    if not wanted:
+        return 0
+
+    sem = asyncio.Semaphore(AT_ONCE)
+    added = 0
+    for key, got in await asyncio.gather(
+        *(_one(data, name, espn_id, sem) for name, espn_id in wanted)
+    ):
+        cached[key] = got
+        added += bool(got)
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".part")
+    tmp.write_text(json.dumps(cached), encoding="utf-8")
+    # Replaced rather than written in place: the refresh reads this file and
+    # must never see half of it.
+    tmp.replace(path)
+    log.info("Nightly top-up: asked about %d booked fighters, found %d", len(wanted), added)
+    return added
+
+
 async def main(refresh: bool) -> int:
     from ufcbot.sources.espn import UFCData
     from ufcbot.sources.http import HttpClient

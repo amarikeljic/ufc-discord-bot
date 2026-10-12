@@ -132,11 +132,26 @@ class RefreshOutcome:
 
 
 def fingerprint(data_dir: Path) -> str:
-    """A digest of the dataset CSVs, so a rebuild is skipped when nothing moved."""
+    """A digest of everything the build reads, so a rebuild is skipped when
+    nothing moved.
+
+    The professional careers belong in here beside the dataset. They are an
+    input to the same build: the graph features come out of them, and so does
+    graph_standing, which is the only reason a debut can be called at all. Left
+    out, a crawl that picked up a newly signed fighter on the Tuesday changed
+    nothing until the dataset moved -- and the dataset moves when results land,
+    which is after the card he was signed for. He would get a pick the day it
+    stopped being worth having.
+
+    It costs one extra rebuild and retrain per crawl that finds anybody, which
+    is right rather than merely affordable: when the careers change, the
+    features the model trains on change with them.
+    """
     from .dataset import FILES
+    from .graph import CAREERS_FILE
 
     digest = hashlib.sha1()
-    for name in FILES:
+    for name in (*FILES, CAREERS_FILE):
         path = data_dir / name
         digest.update(name.encode("utf-8"))
         digest.update(path.read_bytes() if path.exists() else b"")

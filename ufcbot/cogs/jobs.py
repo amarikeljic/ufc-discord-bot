@@ -88,6 +88,31 @@ class JobsCog(commands.Cog):
         self.channels_loop.cancel()
         self.live_loop.cancel()
 
+    async def _top_up_careers(self) -> None:
+        """Ask ESPN about fighters booked on a card who have no career cached.
+
+        The rest of the career crawl is built out of fights that already
+        happened and keeps for months, so it stays a job somebody runs. This
+        part cannot wait: a fighter signed from outside the UFC is missing from
+        the cache until his debut is over, and a rating for him is worth having
+        before the fight rather than after it.
+
+        A handful of requests against a warm cache, and bounded against a cold
+        one. Failure is logged and dropped -- a missing career costs one pick,
+        where a raised exception here would cost the rest of the nightly pass.
+        """
+        from careers import top_up_booked
+
+        try:
+            found = await top_up_booked(self.bot.data, self.bot.config.data_dir)
+        except Exception:  # housekeeping must survive any one of its steps
+            log.exception("Nightly career top-up failed")
+            return
+        if found:
+            # The careers are part of what the build is fingerprinted on, so the
+            # next refresh rebuilds and the newcomers reach the picks board.
+            log.info("Nightly career top-up added %d; the next refresh will rebuild", found)
+
     async def _sync_calendar(self) -> None:
         """Mirror upcoming cards into each server's scheduled events, once a night.
 
@@ -104,6 +129,7 @@ class JobsCog(commands.Cog):
         # names somewhere to put them.
         if self.bot.config.backup_dir:
             await self.bot.storage.back_up_to(self.bot.config.backup_dir)
+        await self._top_up_careers()
         for settings in await self.bot.storage.guilds_with_sync_enabled():
             guild = self.bot.get_guild(settings.guild_id)
             if guild is None:

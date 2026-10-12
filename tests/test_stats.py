@@ -1051,3 +1051,52 @@ def test_no_fights_is_no_ratings():
     from ufcbot.stats.strength import fit
 
     assert fit([]) == {}
+
+
+# -- what counts as a change worth rebuilding for ----------------------------
+
+
+def test_a_new_career_is_a_reason_to_rebuild(tmp_path):
+    """The careers cache is an input to the build: the graph features come out
+    of it, and so does graph_standing, which is the only thing that lets a debut
+    be called. Left out of the digest, a crawl that found a newly signed fighter
+    on the Tuesday changed nothing until the dataset moved -- and the dataset
+    moves when results land, which is after the card he was signed for."""
+    from ufcbot.stats.dataset import FILES
+    from ufcbot.stats.graph import CAREERS_FILE
+    from ufcbot.stats.worker import fingerprint
+
+    for name in FILES:
+        (tmp_path / name).write_text("a,b\n1,2\n", encoding="utf-8")
+    (tmp_path / CAREERS_FILE).write_text('{"someone": null}', encoding="utf-8")
+    before = fingerprint(tmp_path)
+
+    (tmp_path / CAREERS_FILE).write_text(
+        '{"someone": null, "fresh signing": {"espn_id": "1", "fights": []}}', encoding="utf-8"
+    )
+
+    assert fingerprint(tmp_path) != before, "a crawl that found somebody has to count"
+
+
+def test_a_missing_careers_cache_is_not_an_error(tmp_path):
+    """The file is optional, and the digest has to be stable without it."""
+    from ufcbot.stats.dataset import FILES
+    from ufcbot.stats.worker import fingerprint
+
+    for name in FILES:
+        (tmp_path / name).write_text("a,b\n1,2\n", encoding="utf-8")
+
+    assert fingerprint(tmp_path) == fingerprint(tmp_path)
+
+
+def test_the_dataset_still_counts(tmp_path):
+    from ufcbot.stats.dataset import FILES
+    from ufcbot.stats.worker import fingerprint
+
+    for name in FILES:
+        (tmp_path / name).write_text("a,b\n1,2\n", encoding="utf-8")
+    before = fingerprint(tmp_path)
+
+    (tmp_path / FILES[0]).write_text("a,b\n1,3\n", encoding="utf-8")
+
+    assert fingerprint(tmp_path) != before

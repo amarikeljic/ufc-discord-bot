@@ -401,6 +401,21 @@ timer and this does not belong on one. **The bot runs without it**: the two feat
 constant and carry nothing. And none of it reaches the boards, which say UFC fights only and
 still mean it.
 
+Most of it is a job somebody runs, but **the booked fighters are topped up nightly**, as a
+step of the midnight pass. That part cannot wait for a person: a fighter signed from outside
+the UFC is missing until his debut is over. It is bounded at 40 careers a night so that a
+cold cache cannot turn the housekeeping into the full crawl, and against a warm one it is a
+handful of requests a week and usually none.
+
+The careers cache is part of what the build is fingerprinted on, which is what makes that
+work. It was not, and the consequence was quiet: `graph_standing` is written only when the
+build rebuilds, and the build rebuilds when the dataset moves. The dataset moves when
+results land. So a crawl that found a new signing on the Tuesday reached the picks board
+after the card he was signed for, not before it. A crawl that finds anybody now changes the
+digest, so the next refresh rebuilds and he is answerable in time. It costs one rebuild and
+retrain per crawl that found somebody, which is right rather than merely affordable: when
+the careers change, the features the model trains on change with them.
+
 It asks about three sets of people, because the first two cannot see a debutant: everyone
 with a UFC record, the regional opponents who keep coming up, and everyone booked on a card
 that has not happened yet. That last set is the point of the whole thing — a crawl built out

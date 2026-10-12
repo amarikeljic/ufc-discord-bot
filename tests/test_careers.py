@@ -119,3 +119,74 @@ def test_the_placeholders_the_cards_actually_use(name):
     from ufcbot.util import normalise
 
     assert is_placeholder(normalise(name))
+
+
+# -- the nightly top-up -------------------------------------------------------
+
+
+def cached_file(tmp_path, data: dict):
+    import json
+
+    (tmp_path / "espn_careers.json").write_text(json.dumps(data), encoding="utf-8")
+    return tmp_path
+
+
+def read_cache(tmp_path) -> dict:
+    import json
+
+    return json.loads((tmp_path / "espn_careers.json").read_text(encoding="utf-8"))
+
+
+def test_the_nightly_pass_fetches_a_booked_fighter_nobody_has_cached(tmp_path):
+    """The one part of the crawl that cannot wait for somebody to run it: a
+    fighter signed from outside the UFC is missing until his debut is over."""
+    from careers import top_up_booked
+
+    cached_file(tmp_path, {"arnold allen": {"espn_id": "456", "fights": []}})
+    data = Schedule(event(fighter("Fresh Signing", "123"), fighter("Arnold Allen", "456")))
+
+    added = asyncio.run(top_up_booked(data, tmp_path))
+
+    assert added == 1
+    assert data.histories == ["123"], "only the one nobody had"
+    assert "fresh signing" in read_cache(tmp_path)
+    assert read_cache(tmp_path)["arnold allen"]["espn_id"] == "456", "the cache is kept"
+
+
+def test_a_warm_cache_asks_for_nothing(tmp_path):
+    """Most nights. It must not rewrite the file either, because the file is
+    part of what the build is fingerprinted on and a rewrite would rebuild."""
+    from careers import top_up_booked
+
+    cached_file(tmp_path, {"arnold allen": {"espn_id": "456", "fights": []}})
+    before = (tmp_path / "espn_careers.json").read_bytes()
+    data = Schedule(event(fighter("Arnold Allen", "456")))
+
+    assert asyncio.run(top_up_booked(data, tmp_path)) == 0
+    assert data.histories == []
+    assert (tmp_path / "espn_careers.json").read_bytes() == before, "untouched"
+
+
+def test_the_nightly_pass_will_not_turn_into_the_whole_crawl(tmp_path):
+    """Bounded, so an empty cache or a bad schedule read cannot make the
+    housekeeping pass fetch thousands of careers."""
+    from careers import top_up_booked
+
+    cached_file(tmp_path, {})
+    many = [fighter(f"Someone {i}", str(i)) for i in range(30)]
+    data = Schedule(event(*many))
+
+    asyncio.run(top_up_booked(data, tmp_path, at_most=5))
+
+    assert len(data.histories) == 5
+
+
+def test_an_unreadable_cache_is_left_alone(tmp_path):
+    """Rather than overwritten with whatever tonight happens to find."""
+    from careers import top_up_booked
+
+    (tmp_path / "espn_careers.json").write_text("{not json", encoding="utf-8")
+    data = Schedule(event(fighter("Fresh Signing", "123")))
+
+    assert asyncio.run(top_up_booked(data, tmp_path)) == 0
+    assert (tmp_path / "espn_careers.json").read_text(encoding="utf-8") == "{not json"
