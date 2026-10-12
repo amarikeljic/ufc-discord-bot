@@ -6,6 +6,7 @@ import json
 import logging
 from dataclasses import replace
 from datetime import UTC, date, datetime
+from pathlib import Path
 
 import aiosqlite
 
@@ -40,6 +41,11 @@ def _bool_or_none(value) -> bool | None:
     return None if value is None else bool(value)
 
 
+# How many dated copies to keep. Enough to notice something went wrong a few
+# days ago and still have the day before it.
+BACKUPS_KEPT = 7
+
+
 class Storage:
     def __init__(self, path: str) -> None:
         self._path = path
@@ -63,6 +69,37 @@ class Storage:
                 if column not in existing:
                     await self.db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
                     log.info("Added %s.%s", table, column)
+
+    async def back_up_to(self, directory: str, *, keep: int = BACKUPS_KEPT) -> Path | None:
+        """Copy the database to ``directory``, oldest copies dropped.
+
+        Through SQLite's own backup, not a file copy: the bot writes while this
+        runs, and the write-ahead log holds whatever has not been folded back
+        into the main file yet -- on this database that has been eight times
+        the size of the database. Copying the one file and leaving the log
+        behind gets a backup missing most of the recent rows, which is worse
+        than none for being mistaken for one.
+
+        A volume is not a backup. Pointing this at a mount is what makes it
+        one; pointing it at the same disk only survives a mistake, not the
+        disk."""
+        if self._db is None:
+            return None
+        target = Path(directory)
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+            stamped = target / f"ufcbot-{datetime.now(UTC):%Y%m%d-%H%M}.sqlite3"
+            async with aiosqlite.connect(stamped) as copy:
+                await self._db.backup(copy)
+            for old in sorted(target.glob("ufcbot-*.sqlite3"))[:-keep]:
+                old.unlink(missing_ok=True)
+        except (OSError, aiosqlite.Error):
+            # Never the reason the bot stops: a full disk or a mount that went
+            # away is worth saying loudly and carrying on from.
+            log.exception("Could not back the database up to %s", directory)
+            return None
+        log.info("Database backed up to %s", stamped)
+        return stamped
 
     async def close(self) -> None:
         if self._db is not None:

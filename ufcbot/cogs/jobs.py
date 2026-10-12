@@ -98,6 +98,12 @@ class JobsCog(commands.Cog):
         """
         if datetime.now(central_time()).hour != SYNC_HOUR_CENTRAL:
             return
+        # The database is the only thing here that cannot be rebuilt from
+        # upstream: every pick anybody has made and every graded prediction
+        # lives in it, and a volume is not a backup. Off unless BACKUP_DIR
+        # names somewhere to put them.
+        if self.bot.config.backup_dir:
+            await self.bot.storage.back_up_to(self.bot.config.backup_dir)
         for settings in await self.bot.storage.guilds_with_sync_enabled():
             guild = self.bot.get_guild(settings.guild_id)
             if guild is None:

@@ -378,6 +378,14 @@ order, and Khabib at thirteen is the shortest career it admits. It costs the thi
 divisions: exactly one woman has had twelve UFC featherweight fights, so that board is one
 name long, which is true.
 
+**The database is backed up nightly if you say where.** `BACKUP_DIR` is empty by default
+and nothing is written. Pointed somewhere, the midnight pass copies the database through
+SQLite's own backup rather than copying the file, keeping the last seven. That distinction
+matters here: the write-ahead log has been eight times the size of the database itself, and
+a copy that left it behind would be missing most of the recent rows while looking like a
+backup. It is the one thing in the data directory that cannot be rebuilt from upstream, and
+a volume is not a backup — point it off the host.
+
 `python careers.py` builds the cache and is incremental — a first run is a few thousand
 requests, afterwards a handful per card. It is a separate job because the refresh runs on a
 timer and this does not belong on one. **The bot runs without it**: the two features go

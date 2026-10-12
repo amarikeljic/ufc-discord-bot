@@ -345,3 +345,41 @@ async def test_a_rebuild_keeps_the_places_and_drops_the_ratings(storage):
     after_rebuild = await storage.ranking_state("Lightweight", 10)
     assert after_rebuild["a"].rank == 1, "he was still first, whoever rated him"
     assert after_rebuild["a"].raw is None, "but that number is not this version's"
+
+
+async def test_a_backup_is_a_readable_database_not_a_file_copy(storage, tmp_path):
+    """Taken through SQLite's own backup rather than by copying the file. The bot
+    writes while this runs and the write-ahead log holds whatever has not been
+    folded back in yet -- on the live database that log has been eight times the
+    size of the database itself. A copy that left it behind would be missing most
+    of the recent rows while looking like a backup."""
+    import aiosqlite
+
+    await storage.save_post(1, "picks", "board", channel_id=50, message_id=900, signature="abc")
+
+    first = await storage.back_up_to(str(tmp_path))
+
+    assert first is not None and first.exists()
+    async with aiosqlite.connect(first) as copy:
+        copy.row_factory = aiosqlite.Row
+        rows = await (await copy.execute("SELECT message_id FROM channel_posts")).fetchall()
+    assert [r["message_id"] for r in rows] == [900], "the writes came with it"
+
+
+async def test_old_backups_are_dropped(storage, tmp_path):
+    """They are never read by anything, so nothing would ever notice them filling
+    the disk."""
+    for i in range(5):
+        (tmp_path / f"ufcbot-2026010{i}-0000.sqlite3").write_bytes(b"old")
+
+    await storage.back_up_to(str(tmp_path), keep=3)
+
+    assert len(list(tmp_path.glob("ufcbot-*.sqlite3"))) == 3
+
+
+async def test_nowhere_to_write_is_not_a_reason_to_fall_over(storage, tmp_path):
+    """A full disk or a mount that went away says so and the bot carries on."""
+    blocked = tmp_path / "wall"
+    blocked.write_text("not a directory", encoding="utf-8")
+
+    assert await storage.back_up_to(str(blocked / "under")) is None
