@@ -366,6 +366,18 @@ fought out there the more inflation they bring. That is why the *count* of profe
 fights is a feature beside the rating: it lets the model fit the discount rather than have
 one imposed.
 
+**The all-time boards ask for twelve UFC fights,** and that is where the longevity
+preference lives. The strength fit's shrinkage used to carry it: it shipped at 1.0 because
+the resulting list looked right, which is a view about how much a short career should count
+wearing a statistical parameter's clothes. Cross-validation on held-out bouts says 0.25 --
+0.653 against 0.664 at 1.0, a clean interior minimum -- so the fit uses that now and the
+preference is stated as a number instead. At the honest shrinkage, five fights let Du
+Plessis at 10-1, Evloev at 10-0 and Topuria at 9-1 into the top twelve all time, over
+Anderson Silva. Twelve produces the same ten names the old setting did, in a different
+order, and Khabib at thirteen is the shortest career it admits. It costs the thinnest
+divisions: exactly one woman has had twelve UFC featherweight fights, so that board is one
+name long, which is true.
+
 `python careers.py` builds the cache and is incremental — a first run is a few thousand
 requests, afterwards a handful per card. It is a separate job because the refresh runs on a
 timer and this does not belong on one. **The bot runs without it**: the two features go

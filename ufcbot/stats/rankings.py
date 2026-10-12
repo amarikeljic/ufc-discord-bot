@@ -67,10 +67,22 @@ ACTIVE_WITHIN = timedelta(days=548)
 
 # Below this many UFC fights a rating is mostly where it started.
 MIN_FIGHTS = 3
-# All-time asks what someone did over a career, so it asks for more of one. Five
-# is still low, deliberately: an unbeaten seven-fight run belongs on the board
-# that is about who was ever any good, even before it is a career.
-ALL_TIME_MIN_FIGHTS = 5
+# All-time asks what someone did over a career, so it asks for a career.
+#
+# This is where the longevity preference lives, now that the strength fit's
+# shrinkage is set by cross-validation instead. At the honest shrinkage the fit
+# is confident about short records, and five fights let Du Plessis at 10-1,
+# Evloev at 10-0 and Topuria at 9-1 into the top twelve all time, over Anderson
+# Silva. Twelve keeps the names the old setting produced -- the top ten is the
+# same ten fighters either way, in a different order -- while saying in one
+# number what a regularisation constant used to imply. Khabib, at thirteen, is
+# the shortest career it admits.
+#
+# It costs the thinnest divisions. Exactly one woman has had twelve UFC
+# featherweight fights, so that board is one name long. That is true, and a
+# board saying otherwise would be lowering the bar for a division rather than
+# for a reason.
+ALL_TIME_MIN_FIGHTS = 12
 # What a belt is worth on an all-time board, in rating points.
 #
 # A rating cannot say "beat him three times", because it is transitive: it adds
@@ -292,14 +304,16 @@ def career_points(ledger: Ledger) -> float:
 # used to be on the rating scale and got read against the current board, which
 # is a comparison between two different measurements: Evloev shows 1160 now and
 # 1257 all time, and the 97 points between them are not 97 points of anything.
-# At six to one, Jones is on 99 today and the bottom of a divisional all-time
-# board is in the twenties, so nothing on either board reads as a rating.
+# At nine to one, Jones is on 96 and the bottom of a divisional all-time board is
+# in the twenties, so nothing on either board reads as a rating. It was six while
+# the fit shrank harder; the fit now spreads more than twice as wide, and the
+# divisor follows it to keep the printed number the same size.
 #
 # Nothing caps it, and it is not out of a hundred: whoever passes Jones scores
 # over 100, which is the scale working rather than breaking. Fixed rather than
 # fitted to the field, so a fighter's score does not move when somebody else
 # fights.
-RATING_POINTS_PER_SCORE = 6.0
+RATING_POINTS_PER_SCORE = 9.0
 
 
 def career_score(ledger: Ledger) -> int:

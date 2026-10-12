@@ -38,11 +38,22 @@ log = logging.getLogger(__name__)
 #
 # Without it an unbeaten record has no finite answer -- nothing in the results
 # contradicts "infinitely good" -- so this is what makes a short perfect career
-# merely very good. At 1.0 the top fifteen all time hold no record shorter than
-# nine fights and the best unbeaten five-fight career sits 34th, so it is not
-# letting anybody in on a handful of wins; at 3.0 the whole scale compresses
-# without changing the order much.
-SHRINKAGE = 1.0
+# merely very good.
+#
+# Chosen by cross-validation rather than by eye: held-out bouts drawn at random,
+# five folds, scored on how likely each held-out result was. 0.25 is a clean
+# interior minimum -- 0.653, against 0.655 at 0.5, 0.664 at 1.0 and 0.687 at
+# 0.0625. Random bouts rather than a date split, because this rating is a
+# retrospective one: a 2019 fight is legitimate evidence about a 2015 one, and
+# splitting by date would answer a forecasting question the all-time board never
+# asks.
+#
+# It shipped at 1.0 on the grounds that the resulting list looked right, which is
+# a preference about how much a short career should count wearing a statistical
+# parameter's clothes. The preference is real and it is kept -- as
+# ALL_TIME_MIN_FIGHTS, where it is one number anybody can read and argue with.
+# This one now only does the job it is named for.
+SHRINKAGE = 0.25
 
 # The rating scale the boards are drawn on, so this can be read beside them: a
 # tenfold change in the odds of winning is 400 points, as in the running rating.

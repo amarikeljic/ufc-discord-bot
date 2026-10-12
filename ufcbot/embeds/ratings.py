@@ -152,7 +152,7 @@ def rankings_embed(
                 "Not the rating with the fade taken off: a rating adds up results, so it "
                 "pays for a long career over a good one, and it cannot say *beat him three "
                 "times*. A career judged by the number it ended on is judged by its "
-                "decline. Five or more fights to qualify, and a fighter is listed in the "
+                "decline. Twelve or more UFC fights to qualify, and a fighter is listed in the "
                 "division they fought in most rather than the one they finished in, or "
                 "St-Pierre is a middleweight.\n\n"
                 "Defences are this board's belt, so a two-division champion's are split "
