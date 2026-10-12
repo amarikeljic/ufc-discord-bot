@@ -482,8 +482,18 @@ Neither interval excludes zero, so both are choices between candidates specified
 rather than proven results: take the option the paired evidence favours, report it as
 provisional, and re-test when the evaluation can resolve differences this small.
 
-**That re-test is `python evaluate.py`,** and it is how everything below was decided. A single
-held-out tail could not settle these questions: 117 events gives a 95% interval of about
+**That re-test is `python evaluate.py`,** and it is how everything below was decided — with
+one exception, found and fixed later and worth recording. It swept `ELO_K`, the boards'
+learning rate, when the model walks its own at `MODEL_ELO_K`. The two were separated by the
+same change that introduced the sweep, so it was correct when written and stale by the end
+of the commit that wrote it. The three design matrices it built came out byte-identical,
+which made every K it reported choosing the first of three ties and its "K selected against
+K held at 32" a comparison between one model and itself. It sweeps the model's constant now,
+and builds with the professional graph, which it also omitted. `rolling.walk` refuses two
+candidate Ks whose matrices are identical, so a sweep that sweeps nothing says so rather
+than reporting a result.
+
+A single held-out tail could not settle these questions: 117 events gives a 95% interval of about
 ±0.005 nats on an event-level bootstrap, and the differences worth deciding are a few
 thousandths. Making the holdout longer does not help, because the training set shrinks as it
 grows.

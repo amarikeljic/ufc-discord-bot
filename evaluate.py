@@ -26,9 +26,10 @@ from pathlib import Path
 import numpy as np
 from dotenv import load_dotenv
 
-# Elo learning rates to choose between. Predictions depend only on K/D, so with
-# the divisor fixed at 400 this one grid covers the whole ridge. 32 is what the
-# boards use and what the model has always used.
+# Elo learning rates to choose between, for the rating the model trains on.
+# Predictions depend only on K/D, so with the divisor fixed at 400 this one grid
+# covers the whole ridge. 128 is what ships; 32 is what the boards use, and is in
+# the grid because it is the value this used to be compared against.
 K_VALUES = (32.0, 64.0, 128.0)
 
 # How hard to hold the logistic half back. Coarse and on a log scale: a fine
@@ -43,23 +44,41 @@ def designs_by_k(data_dir: Path, ks=K_VALUES):
     A fighter's rating at a fight depends only on earlier fights, so a full pass
     at each K is leakage-free under any later split by date. That is what makes
     K an ordinary thing to select over rather than a rebuild per step.
+
+    MODEL_ELO_K, not ELO_K. The model walks its own rating and the boards keep
+    theirs, and this swept the boards' one for as long as the two have been
+    separate -- which was the same commit that separated them. The three
+    matrices came out byte-identical, so every K this reported choosing was the
+    first of three ties, and the comparison that set MODEL_ELO_K could not be
+    re-run by the script its own comment points at.
     """
     from ufcbot.stats import career as career_mod
     from ufcbot.stats import dataset as ds
+    from ufcbot.stats import graph as graph_mod
     from ufcbot.stats.career import build_history
     from ufcbot.stats.model import _design_matrix
     from ufcbot.stats.rolling import Design
+    from ufcbot.util import normalise
 
     dataset = ds.load(data_dir)
     out = {}
     for k in ks:
         started = time.time()
-        career_mod.ELO_K = k
-        history = build_history(dataset, keep_snapshots=True)
+        career_mod.MODEL_ELO_K = k
+        # With the professional graph, because the bot trains with it and a model
+        # missing two of its features is not the one whose K is being chosen. A
+        # fresh graph per pass: its cursor only moves forward, so a shared one is
+        # at the end of the data by the second pass and rates every fight by its
+        # own result.
+        history = build_history(
+            dataset,
+            keep_snapshots=True,
+            graph=graph_mod.load(data_dir, normalise=normalise),
+        )
         x, y, dates, _ = _design_matrix(history, dataset.fighters)
         out[k] = Design(x=x, y=y, dates=dates)
         print(f"  K={k:<6g} {x.shape[0]:>6} rows x {x.shape[1]} features   {time.time() - started:.0f}s")
-    career_mod.ELO_K = 32.0
+    career_mod.MODEL_ELO_K = 128.0
     return out
 
 

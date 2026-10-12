@@ -197,6 +197,39 @@ def test_designs_that_disagree_are_refused():
         )
 
 
+def test_a_sweep_that_does_not_sweep_is_refused():
+    """Two Ks whose matrices are identical means K is not being varied, and
+    every choice reported is the first of a set of ties. The caller builds one
+    matrix per K by setting a module constant before each pass, and there are
+    two such constants -- the boards' rating and the model's -- so setting the
+    wrong one produces exactly this and looks like a working experiment. It is
+    what evaluate.py did for as long as the two were separate.
+    """
+    same, also = design(FIGHTS, k=32.0), design(FIGHTS, k=32.0)
+
+    with pytest.raises(ValueError, match="not being varied"):
+        walk(
+            {32.0: same, 128.0: also},
+            start=date(2010, 1, 1),
+            candidates=[Candidate(32.0, 0.02), Candidate(128.0, 0.02)],
+            fit=fit,
+        )
+
+
+def test_one_k_on_its_own_is_not_a_sweep_to_refuse():
+    """Holding K still and selecting only over C is a legitimate walk."""
+    base = design(FIGHTS, k=32.0)
+
+    result = walk(
+        {32.0: base, 128.0: base},
+        start=date(2010, 1, 1),
+        candidates=[Candidate(32.0, 0.005), Candidate(32.0, 0.02)],
+        fit=fit,
+    )
+
+    assert result.fights > 0, "identical matrices are fine when only one K is asked for"
+
+
 def test_comparing_two_walks_pairs_them_on_the_same_events():
     """Unpaired, the comparison carries both walks' luck. Paired, the shared
     luck cancels, which is what made the K test sharp enough to be worth

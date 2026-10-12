@@ -45,6 +45,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import date, timedelta
+from itertools import pairwise
 
 import numpy as np
 
@@ -173,6 +174,22 @@ def walk(
     for design in designs.values():
         if not np.array_equal(design.dates, dates) or not np.array_equal(design.y, reference.y):
             raise ValueError("the designs disagree about which fights they hold")
+
+    # And they must actually differ, or selecting over K is selecting over
+    # nothing. The caller builds one matrix per K by setting a module constant
+    # before each pass, and setting the wrong one leaves three identical
+    # matrices, every choice the first of three ties, and an output that reads
+    # like a result. That is what happened here for as long as the model and the
+    # boards have had separate learning rates.
+    ks = sorted({candidate.k for candidate in candidates})
+    for earlier, later in pairwise(ks):
+        if np.array_equal(
+            np.nan_to_num(designs[earlier].x), np.nan_to_num(designs[later].x)
+        ):
+            raise ValueError(
+                f"the designs for K={earlier:g} and K={later:g} are identical, so K "
+                "is not being varied; check which constant the caller is setting"
+            )
 
     events = np.unique(dates[dates >= start])
     probabilities: list[np.ndarray] = []
