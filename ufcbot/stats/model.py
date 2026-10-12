@@ -85,11 +85,23 @@ WINNER_BOOST_WEIGHT = 0.0
 # them without re-running both measurements.
 METHOD_BOOST_WEIGHT = 0.35
 
-# How hard the logistic half is held back, searched over 108 combinations by
-# time-series cross-validation inside the training period. Named rather than
-# inline so the rolling-origin walk can select over it without a second copy
-# of the pipeline drifting away from this one.
-LOGISTIC_C = 0.02
+# How hard the logistic half is held back. Named rather than inline so the
+# rolling-origin walk can select over it without a second copy of the pipeline
+# drifting away from this one.
+#
+# 0.02 came out of a cross-validated search over 108 combinations inside the
+# training period. Rolling origin prefers 0.005, and says so from three
+# directions: with K held at the shipped 128 it scores 0.64445 against 0.64530
+# over 446 events, -0.00085 nats with 94.8% of paired draws behind it; the full
+# K sweep picked it in 32 of 45 windows; and the walk behind benchmark.py picked
+# it in all twelve blocks of its own.
+#
+# The interval is [-0.00188, +0.00016] and so straddles zero. This is therefore
+# a choice between candidates named in advance rather than a result -- take what
+# the paired evidence favours, hold it as provisional, re-test as events
+# accumulate. The direction is the part worth trusting: every measurement that
+# varies it wants the model held back less than this was holding it.
+LOGISTIC_C = 0.005
 
 # A compiled model must agree with the estimator it came from this closely.
 PARITY_TOLERANCE = 1e-9
