@@ -12,6 +12,13 @@ Incremental: the cache is keyed by fighter and only the missing ones are asked
 for. A first run over an empty cache is a few thousand requests and the better
 part of an hour; afterwards it is a handful per card.
 
+Three sources, because the first two cannot see a debutant. Everyone with a UFC
+record, then the regional opponents who keep coming up, then everyone booked on
+a card that has not happened yet -- that last one by id straight off the card,
+since a crawl built out of past fights only learns a new signing exists once his
+debut is over, which is when a rating for him stops being any use. Run it in the
+week before a card and the debuts on it have ratings.
+
 The bot runs perfectly well without the file. Its absence costs the two graph
 features, which go constant and carry nothing.
 """
@@ -36,44 +43,62 @@ OPPONENT_SEEN = 3
 # Anyone who fought this recently is re-fetched with --refresh, since their
 # career has grown since it was cached.
 RECENT = timedelta(days=120)
+# How far ahead to read announced cards, and how many of them. The UFC
+# announces a bout a few weeks out and books three months ahead, so this
+# reaches past everything booked without asking for pages that do not exist.
+UPCOMING_DAYS = 120
+UPCOMING_CARDS = 12
 AT_ONCE = 4
 CHUNK = 50
 
 log = logging.getLogger("careers")
 
 
-async def _one(data, name: str, sem: asyncio.Semaphore):
+async def _search(data, name: str, key: str) -> str | None:
+    """The ESPN id for a name, or None when nothing comes back matching it.
+
+    Exact on the normalised name on purpose. A near miss here does not give a
+    worse career, it gives somebody else's."""
+    from ufcbot.util import normalise
+
+    try:
+        matches = await data.search_fighters(name, limit=3)
+    except Exception as exc:  # noqa: BLE001 - one bad name must not stop the crawl
+        log.debug("search failed for %r: %r", name, exc)
+        return None
+    for stub in matches:
+        if normalise(stub.display_name) == key:
+            return stub.id
+    return None
+
+
+async def _one(data, name: str, espn_id: str | None, sem: asyncio.Semaphore):
     from ufcbot.util import normalise
 
     key = normalise(name)
     async with sem:
-        try:
-            matches = await data.search_fighters(name, limit=3)
-        except Exception as exc:  # noqa: BLE001 - one bad name must not stop the crawl
-            log.debug("search failed for %r: %r", name, exc)
-            return key, None
-        for stub in matches:
-            if normalise(stub.display_name) != key:
-                continue
-            try:
-                history = await data.fighter_history(stub.id)
-            except Exception as exc:  # noqa: BLE001
-                log.debug("history failed for %r: %r", name, exc)
+        if espn_id is None:
+            espn_id = await _search(data, name, key)
+            if espn_id is None:
                 return key, None
-            return key, {
-                "espn_id": stub.id,
-                "name": stub.display_name,
-                "fights": [
-                    {
-                        "on": e.on.date().isoformat() if e.on else None,
-                        "result": e.result,
-                        "opponent": e.opponent,
-                        "event": e.event,
-                    }
-                    for e in history if e.on
-                ],
-            }
-    return key, None
+        try:
+            history = await data.fighter_history(espn_id)
+        except Exception as exc:  # noqa: BLE001
+            log.debug("history failed for %r: %r", name, exc)
+            return key, None
+        return key, {
+            "espn_id": espn_id,
+            "name": name,
+            "fights": [
+                {
+                    "on": e.on.date().isoformat() if e.on else None,
+                    "result": e.result,
+                    "opponent": e.opponent,
+                    "event": e.event,
+                }
+                for e in history if e.on
+            ],
+        }
 
 
 def _wanted(cached: dict, history, *, refresh: bool) -> list[str]:
@@ -111,12 +136,46 @@ def _wanted(cached: dict, history, *, refresh: bool) -> list[str]:
     return list(dict.fromkeys(todo))
 
 
+async def _announced(data) -> dict[str, tuple[str, str]]:
+    """Everyone booked on a card that has not happened yet, with their ESPN id.
+
+    The rest of this crawl is built out of fights that already happened, so a
+    fighter signed from outside the UFC is missing from it until their debut is
+    over -- which is exactly when a rating for them stops being any use. These
+    are the people the professional graph was built for.
+
+    By id straight off the card rather than by name: a fighter nobody has
+    published before is also the kind of name a search does not match, and the
+    card has already told us who he is."""
+    from ufcbot.stats.graph import is_placeholder
+    from ufcbot.util import normalise
+
+    found: dict[str, tuple[str, str]] = {}
+    for summary in await data.upcoming_events(days=UPCOMING_DAYS, limit=UPCOMING_CARDS):
+        event = await data.get_event(summary.id)
+        if event is None:
+            continue
+        for bout in event.bouts:
+            for fighter in bout.fighters:
+                if not fighter.display_name or not fighter.id:
+                    continue
+                key = normalise(fighter.display_name)
+                if is_placeholder(key):
+                    # A corner still to be filled. ESPN gives it an athlete id
+                    # and a history like anybody else, and fetching one is how a
+                    # card's placeholder becomes a fighter with a rating.
+                    continue
+                found.setdefault(key, (fighter.display_name, fighter.id))
+    return found
+
+
 async def main(refresh: bool) -> int:
     from ufcbot.sources.espn import UFCData
     from ufcbot.sources.http import HttpClient
     from ufcbot.stats import dataset as ds
     from ufcbot.stats.career import build_history
     from ufcbot.stats.graph import CAREERS_FILE
+    from ufcbot.util import normalise
 
     load_dotenv()
     data_dir = Path(os.getenv("DATA_DIR", "data"))
@@ -130,25 +189,46 @@ async def main(refresh: bool) -> int:
             log.warning("%s was unreadable; starting again.", CAREERS_FILE)
 
     history = build_history(ds.load(data_dir), keep_snapshots=False)
-    todo = _wanted(cached, history, refresh=refresh)
-    print(f"{len(cached)} cached, {len(todo)} to fetch")
-    if not todo:
-        return 0
+    # Name -> (name, ESPN id or None). Keyed so the people who turn up from more
+    # than one direction are asked for once.
+    todo: dict[str, tuple[str, str | None]] = {
+        normalise(name): (name, None)
+        for name in _wanted(cached, history, refresh=refresh)
+    }
 
     http = HttpClient()
     await http.start()
     data = UFCData(http)
     sem = asyncio.Semaphore(AT_ONCE)
     try:
-        for start in range(0, len(todo), CHUNK):
+        try:
+            announced = await _announced(data)
+        except Exception as exc:  # noqa: BLE001 - a bad schedule read is not fatal
+            log.warning("Could not read the upcoming cards: %r", exc)
+            announced = {}
+        booked = 0
+        for key, pair in announced.items():
+            if cached.get(key):
+                continue
+            if key not in todo:
+                booked += 1
+            # The id wins even where a name search was already queued: it cannot
+            # fetch the wrong man, and it retries whoever the search failed on.
+            todo[key] = pair
+
+        jobs = list(todo.values())
+        print(f"{len(cached)} cached, {len(jobs)} to fetch ({booked} booked but unseen)")
+        if not jobs:
+            return 0
+        for start in range(0, len(jobs), CHUNK):
             for key, got in await asyncio.gather(
-                *(_one(data, n, sem) for n in todo[start : start + CHUNK])
+                *(_one(data, name, espn_id, sem) for name, espn_id in jobs[start : start + CHUNK])
             ):
                 cached[key] = got
             tmp = path.with_suffix(path.suffix + ".part")
             tmp.write_text(json.dumps(cached), encoding="utf-8")
             tmp.replace(path)
-            print(f"  {min(start + CHUNK, len(todo))}/{len(todo)}", flush=True)
+            print(f"  {min(start + CHUNK, len(jobs))}/{len(jobs)}", flush=True)
     finally:
         await http.close()
 

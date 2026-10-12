@@ -154,6 +154,46 @@ def test_a_cache_with_junk_entries_keeps_the_good_ones(tmp_path):
     assert len(graph.fights) == 1
 
 
+def test_a_corner_nobody_has_filled_is_not_a_fighter():
+    """ESPN hands a card's unfilled corner an athlete id and a fight history like
+    anybody else's. Rated, it collects a result from every card it ever appears
+    on and becomes a fighter called TBA, who the bot would then pick by name to
+    beat somebody real."""
+    graph = load_from(careers(
+        Ann=[("2020-01-01", "W", "TBA"), ("2020-06-01", "W", "Bob")],
+        Cal=[("2021-01-01", "L", "Opponent TBA")],
+        Dee=[("2021-06-01", "W", "TBD")],
+    ))
+
+    assert [f[1:] for f in graph.fights] == [("ann", "bob")]
+    graph.advance_to(date(2030, 1, 1))
+    assert "tba" not in graph.rating
+    assert "opponent tba" not in graph.rating
+    assert "tbd" not in graph.rating
+
+
+def test_a_real_name_is_not_mistaken_for_a_placeholder():
+    """On whole words, so a man is not dropped for the letters in his name."""
+    from ufcbot.stats.graph import is_placeholder
+
+    assert is_placeholder("tba")
+    assert is_placeholder("opponent tba")
+    assert is_placeholder("to be announced")
+    assert not is_placeholder("tbasa ngoma"), "a name that merely starts with it"
+    assert not is_placeholder("otba")
+
+
+def test_a_placeholder_never_reaches_the_newcomers():
+    """Nothing can carry one into the bot, because nothing rates one."""
+    graph = load_from(careers(
+        Ann=[("2020-01-01", "W", "TBA"), ("2020-02-01", "W", "TBA"),
+             ("2020-03-01", "W", "TBA"), ("2020-04-01", "W", "TBA")],
+    ))
+    graph.advance_to(date(2030, 1, 1))
+
+    assert graph.newcomers(set()) == {}, "four fights against a phantom is no fighter"
+
+
 def load_from(data: dict) -> Graph:
     from ufcbot.stats.graph import _fights_from
 

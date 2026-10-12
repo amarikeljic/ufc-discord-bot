@@ -76,6 +76,25 @@ SAFE_GAP = timedelta(days=3)
 # a 2-0 record.
 NEWCOMER_FLOOR = 3
 
+# What a card calls a corner nobody has filled yet. ESPN hands these out with an
+# athlete id and a fight history like anybody else, so left alone they collect
+# results from every card they appear on and become a rated fighter called TBA --
+# who the bot would then pick, by name, to beat somebody real. There is one in
+# the cache already on two fights, which is under the floor above by luck rather
+# than design.
+PLACEHOLDERS = frozenset({"tba", "tbd"})
+
+
+def is_placeholder(key: str) -> bool:
+    """Whether a normalised name is a card saying nobody yet.
+
+    On whole words: a corner is "TBA" or "Opponent TBA", never a man whose name
+    happens to contain the letters."""
+    return bool(set(key.split()) & PLACEHOLDERS) or key in (
+        "to be announced",
+        "to be determined",
+    )
+
 
 @dataclass(slots=True)
 class Graph:
@@ -172,6 +191,10 @@ def _fights_from(careers: dict, *, normalise) -> list[tuple[date, str, str]]:
             except ValueError:
                 continue
             other = normalise(opponent)
+            if is_placeholder(key) or is_placeholder(other):
+                # Not a fight. Dropped rather than rated, both for the phantom's
+                # sake and for the real fighter credited with beating one.
+                continue
             pair = (*sorted((key, other)), on)
             if pair in seen:
                 continue

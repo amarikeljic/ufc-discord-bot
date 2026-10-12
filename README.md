@@ -392,6 +392,21 @@ timer and this does not belong on one. **The bot runs without it**: the two feat
 constant and carry nothing. And none of it reaches the boards, which say UFC fights only and
 still mean it.
 
+It asks about three sets of people, because the first two cannot see a debutant: everyone
+with a UFC record, the regional opponents who keep coming up, and everyone booked on a card
+that has not happened yet. That last set is the point of the whole thing — a crawl built out
+of fights that already happened only learns a new signing exists once his debut is over, by
+which time a rating for him is no use. Of 152 fighters booked across the next few months, 23
+had no career cached. **Run it in the week before a card** and the debuts on it are
+answerable. Those are taken by ESPN id off the card rather than by name, because a fighter
+nobody has published before is exactly the kind of name a search fails to match.
+
+A corner the card has not filled is skipped. ESPN gives `TBA` an athlete id and a fight
+history like anybody else, so fetching one is how a placeholder accumulates a result from
+every card it appears on and becomes a rated fighter called TBA — who the bot would then
+pick, by name, to beat somebody real. The loader drops them too, so a cache that already has
+one cannot produce it.
+
 Ratings carry strength of schedule. Every fighter starts at 1000 and each result moves
 both fighters by how surprising it was, so beating a contender is worth more than beating
 a debutant, and a record built against nobody reads differently from the same record built
