@@ -12,7 +12,7 @@ have done.
   leads with — both records, division, bio, gym, headshot — plus the bot's rating and
   where it places them. Behind buttons: the career numbers ufcstats.com publishes, and
   the full fight history, which is the only page that knows about the fights before the
-  UFC. Patricio Pitbull reads 38-9 professionally and 1-1 in the UFC, and the ratings
+  UFC. Patricio Pitbull reads 38-9 professionally and 2-2 in the UFC, and the ratings
   have only ever seen the second number.
 - **Predictions.** Win probability for any matchup, plus how the fight is likely to end:
   KO/TKO, submission, unanimous or split decision, with the likeliest finishing technique.

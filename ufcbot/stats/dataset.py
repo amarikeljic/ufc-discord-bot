@@ -50,10 +50,11 @@ _BOUT_SPLIT = re.compile(r"\s+vs\.?\s+")
 # A rename splits a man in two. ufcstats writes the new name into the bout line
 # and leaves the old one on the fighter page, so the results give two fighters,
 # each with half a record, and whichever the next card happens to name is the one
-# the model reads. Patricio Pitbull has four UFC fights and a 1-3 record; under
-# the spelling the 2026 cards use he has two and reads 1-1, with his losses to
-# Yair Rodriguez and Dan Ige filed under somebody the bot thinks is a different
-# man. The canonical side is whichever ESPN also uses, so that the professional
+# the model reads. Patricio Pitbull has four UFC fights and a 2-2 record; under
+# the spelling the 2026 cards use he had two of them, with the loss to Yair
+# Rodriguez and the win over Dan Ige filed under somebody the bot took for a
+# different man -- and at two fights he was below the minimum to be ranked at
+# all. The canonical side is whichever ESPN also uses, so that the professional
 # career lands on the same key.
 #
 # Written out by hand rather than inferred. Stripping "Jr." or matching loosely
