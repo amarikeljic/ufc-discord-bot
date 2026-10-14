@@ -116,7 +116,10 @@ def _board_bout_value(event: Event, bout: Bout, counts: dict[str, int], now: dat
     if bout.completed and bout.winner_id:
         winner = bout.fighter(bout.winner_id)
         if winner:
-            lines.append(f"✅ **{keep(winner.display_name)}** won")
+            # Not a tick. The field above this is "A vs. B" and a tick sits hard
+            # against the left of the value, so it reads as marking the first
+            # name rather than the one it is actually in front of.
+            lines.append(f"🏁 **{keep(winner.display_name)}** won")
 
     for fighter in (a, b):
         odds = bout.odds.get(fighter.id)
