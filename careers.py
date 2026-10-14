@@ -12,12 +12,13 @@ Incremental: the cache is keyed by fighter and only the missing ones are asked
 for. A first run over an empty cache is a few thousand requests and the better
 part of an hour; afterwards it is a handful per card.
 
-It goes round until nothing new is wanted, which takes three or four passes from
-cold. One pass is not the crawl: the regional opponents are read out of the
+It goes round until nothing new is wanted, which takes seven or eight passes
+from cold. One pass is not the crawl: the regional opponents are read out of the
 careers already cached, so an empty cache has none to read and the first pass
-fetches the UFC and the booked cards alone -- about 2,700 of an eventual 5,000.
+fetches the UFC and the booked cards alone -- about 2,700 of an eventual 9,700.
 Their opponents are what the graph is for, and they only become visible once
-those fights have been fetched.
+those fights have been fetched, which is also why it takes so many passes: each
+one can only see one step further out than the last.
 
 Three sources, because the first two cannot see a debutant. Everyone with a UFC
 record, then the regional opponents who keep coming up, then everyone booked on
@@ -58,10 +59,17 @@ UPCOMING_CARDS = 12
 AT_ONCE = 4
 CHUNK = 50
 # How many times to go round before giving up. Each pass can only see the
-# opponents of careers already fetched, so the frontier moves outwards one
-# step at a time and settles after three or four; the cap is here so that a
-# cycle in the data cannot keep it going all night.
-PASSES = 6
+# opponents of careers already fetched, so the frontier moves outwards one step
+# at a time.
+#
+# Six was a guess and it was short. From cold the frontier runs 2,723 then down
+# to 107 by the sixth pass -- decaying fast, but not yet nothing, and stopping
+# there leaves the crawl needing to be run again by hand, which is the thing the
+# loop exists to avoid. The cap is a guard against a cycle in the data rather
+# than a budget, so it is set past where this settles: about 9,700 careers and
+# 117,000 fights, which is everyone who has fought somebody connected to the UFC
+# often enough to count.
+PASSES = 12
 
 log = logging.getLogger("careers")
 
