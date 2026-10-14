@@ -5,15 +5,12 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
 
 import discord
 
 from ..embeds import (
-    event_embed,
     scheduled_event_description,
     scheduled_event_location,
     scheduled_event_name,
@@ -25,9 +22,6 @@ from ..sources.posters import PosterLookup
 from ..storage import Storage
 from ..util import normalise
 from .pickem import results_official
-
-if TYPE_CHECKING:
-    from ..stats.prediction import Prediction
 
 log = logging.getLogger(__name__)
 
@@ -81,14 +75,11 @@ class EventSyncer:
         storage: Storage,
         *,
         enable_poster_art: bool = True,
-        pick_provider: Callable[[Event], dict[str, Prediction]] | None = None,
     ) -> None:
         self.data = data
         self.posters = posters
         self.storage = storage
         self.enable_poster_art = enable_poster_art
-        # Optional: returns model picks keyed by bout id, shown in event descriptions.
-        self.pick_provider = pick_provider
 
     async def collect_events(self, settings: GuildSettings) -> list[Event]:
         """Upcoming cards for a guild, filtered and fully resolved."""
@@ -151,10 +142,9 @@ class EventSyncer:
                 result.skipped += 1
                 continue
 
-            picks = self.pick_provider(event) if self.pick_provider else None
             payload = _EventPayload(
                 name=scheduled_event_name(event),
-                description=scheduled_event_description(event, picks),
+                description=scheduled_event_description(event),
                 location=scheduled_event_location(event),
                 start=start,
                 end=end,
@@ -225,33 +215,6 @@ class EventSyncer:
         )
         payload.discord_id = scheduled.id
         log.info("Updated scheduled event %r", payload.name)
-
-    async def announce_new_cards(
-        self, guild: discord.Guild, settings: GuildSettings, result: SyncResult
-    ) -> None:
-        """Post newly added cards to the configured channel, if there is one.
-
-        Lives here rather than in a cog because it describes a sync result, and
-        both the midnight pass and ``/ufc sync now`` have one to describe.
-        """
-        if not settings.announce_channel_id or not result.new_events:
-            return
-
-        channel = guild.get_channel(settings.announce_channel_id)
-        if not isinstance(channel, discord.TextChannel):
-            return
-        if not channel.permissions_for(guild.me).send_messages:
-            return
-
-        for event in result.new_events[:5]:
-            try:
-                await channel.send(
-                    content="📅 New UFC card on the calendar",
-                    embed=event_embed(event, show_records=False, picks=self.pick_provider(event) if self.pick_provider else {}),
-                )
-            except discord.HTTPException as exc:
-                log.debug("Announcement failed in guild %s: %r", guild.id, exc)
-                return
 
     async def close_finished(self, guild: discord.Guild, *, now: datetime | None = None) -> int:
         """End Discord events for cards whose last result is in. Returns how many.

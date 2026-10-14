@@ -72,7 +72,6 @@ class UFCBot(commands.Bot):
             self.posters,
             self.storage,
             enable_poster_art=config.enable_poster_art,
-            pick_provider=self.picks_for if config.enable_predictions else None,
         )
         self.tracker = PredictionTracker(self.storage, self.data)
         self.pickem = PickemService(self.data, self.storage)

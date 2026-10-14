@@ -284,13 +284,22 @@ class UFCCog(commands.Cog):
         await interaction.response.send_message(embed=pickem_stats_embed(target, summary, cards))
 
     @pickem.command(name="picks", description="Everyone's picks for one card, fight by fight")
-    @app_commands.describe(event="Card name, for example 'UFC 331'")
-    async def pickem_picks(self, interaction: discord.Interaction, event: str) -> None:
+    @app_commands.describe(event="Card name, for example 'UFC 331'. Defaults to the card on now, or the last one.")
+    async def pickem_picks(self, interaction: discord.Interaction, event: str | None = None) -> None:
         await interaction.response.defer()
-        found = await self.bot.data.find_event(event)
-        if found is None:
-            await interaction.followup.send(f"No event matched **{truncate(event, 80)}**.", ephemeral=True)
-            return
+        if event is None:
+            # Whatever is on, or the last card to have happened. Asking for a
+            # card by name to see the night everybody just watched is a step
+            # nobody should have to take.
+            found = await self.bot.pickem.latest_event()
+            if found is None:
+                await interaction.followup.send("No card to show yet.", ephemeral=True)
+                return
+        else:
+            found = await self.bot.data.find_event(event)
+            if found is None:
+                await interaction.followup.send(f"No event matched **{truncate(event, 80)}**.", ephemeral=True)
+                return
         picks = await self.bot.storage.pickem_card_picks(interaction.guild_id or 0, found.id)
         # Every pick, locked or not. They used to be held back until each fight
         # locked, so the card could not be read as a list of answers -- but the
@@ -622,7 +631,7 @@ class UFCCog(commands.Cog):
         duration_minutes="How long each event lasts (30-1440)",
         starts_at="Whether the event starts at the main card or the prelims",
         include_contender_series="Include Dana White's Contender Series cards",
-        announce_channel="Channel to post in when a new card is added; omit to leave unchanged",
+        announce_channel="Channel for card changes and bot notices; omit to leave unchanged",
     )
     @app_commands.choices(
         starts_at=[
@@ -682,7 +691,6 @@ class UFCCog(commands.Cog):
             await interaction.followup.send(f"Sync failed: {exc}")
             return
 
-        await self.bot.syncer.announce_new_cards(guild, settings, result)
 
         lines = [header] if header else []
         lines.append(f"Scheduled events: {result.summary()}.")

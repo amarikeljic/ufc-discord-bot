@@ -6,15 +6,8 @@ rather than embeds, and every one of them has a hard length limit.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from ..models import Event
 from ..util import truncate
-from .common import surname
-
-if TYPE_CHECKING:
-    from ..stats.prediction import Prediction
-
 
 SCHEDULED_EVENT_NAME_LIMIT = 100
 
@@ -30,8 +23,13 @@ def scheduled_event_location(event: Event) -> str:
     nobody anything they cannot get from the city."""
     return truncate(event.short_location, SCHEDULED_EVENT_LOCATION_LIMIT)
 
-def scheduled_event_description(event: Event, picks: dict[str, Prediction] | None = None) -> str:
-    """Main card summary, trimmed to Discord's 1000 character limit."""
+def scheduled_event_description(event: Event) -> str:
+    """Main card summary, trimmed to Discord's 1000 character limit.
+
+    The card and nothing else. It used to carry the model's pick beside each
+    bout, which put a prediction somewhere nobody went looking for one and
+    left it there: a calendar entry is read weeks out and never again, so the
+    pick it showed was the one from whenever the event was created."""
     lines: list[str] = []
 
     main_card = next((bouts for _segment, bouts in event.bouts_by_segment() if bouts), [])
@@ -41,10 +39,6 @@ def scheduled_event_description(event: Event, picks: dict[str, Prediction] | Non
             entry = f"• {bout.matchup}"
             if bout.weight_class:
                 entry += f" ({bout.weight_class})"
-            pick = (picks or {}).get(bout.id)
-            if pick is not None and bout.has_opponents:
-                favourite = bout.fighters[0] if pick.prob_a >= 0.5 else bout.fighters[1]
-                entry += f" · pick {surname(favourite.display_name)} {pick.confidence:.0%}"
             if len("\n".join(lines)) + len(entry) + 1 > SCHEDULED_EVENT_DESCRIPTION_LIMIT - 80:
                 lines.append("• …")
                 break

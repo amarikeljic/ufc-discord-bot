@@ -138,10 +138,23 @@ def test_a_scheduled_event_description_is_only_the_card():
     event.broadcast = "Paramount+"
     event.main_card_start = START + timedelta(hours=3)
 
-    text = scheduled_event_description(event, {})
+    text = scheduled_event_description(event)
 
     assert "Live on" not in text and "Prelims first" not in text
     assert "Arnold Allen vs. Aaron Pico" in text
+
+
+def test_a_calendar_entry_carries_no_prediction():
+    """It used to print the model's pick beside each bout. A calendar entry is
+    read weeks out and never written again, so what it showed was the pick from
+    whenever the event happened to be created -- a stale opinion somewhere
+    nobody went looking for one."""
+    event = card(bout("B1", ALLEN, PICO), start=START)
+
+    text = scheduled_event_description(event)
+
+    assert "pick" not in text.casefold()
+    assert "%" not in text
 
 
 def test_card_changes_read_as_what_happened():

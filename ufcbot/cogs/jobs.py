@@ -138,7 +138,6 @@ class JobsCog(commands.Cog):
                 result = await self.bot.syncer.sync_guild(guild, settings)
                 if result.created or result.updated:
                     log.info("Synced guild %s: %s", guild.id, result.summary())
-                await self.bot.syncer.announce_new_cards(guild, settings, result)
             except MissingPermissions as exc:
                 log.warning("Skipping guild %s: %s", guild.id, exc)
             except Exception:  # one guild must not stop the rest
