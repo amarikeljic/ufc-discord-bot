@@ -6,7 +6,7 @@ starts level with everyone, and on a quarter of all fights the model is
 predicting someone it knows nothing about.
 
 ESPN publishes whole professional careers. Walked as one Elo in date order this
-is 56,080 decided fights, and a debutant arrives with a rating earned against
+is 71,958 decided fights, and a debutant arrives with a rating earned against
 real opponents rather than at 1000. It propagates, too: beating someone who beat
 a UFC fighter carries through the graph, which no summary of a record can say.
 
@@ -15,6 +15,12 @@ Measured on rolling origin over 446 events, against the model without it:
     debuts        -0.01114  95% [-0.01731, -0.00517]  100% of draws
     established   -0.00229  95% [-0.00565, +0.00119]   91%
     overall       -0.00498  95% [-0.00764, -0.00250]  100%
+
+That split was measured when the cache held 56,078 decided fights. The crawl has
+since run to closure at 71,958, and the overall figure re-measured there is
+-0.00547, 95% [-0.00918, -0.00183], 99.9% of draws -- the same answer. The
+fighters the extra passes reach are four and five steps out from the UFC, so
+they barely touch the rating of anybody the model is asked about.
 
 Eight designs that summarised the same careers into columns all failed, every
 one of them helping debutants and hurting everybody else by about as much. The
@@ -71,9 +77,8 @@ GRAPH_DIVISOR = 400.0
 SAFE_GAP = timedelta(days=3)
 
 # Professional fights a newcomer needs before the bot bothers to remember
-# them. At one it is 22,320 fighters and 2.2 MB held for the life of the
-# process; at three it is 4,568 and 457 KB, and nobody arrives in the UFC on
-# a 2-0 record.
+# them. At one it is 32,050 fighters; at three it is 9,549, which is 0.3 MB in
+# the cache, and nobody arrives in the UFC on a 2-0 record.
 NEWCOMER_FLOOR = 3
 
 # What a card calls a corner nobody has filled yet. ESPN hands these out with an

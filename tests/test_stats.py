@@ -740,7 +740,7 @@ def test_two_debutants_are_not_worth_calling(tmp_path):
 
 def test_the_graph_keeps_only_newcomers_worth_keeping():
     """Every fighter remembered is weight carried for the life of the process,
-    and at one professional fight it is 22,320 of them. Nobody arrives in the
+    and at one professional fight it is 32,050 of them. Nobody arrives in the
     UFC on a 2-0 record."""
     from ufcbot.stats.graph import Graph
 

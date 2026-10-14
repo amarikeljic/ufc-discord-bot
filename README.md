@@ -339,11 +339,11 @@ before, and the league-wide rate.
 **The model also rates fights that did not happen in the UFC.** ufcstats publishes UFC
 fights, which is 8,935 of them, so a fighter arriving from anywhere else used to start level
 with everyone — and a quarter of all fights have somebody the ratings had never seen. ESPN
-publishes whole careers; walked as one Elo in date order that is **56,080 decided fights**,
+publishes whole careers; walked as one Elo in date order that is **71,958 decided fights**,
 and a debutant arrives with a rating earned against real opponents. It propagates, too:
 beating someone who beat a UFC fighter carries through the graph, which no summary of a
-record can say. Patricio Pitbull reads 1006 on the UFC rating and 1285 across 46 professional
-fights.
+record can say. Patricio Pitbull reads 1006 on the UFC rating, over two UFC fights, and 1303
+across 47 professional ones.
 
 Measured on rolling origin over 446 events, against the same model without it:
 
@@ -352,6 +352,13 @@ Measured on rolling origin over 446 events, against the same model without it:
 | fights with a debutant | −0.01114 | [−0.01731, −0.00517] | better |
 | between established fighters | −0.00229 | [−0.00565, +0.00119] | no measurable change |
 | overall | −0.00498 | [−0.00764, −0.00250] | better |
+
+That split was measured when the cache held 56,078 decided fights, which was as far as the
+crawl had been run by hand. It has since gone to closure at 71,958, and the overall figure
+re-measured there is **−0.00547, 95% [−0.00918, −0.00183]**, 99.9% of draws — the same
+answer. Nearly doubling the graph changed nothing measurable, because the fighters the extra
+passes reach are four and five steps out from the UFC and barely touch the rating of anybody
+the model is ever asked about.
 
 For scale, the largest other change this model has had was −0.0015. Eight earlier designs
 that summarised the same careers into columns all failed the same way — every one helped

@@ -59,7 +59,7 @@ class CareerData:
     Nought means the crawl has never run here, which is a thing worth being
     able to see. The graph is optional and fails safe -- the two features it
     feeds go constant and carry nothing -- so a bot without it looks exactly
-    like a bot with it from the outside, and cost 0.00577 nats and a point of
+    like a bot with it from the outside, and cost 0.00547 nats and a point of
     accuracy before anybody thought to grep the logs for it."""
     graph_standing: dict[str, tuple[float, int]] = field(default_factory=dict)
     """Rating and fight count for fighters the UFC has never seen.
