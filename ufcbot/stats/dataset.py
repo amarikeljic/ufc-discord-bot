@@ -44,6 +44,36 @@ _OF = re.compile(r"^\s*(\d+)\s+of\s+(\d+)\s*$")
 _BOUT_SPLIT = re.compile(r"\s+vs\.?\s+")
 
 
+# Fighters ufcstats has renamed mid-career, keyed by the normalised old name and
+# giving the spelling to file them under.
+#
+# A rename splits a man in two. ufcstats writes the new name into the bout line
+# and leaves the old one on the fighter page, so the results give two fighters,
+# each with half a record, and whichever the next card happens to name is the one
+# the model reads. Patricio Pitbull has four UFC fights and a 1-3 record; under
+# the spelling the 2026 cards use he has two and reads 1-1, with his losses to
+# Yair Rodriguez and Dan Ige filed under somebody the bot thinks is a different
+# man. The canonical side is whichever ESPN also uses, so that the professional
+# career lands on the same key.
+#
+# Written out by hand rather than inferred. Stripping "Jr." or matching loosely
+# on a surname would catch these and would also merge Matt and Mark Hughes, and
+# Jake and Joe Ellenberger -- brothers in this dataset sharing a surname, a
+# build and a date of birth. A missing attribute is visible in the features; a
+# wrongly merged pair of brothers is two corrupted careers that look fine.
+#
+# ``_orphan_names`` finds the candidates when the next one happens.
+ALIASES = {
+    "patricio freire": "Patricio Pitbull",
+    "kai kamaka": "Kai Kamaka III",
+}
+
+
+def canonical(name: str) -> str:
+    """The one spelling a fighter is filed under."""
+    return ALIASES.get(normalise(name), name)
+
+
 # -- download ---------------------------------------------------------------
 
 
@@ -214,6 +244,18 @@ def load(directory: Path) -> Dataset:
     fight_stats = _build_fight_stats(fights, stats)
     fighters = _build_fighters(tott)
 
+    orphans = _orphan_names(fights, fighters)
+    if orphans:
+        # Said out loud because the failure is silent otherwise: a renamed
+        # fighter becomes two people, each with half a record, and nothing
+        # anywhere looks wrong. See ALIASES.
+        log.info(
+            "%d fighting names have no fighter page, so no height, reach, stance or "
+            "age: %s. A rename hides here; the rest are simply missing upstream.",
+            len(orphans),
+            ", ".join(orphans[:12]) + (" ..." if len(orphans) > 12 else ""),
+        )
+
     newest = fights["date"].max()
     return Dataset(
         fights=fights,
@@ -221,6 +263,27 @@ def load(directory: Path) -> Dataset:
         fighters=fighters,
         newest_event=newest.date() if pd.notna(newest) else None,
     )
+
+
+def _orphan_names(fights: pd.DataFrame, fighters: dict[str, FighterInfo]) -> list[str]:
+    """Fighters who appear in a bout with no row in the tale of the tape.
+
+    Two things land here. Most are names upstream simply has no page for, which
+    costs their physical features and nothing else. The rest are one man under
+    two spellings, which costs half his record -- and that one is worth catching
+    by hand, because it cannot be told from the first kind without looking.
+
+    Sorted by how recently they fought, since a rename happens to somebody still
+    fighting and a gap in 2013 is nobody's problem now."""
+    missing: dict[str, pd.Timestamp] = {}
+    for column in ("fighter_a", "fighter_b"):
+        for name, when in zip(fights[column], fights["date"]):
+            key = normalise(str(name))
+            if key in fighters:
+                continue
+            if key not in missing or when > missing[key]:
+                missing[key] = when
+    return [name for name, _ in sorted(missing.items(), key=lambda kv: kv[1], reverse=True)]
 
 
 def _build_fights(events: pd.DataFrame, results: pd.DataFrame) -> pd.DataFrame:
@@ -242,8 +305,8 @@ def _build_fights(events: pd.DataFrame, results: pd.DataFrame) -> pd.DataFrame:
     frame["date"] = frame["date"].bfill().ffill()
 
     sides = frame["bout"].apply(lambda b: _BOUT_SPLIT.split(b, maxsplit=1))
-    frame["fighter_a"] = sides.apply(lambda s: s[0].strip() if len(s) == 2 else None)
-    frame["fighter_b"] = sides.apply(lambda s: s[1].strip() if len(s) == 2 else None)
+    frame["fighter_a"] = sides.apply(lambda s: canonical(s[0].strip()) if len(s) == 2 else None)
+    frame["fighter_b"] = sides.apply(lambda s: canonical(s[1].strip()) if len(s) == 2 else None)
     frame = frame.dropna(subset=["fighter_a", "fighter_b"])
 
     outcome = frame["OUTCOME"].str.strip()
@@ -357,6 +420,8 @@ def _build_fighters(tott: pd.DataFrame) -> dict[str, FighterInfo]:
         name = str(row.FIGHTER).strip()
         if not name or name == "nan":
             continue
+        # Both sides of a rename, or the record merges and the height does not.
+        name = canonical(name)
         key = normalise(name)
         info = FighterInfo(
             name=name,
