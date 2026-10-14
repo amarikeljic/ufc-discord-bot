@@ -383,3 +383,95 @@ async def test_paging_faster_than_the_redraw_still_leaves_a_whole_view():
     # A page always carries its menus; a half-rebuilt view carries fewer.
     assert all(count >= PAGE_SIZE for count in seen), f"a view went out short: {seen}"
     assert 0 <= view.page < view.pages
+
+
+# -- what a finished fight looks like on the board ----------------------------
+
+
+def test_a_finished_fight_is_not_marked_with_a_tick():
+    """The field is titled "A vs. B" and its value starts hard against the left,
+    so a tick there reads as marking the first name rather than the one it is
+    actually in front of -- which is the other man half the time."""
+    from ufcbot.embeds.pickem import pickem_board_embed
+
+    start = datetime(2026, 5, 1, 22, 0, tzinfo=UTC)
+    finished = bout("B1", MOICANO, ORTEGA)
+    finished.completed = True
+    finished.winner_id = ORTEGA.id
+    event = card(finished, start=start)
+
+    embed = pickem_board_embed(event, {}, players=1, now=start + timedelta(hours=4))
+    value = embed.fields[0].value
+
+    assert "✅" not in value, "a tick beside one of two names is a claim about both"
+    # keep() joins a name with a non-breaking space so it cannot wrap.
+    assert "Ortega" in value and "won" in value
+    assert "Moicano" not in value, "the loser is not named by the winner's line"
+
+
+# -- which card /ufc pickem picks shows when nobody says ----------------------
+
+
+class Cards:
+    """Stands in for ESPN: cards by start time, resolved on demand."""
+
+    def __init__(self, *events):
+        self.events = list(events)
+
+    async def recent_events(self, *, days, limit):
+        return [e for e in self.events][:limit]
+
+    async def upcoming_events(self, *, days, limit):
+        return [e for e in self.events][:limit]
+
+    async def get_event(self, event_id, **kwargs):
+        return next((e for e in self.events if e.id == event_id), None)
+
+    async def load_odds(self, event, **kwargs):
+        return None
+
+
+def at(hours: float):
+    return datetime(2026, 5, 2, 0, 0, tzinfo=UTC) + timedelta(hours=hours)
+
+
+def a_card(event_id: str, start, *, done: bool = False):
+    fight = bout(f"{event_id}-B1", MOICANO, ORTEGA)
+    if done:
+        fight.completed = True
+        fight.winner_id = ORTEGA.id
+    event = card(fight, start=start)
+    event.id = event_id
+    event.name = f"UFC {event_id}"
+    return event
+
+
+async def test_the_card_being_fought_is_the_one_shown(storage):
+    """A card under way is what anybody asking means."""
+    live = a_card("300", at(-2))
+    svc = PickemService(data=Cards(live), storage=storage, clock=lambda: at(0))
+
+    assert (await svc.latest_event()).id == "300"
+
+
+async def test_between_cards_it_shows_the_one_that_happened(storage):
+    """Not the one pick'em is now taking picks for. The board turns over the
+    moment a card ends, so current_event points at a card nobody has picked --
+    right for a board asking for picks, wrong for a command showing them."""
+    finished = a_card("300", at(-30), done=True)
+    nextup = a_card("301", at(100))
+    svc = PickemService(data=Cards(finished, nextup), storage=storage, clock=lambda: at(0))
+
+    shown = await svc.latest_event()
+
+    assert shown.id == "300", "the night everybody just watched"
+
+
+async def test_contender_series_is_never_the_answer(storage):
+    """No pick was ever taken on one, so it would show an empty card."""
+    dwcs = a_card("900", at(-10), done=True)
+    dwcs.name = "Dana White's Contender Series: Week 5"
+    proper = a_card("300", at(-40), done=True)
+    svc = PickemService(data=Cards(dwcs, proper), storage=storage, clock=lambda: at(0))
+
+    assert (await svc.latest_event()).id == "300"

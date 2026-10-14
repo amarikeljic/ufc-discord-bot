@@ -182,6 +182,35 @@ class PickemService:
                 return event
         return None
 
+    async def latest_event(self) -> Event | None:
+        """The card to show when nobody named one: the live one, or the last one.
+
+        Not ``current_event``, which is the card pick'em is taking picks for.
+        That turns over to the next card the moment the last one ends, so
+        between cards it points at one nobody has picked yet -- the right answer
+        for a board that is asking for picks, and the wrong one for a command
+        that is showing what people picked.
+
+        So: whatever is under way, and otherwise whatever happened most
+        recently. Contender Series is skipped the same way it is everywhere
+        else in pick'em, because no pick was ever taken on one."""
+        now = self.now()
+        current = await self.current_event()
+        if current is not None and current.start <= now:
+            return current
+
+        recent = await self.data.recent_events(days=45, limit=10)
+        for summary in sorted(recent, key=lambda event: event.start, reverse=True):
+            if summary.start > now or "contender series" in normalise(summary.name):
+                continue
+            event = await self.load_event(summary.id)
+            if event is not None:
+                return event
+        # Nothing has happened lately, so the card being picked is the best
+        # answer there is, even with nothing on it yet.
+        return current
+
+
     async def make_pick(self, guild_id: int, user_id: int, event_id: str, bout_id: str, athlete_id: str) -> PickOutcome:
         """Save or change a pick, checked against fresh odds and lock times."""
         event = await self.current_event()
