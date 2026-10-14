@@ -625,23 +625,23 @@ the same channel as the rest of its news, and says what still works meanwhile.
 Every other measurement here compares one version of the model with another, which cannot
 say whether the thing is any good — only whether it moved. `python odds.py` then `python
 benchmark.py` compares it with the closing price, which is thousands of people with money
-at stake. On 910 fights across 85 cards from 2024, scored under the same rolling origin as
+at stake. On 909 fights across 85 cards from 2024, scored under the same rolling origin as
 everything else:
 
 | | log loss | accuracy | mean distance from even money |
 | --- | --- | --- | --- |
-| Model | 0.6254 | 64.8% | 0.124 |
-| Opening line | 0.6001 | 67.7% | 0.158 |
-| Closing line | **0.5931** | **69.7%** | 0.175 |
+| Model | 0.6244 | 65.0% | 0.125 |
+| Opening line | 0.6001 | 67.8% | 0.158 |
+| Closing line | **0.5934** | **69.6%** | 0.175 |
 
-The market wins, and not marginally: **+0.0323 nats, 95% [+0.0132, +0.0513]**, with 999 of
+The market wins, and not marginally: **+0.0310 nats, 95% [+0.0118, +0.0501]**, with 999 of
 1,000 paired draws against the model. Blending the two at any weight from 10% to 50% is
 indistinguishable from the closing line alone, so the model carries nothing the price does
 not already have.
 
 The whole deficit sits in lopsided fights — **+0.0726 nats, 95% [+0.0392, +0.1040]** where
-the market is past 70%, the only band that separates — and the reason is in the last
-column. The model will not commit. Where the market says 85% it says 74%, and the market is
+the market is past 70%, the only band that separates, measured when the professional graph
+was half its present size — and the reason is in the last column. The model will not commit. Where the market says 85% it says 74%, and the market is
 right to. Neither a regularisation grid extended down to 0.0002 nor Platt scaling fixed
 that; both came back worse. What is missing is information, not tuning: late money,
 injuries, a camp that went badly, a weight cut that did not.
@@ -652,10 +652,10 @@ fights the two disagree about. It finds fights the model is wrong about, not mis
 
 Two things in the model's favour, neither of them an edge yet. Pick'em pays the price when
 a pick was made and its board opens days before a card is sharply priced, and at the
-opening price backing the model returned **+2.29%** where backing the favourite returned
--1.91% — the only positive figure anywhere here, and still inside its own interval at 95%
-[-3.21%, +7.90%]. And on the 529 fights where the line moved more than three points, the
-model leaned the way it went **54.4% of the time, 95% [50.5%, 58.5%]**. That one is
+opening price backing the model returned **+2.46%** where backing the favourite returned
+-1.82% — the only positive figure anywhere here, and still inside its own interval at 95%
+[-2.90%, +7.90%]. And on the 529 fights where the line moved more than three points, the
+model leaned the way it went **54.3% of the time, 95% [50.2%, 58.5%]**. That one is
 conclusive, if small: the model holds a little that the opening price has not absorbed.
 
 The archive is also what makes any of this auditable. `odds.py` stores the raw payload per

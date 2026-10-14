@@ -14,27 +14,29 @@ design matrix as ``evaluate.py``, under the same rolling-origin protocol: every
 event scored once by a model fitted only on fights before it, and the
 hyperparameters for a block chosen on a slice the block never joins.
 
-What it found when it was written, on 910 fights across 85 cards from 2024:
+What it found, on 909 fights across 85 cards from 2024:
 
-    model          0.6254 nats   64.8%
-    opening line   0.6001 nats   67.7%
-    closing line   0.5931 nats   69.7%
+    model          0.6244 nats   65.0%
+    opening line   0.6001 nats   67.8%
+    closing line   0.5934 nats   69.6%
 
-    model minus closing  +0.0323 nats  95% [+0.0132, +0.0513]
+    model minus closing  +0.0310 nats  95% [+0.0118, +0.0501]
 
 The market wins, conclusively, and a blend of the two at any weight is
 indistinguishable from the market alone, so the model holds nothing the price
 does not already carry. The deficit is all in lopsided fights -- +0.0726 nats
 95% [+0.0392, +0.1040] where the market is past 70% -- because the model will
-not commit: it sits 0.124 from even money on average where the market sits
+not commit: it sits 0.125 from even money on average where the market sits
 0.175. Neither a wider regularisation grid nor Platt scaling moved that, so what
-is missing is information rather than tuning.
+is missing is information rather than tuning. The band figure was taken when the
+professional graph was half its present size; the headline numbers above are on
+the current one.
 
 Two numbers are worth re-running for. Backing the model's pick at the opening
-price returned +2.29% over those fights where backing the favourite returned
--1.91%, the only positive figure here and still not distinguishable from zero:
-95% [-3.21%, +7.90%]. And the model leans the way the line later moves on 54.4%
-of the fights where it moves at all, 95% [50.5%, 58.5%], which is a real signal
+price returned +2.46% over those fights where backing the favourite returned
+-1.82%, the only positive figure here and still not distinguishable from zero:
+95% [-2.90%, +7.90%]. And the model leans the way the line later moves on 54.3%
+of the fights where it moves at all, 95% [50.2%, 58.5%], which is a real signal
 and a small one.
 
 The practical finding is a negative. An expected-value pick -- staking wherever
