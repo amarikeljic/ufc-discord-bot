@@ -41,9 +41,10 @@ def _bool_or_none(value) -> bool | None:
     return None if value is None else bool(value)
 
 
-# How many dated copies to keep. Enough to notice something went wrong a few
-# days ago and still have the day before it.
-BACKUPS_KEPT = 7
+# How many dated copies to keep. One is taken at the end of each card, so this
+# is about two months of them -- far enough back to cover a problem nobody
+# noticed at the time, at roughly half a megabyte each.
+BACKUPS_KEPT = 8
 
 
 class Storage:

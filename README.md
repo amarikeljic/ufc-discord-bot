@@ -387,13 +387,19 @@ order, and Khabib at thirteen is the shortest career it admits. It costs the thi
 divisions: exactly one woman has had twelve UFC featherweight fights, so that board is one
 name long, which is true.
 
-**The database is backed up nightly if you say where.** `BACKUP_DIR` is empty by default
-and nothing is written. Pointed somewhere, the midnight pass copies the database through
-SQLite's own backup rather than copying the file, keeping the last seven. That distinction
-matters here: the write-ahead log has been eight times the size of the database itself, and
-a copy that left it behind would be missing most of the recent rows while looking like a
-backup. It is the one thing in the data directory that cannot be rebuilt from upstream, and
-a volume is not a backup — point it off the host.
+**The database is backed up at the end of each card if you say where.** `BACKUP_DIR` is
+empty by default and nothing is written. Pointed somewhere, the pass that grades the last
+bout on a card copies the database through SQLite's own backup rather than copying the file,
+keeping the last eight. That distinction matters here: the write-ahead log has been eight
+times the size of the database itself, and a copy that left it behind would be missing most
+of the recent rows while looking like a backup. It is the one thing in the data directory
+that cannot be rebuilt from upstream, and a volume is not a backup — point it off the host.
+
+The end of a card rather than a fixed hour, because it is the one moment the database is
+settled: every bout graded, every point awarded, nothing half-written. A nightly copy can
+land between a fight being scored and the leaderboard being redrawn. The trade is the week
+of picks made between one card and the next, which would not survive a restore — a lost week
+of picks is an annoyance where a lost season of results is the bot.
 
 `python careers.py` builds the cache and is incremental — a first run is a few thousand
 requests, afterwards a handful per card. **It goes round until nothing new is wanted**,

@@ -77,3 +77,74 @@ def test_every_loop_is_started_and_cancelled_with_the_cog(cls):
     for loop in loops:
         assert f"self.{loop}.start()" in started, f"{loop} is never started"
         assert f"self.{loop}.cancel()" in cancelled, f"{loop} is never cancelled"
+
+
+# -- when the database gets copied -------------------------------------------
+
+
+class Recorder:
+    """A bot with just the parts the grading step reaches for."""
+
+    def __init__(self, *, awaiting, graded, backup_dir="/backups"):
+        from types import SimpleNamespace
+
+        self.awaiting = list(awaiting)
+        self.copies: list[str] = []
+        outer = self
+
+        class Storage:
+            async def pickem_events_awaiting_grading(self, now):
+                return outer.awaiting.pop(0) if outer.awaiting else []
+
+            async def back_up_to(self, directory, **kwargs):
+                outer.copies.append(directory)
+                return directory
+
+        class Pickem:
+            async def grade_due(self):
+                return graded
+
+        self.storage = Storage()
+        self.pickem = Pickem()
+        self.config = SimpleNamespace(backup_dir=backup_dir)
+
+
+def jobs_for(bot):
+    return JobsCog(bot)
+
+
+async def test_the_database_is_copied_once_a_card_is_finished_with():
+    """The one moment it is settled: every bout graded, every point awarded."""
+    bot = Recorder(awaiting=[["E1"], []], graded=12)
+
+    await jobs_for(bot)._grade_pickem()
+
+    assert bot.copies == ["/backups"]
+
+
+async def test_a_card_part_way_through_is_not_a_moment_to_copy():
+    """Half the card graded is half a leaderboard."""
+    bot = Recorder(awaiting=[["E1"], ["E1"]], graded=4)
+
+    await jobs_for(bot)._grade_pickem()
+
+    assert bot.copies == []
+
+
+async def test_a_fight_pulled_mid_week_does_not_trigger_a_copy():
+    """Fights come off a card all week and their picks are voided as they go.
+    Nothing has locked yet, so nothing was awaiting grading, and this is not the
+    end of anything."""
+    bot = Recorder(awaiting=[[], []], graded=3)
+
+    await jobs_for(bot)._grade_pickem()
+
+    assert bot.copies == []
+
+
+async def test_nothing_is_written_when_no_destination_is_set():
+    bot = Recorder(awaiting=[["E1"], []], graded=12, backup_dir="")
+
+    await jobs_for(bot)._grade_pickem()
+
+    assert bot.copies == []

@@ -43,7 +43,7 @@ class Config:
     dev_guild_ids: list[int] = field(default_factory=list)
     database_path: str = "ufcbot.sqlite3"
     backup_dir: str = ""
-    """Where to copy the database nightly. Empty means no backups.
+    """Where to copy the database when a card finishes. Empty means no backups.
 
     Deliberately off by default: writing copies of somebody's database
     somewhere they did not ask for is not a thing to do uninvited."""

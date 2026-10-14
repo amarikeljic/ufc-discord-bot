@@ -113,6 +113,33 @@ class JobsCog(commands.Cog):
             # next refresh rebuilds and the newcomers reach the picks board.
             log.info("Nightly career top-up added %d; the next refresh will rebuild", found)
 
+    async def _grade_pickem(self) -> None:
+        """Score what is due, and copy the database once a card is finished with.
+
+        Backing up here rather than nightly is the one moment the database is
+        settled: every bout on the card graded, every point awarded, nothing
+        half-written. A copy taken at an arbitrary hour can land between a fight
+        being scored and the leaderboard being redrawn.
+
+        What it gives up is the week of picks made between one card and the
+        next, which are the only rows in here that cannot be rebuilt from
+        upstream. That is a deliberate trade: a lost week of picks is an
+        annoyance, where a lost season of results is the bot.
+
+        Fires once. ``pickem_events_awaiting_grading`` is empty between cards,
+        so a fight pulled off an upcoming card mid-week grades a void without
+        tripping this, and the pass that grades the last bout of a card is the
+        one that finds nothing left waiting."""
+        now = discord.utils.utcnow()
+        awaiting = await self.bot.storage.pickem_events_awaiting_grading(now)
+        graded = await self.bot.pickem.grade_due()
+        if not graded or not awaiting:
+            return
+        if await self.bot.storage.pickem_events_awaiting_grading(now):
+            return  # the card is still part-way through
+        if self.bot.config.backup_dir:
+            await self.bot.storage.back_up_to(self.bot.config.backup_dir)
+
     async def _sync_calendar(self) -> None:
         """Mirror upcoming cards into each server's scheduled events, once a night.
 
@@ -123,12 +150,6 @@ class JobsCog(commands.Cog):
         """
         if datetime.now(central_time()).hour != SYNC_HOUR_CENTRAL:
             return
-        # The database is the only thing here that cannot be rebuilt from
-        # upstream: every pick anybody has made and every graded prediction
-        # lives in it, and a volume is not a backup. Off unless BACKUP_DIR
-        # names somewhere to put them.
-        if self.bot.config.backup_dir:
-            await self.bot.storage.back_up_to(self.bot.config.backup_dir)
         await self._top_up_careers()
         for settings in await self.bot.storage.guilds_with_sync_enabled():
             guild = self.bot.get_guild(settings.guild_id)
@@ -197,7 +218,7 @@ class JobsCog(commands.Cog):
         except Exception:  # boards can still refresh
             log.exception("Grading failed")
         try:
-            await self.bot.pickem.grade_due()
+            await self._grade_pickem()
         except Exception:  # boards can still refresh
             log.exception("Pick'em grading failed")
         try:
@@ -349,7 +370,7 @@ class JobsCog(commands.Cog):
         self._last_live_refresh = now
         self._boards_stale = False
         try:
-            await self.bot.pickem.grade_due()
+            await self._grade_pickem()
         except Exception:  # the boards can still refresh
             log.exception("Pick'em grading after a live update failed")
         # A result may have been the last one on the card. Closing the calendar
