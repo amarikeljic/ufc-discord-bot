@@ -103,6 +103,29 @@ METHOD_BOOST_WEIGHT = 0.35
 # varies it wants the model held back less than this was holding it.
 LOGISTIC_C = 0.005
 
+# And the method model's, which is a different question on a different training
+# set and had been borrowing the number above.
+#
+# _Pair called _linear() with no argument, and _linear binds LOGISTIC_C as a
+# default at import, so the method model's regularisation was whatever the
+# winner model's happened to be. When the winner model moved to 0.005 this moved
+# with it, silently, on evidence about who wins rather than how.
+#
+# It happens to be right: measured on its own rolling origin over the same 446
+# events, scoring the four-way outcome, 0.005 beats 0.02 by 0.00287 nats, 95%
+# [-0.00449, -0.00117], every draw favouring it, and 46.4% against 45.8%. That
+# is luck rather than design, so the two are separate constants now and moving
+# one cannot quietly move the other.
+#
+# Swept downwards from there on the same walk and it stops paying: 0.002 scores
+# 1.20173 against 0.005's 1.20244 and 0.0005's 1.20507, which is -0.00071 nats
+# for 0.002, 95% [-0.00191, +0.00049], 87% of draws -- straddling zero, with
+# accuracy moving the other way, 46.3% against 46.4%. Seven ten-thousandths of a
+# nat on a baseline of 1.2 is not worth a retrain, and the incumbent has the
+# stronger measurement behind it. The question is closed unless something else
+# about the model changes.
+METHOD_LOGISTIC_C = 0.005
+
 # A compiled model must agree with the estimator it came from this closely.
 PARITY_TOLERANCE = 1e-9
 # How many held-out rows the parity check scores through both paths.
@@ -175,9 +198,15 @@ KO, SUB, DEC_U, DEC_S = (METHODS.index(m) for m in ("ko", "sub", "dec_u", "dec_s
 class _Pair(ClassifierMixin, BaseEstimator):
     """One yes-or-no question, answered by the same blend the rest of the model uses."""
 
-    def __init__(self, boost_weight: float = METHOD_BOOST_WEIGHT, seed: int = 7) -> None:
+    def __init__(
+        self,
+        boost_weight: float = METHOD_BOOST_WEIGHT,
+        seed: int = 7,
+        logistic_c: float = METHOD_LOGISTIC_C,
+    ) -> None:
         self.boost_weight = boost_weight
         self.seed = seed
+        self.logistic_c = logistic_c
 
     def fit(self, X, y):
         self.classes_ = np.array([0, 1])
@@ -191,7 +220,7 @@ class _Pair(ClassifierMixin, BaseEstimator):
             return self
         boost = _boost(self.seed, iterations=300, min_leaf=80)
         self.boost_ = boost.fit(X, y) if self.boost_weight else None
-        self.linear_ = _linear().fit(X, y)
+        self.linear_ = _linear(self.logistic_c).fit(X, y)
         return self
 
     @staticmethod
@@ -237,9 +266,15 @@ class MethodModel(ClassifierMixin, BaseEstimator):
     calling the split, and no amount of structure says what judges did.
     """
 
-    def __init__(self, boost_weight: float = METHOD_BOOST_WEIGHT, seed: int = 7) -> None:
+    def __init__(
+        self,
+        boost_weight: float = METHOD_BOOST_WEIGHT,
+        seed: int = 7,
+        logistic_c: float = METHOD_LOGISTIC_C,
+    ) -> None:
         self.boost_weight = boost_weight
         self.seed = seed
+        self.logistic_c = logistic_c
 
     def fit(self, X, y):
         self.classes_ = np.arange(len(METHODS))
@@ -247,7 +282,9 @@ class MethodModel(ClassifierMixin, BaseEstimator):
         finish = np.isin(y, (KO, SUB))
 
         def pair(rows, target):
-            return _Pair(self.boost_weight, self.seed).fit(X[rows], target[rows].astype(int))
+            return _Pair(self.boost_weight, self.seed, self.logistic_c).fit(
+                X[rows], target[rows].astype(int)
+            )
 
         everything = np.ones(len(y), dtype=bool)
         self.decision_ = pair(everything, ~finish)

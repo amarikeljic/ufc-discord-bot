@@ -1131,3 +1131,53 @@ def test_a_build_counts_the_professional_fights_it_read(tmp_path):
 
     assert graph is not None
     assert len(graph.fights) == 2, "two decided fights is what a build would report"
+
+
+# -- the method model's regularisation is its own ----------------------------
+
+
+def test_the_method_model_does_not_borrow_the_winner_model_s_regularisation():
+    """_Pair used to call _linear() with no argument, and _linear binds
+    LOGISTIC_C as a default at import, so the method model's regularisation was
+    whatever the winner model's happened to be. Moving one moved the other,
+    silently, on evidence that was only ever about who wins.
+
+    They are the same value today and that is a coincidence worth keeping
+    visible: the point is that each is set by its own measurement."""
+    import inspect
+
+    from ufcbot.stats.model import METHOD_LOGISTIC_C, _linear, _Pair
+
+    assert _Pair().logistic_c == METHOD_LOGISTIC_C
+    assert "logistic_c" in inspect.signature(_Pair.__init__).parameters
+    assert inspect.signature(_linear).parameters["c"].default is not None
+
+
+def test_a_pair_fits_at_the_regularisation_it_was_given():
+    """Not at the module default, or the sweep that chose it was measuring the
+    wrong thing."""
+    import numpy as np
+
+    from ufcbot.stats.model import _Pair
+
+    x = np.array([[0.0, 1.0], [1.0, 0.0], [0.0, 2.0], [2.0, 0.0]])
+    y = np.array([0, 1, 0, 1])
+
+    fitted = _Pair(logistic_c=0.123).fit(x, y)
+
+    assert fitted.linear_.named_steps["logisticregression"].C == 0.123
+
+
+def test_the_method_model_hands_its_stages_the_same_one():
+    import numpy as np
+
+    from ufcbot.stats.model import MethodModel
+
+    x = np.tile(np.array([[0.0, 1.0], [1.0, 0.0], [0.0, 2.0], [2.0, 0.0]]), (4, 1))
+    y = np.array([0, 1, 2, 3] * 4)
+
+    fitted = MethodModel(logistic_c=0.077).fit(x, y)
+
+    assert fitted.decision_.logistic_c == 0.077
+    assert fitted.submission_.logistic_c == 0.077
+    assert fitted.split_.logistic_c == 0.077
