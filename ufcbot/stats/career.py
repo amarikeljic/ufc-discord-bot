@@ -290,6 +290,29 @@ class Ledger:
     records outside. This is what lets the model discount the rating in
     proportion to how much of it was earned out there."""
 
+    division_elo: dict[str, float] = field(default_factory=dict)
+    """A rating per division, each built only from the fights held in it.
+
+    One career rating puts a fighter on the board of whichever division they
+    fought in last, carrying everything they earned anywhere else. Conor
+    McGregor made the welterweight top fifteen on a 2-2 record there, off a
+    featherweight run from 2013; Max Holloway made second on one welterweight
+    fight, after twenty-seven at featherweight. A divisional board is supposed
+    to answer who is best in that division, and the answer cannot be a number
+    earned two divisions down.
+
+    Everyone starts each division at ELO_START, so moving up means proving it
+    again. That is the point rather than a side effect: it is what a divisional
+    board is asking."""
+    fights_by_division: dict[str, int] = field(default_factory=dict)
+    """How many fights in each division, which is what the minimum counts."""
+    last_fight_by_division: dict[str, date] = field(default_factory=dict)
+    """When they last fought in each division.
+
+    One rating used to mean one board, so a fighter was only ever as stale as
+    their last fight. A rating per division means a man can stand on two boards
+    at once, and a welterweight record that stopped in 2016 should not read as
+    current because he has been busy at lightweight since."""
     home_division: str | None = None
     """The division they fought in most, which is not always the last one.
 
@@ -403,6 +426,35 @@ class Ledger:
 
     # -- who they have faced -------------------------------------------------
 
+    def elo_in(self, division: str | None) -> float:
+        """Their rating in one division, or the starting rating if never there."""
+        if division is None:
+            return self.elo
+        return self.division_elo.get(division, ELO_START)
+
+    def fights_in(self, division: str | None) -> int:
+        """How many fights they have had in one division."""
+        if division is None:
+            return self.fights
+        return self.fights_by_division.get(division, 0)
+
+    def last_fight_in(self, division: str | None) -> date | None:
+        """When they last fought in one division."""
+        if division is None:
+            return self.last_fight
+        return self.last_fight_by_division.get(division)
+
+    @property
+    def divisional_gain(self) -> float:
+        """What they have proved across every division they fought in.
+
+        The sum of what each divisional rating sits above where it started, so
+        two divisions genuinely beat one and entering a third costs nothing
+        until it is won in. Summing the ratings themselves would instead pay
+        about ELO_START a division for turning up, and rank a journeyman who
+        moved twice over a champion who never had to."""
+        return sum(elo - ELO_START for elo in self.division_elo.values())
+
     @property
     def avg_opponent_elo(self) -> float:
         """How good the fighters they have faced were, on average, at the time."""
@@ -465,6 +517,7 @@ class Ledger:
         method_detail: str = "other",
         technique: str | None = None,
         opponent_elo: float | None = None,
+        opponent_division_elo: float | None = None,
         opponent_finish_elo: float | None = None,
         opponent_model_elo: float | None = None,
         opponent_model_finish_elo: float | None = None,
@@ -500,6 +553,15 @@ class Ledger:
         division = division_name(weight_class)
         if division:
             self.division = division
+            self.fights_by_division[division] = self.fights_by_division.get(division, 0) + 1
+            self.last_fight_by_division[division] = on
+            if opponent_division_elo is not None and result != "nc":
+                # Rated against the opponent's standing in this division, not
+                # their career one, or a visiting champion would hand out the
+                # credit of a division he has not fought in.
+                self.division_elo[division] = _elo_step(
+                    self.elo_in(division), opponent_division_elo, result, method_class, ELO_K
+                )
         if title_fight:
             self.title_fights += 1
         if scheduled_rounds >= 5:
@@ -846,24 +908,25 @@ def build_history(
         }
         # Both ratings are read before either moves, so each fighter is rated
         # against the opponent as they stood walking in.
+        division = division_name(str(fight.weight_class))
         elo_a, elo_b = ledger_a.elo, ledger_b.elo
+        div_a, div_b = ledger_a.elo_in(division), ledger_b.elo_in(division)
         finish_a, finish_b = ledger_a.finish_elo, ledger_b.finish_elo
         model_a, model_b = ledger_a.model_elo, ledger_b.model_elo
         model_finish_a, model_finish_b = ledger_a.model_finish_elo, ledger_b.model_finish_elo
         ledger_a.record_fight(
             result=result_a, own=own_a, opp=own_b,
-            opponent_elo=elo_b, opponent_finish_elo=finish_b,
+            opponent_elo=elo_b, opponent_division_elo=div_b, opponent_finish_elo=finish_b,
             opponent_model_elo=model_b, opponent_model_finish_elo=model_finish_b,
             **common,
         )
         ledger_b.record_fight(
             result=result_b, own=own_b, opp=own_a,
-            opponent_elo=elo_a, opponent_finish_elo=finish_a,
+            opponent_elo=elo_a, opponent_division_elo=div_a, opponent_finish_elo=finish_a,
             opponent_model_elo=model_a, opponent_model_finish_elo=model_finish_a,
             **common,
         )
 
-        division = division_name(str(fight.weight_class))
         if division:
             division_fights[key_a][division] += 1
             division_fights[key_b][division] += 1

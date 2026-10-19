@@ -691,9 +691,20 @@ problem has gone.
 Each division gets one message, holding **Current Ratings** and, beneath it, **🐐 All Time
 Ratings**. The current half ranks whoever has fought in the last eighteen months and has at
 least three UFC fights. `/ufc channels set womens_divisions:False` leaves the
-women's divisions out entirely, boards and pound-for-pound alike. A fighter's division is
-the one their most recent fight was made at, so a move up shows the week it happens, and a
-catchweight leaves it alone. The women's divisions are kept separate from the men's.
+women's divisions out entirely, boards and pound-for-pound alike. The women's divisions
+are kept separate from the men's.
+
+**A fighter is rated once per division, on the fights they had in it.** They stand on every
+board where they have three fights and have been seen in the last eighteen months, so a
+genuine two-division career appears twice, and moving up means starting from 1000 again and
+proving it. That is what a divisional board is asking.
+
+One rating across a whole career put a man on the board of whichever division he fought in
+last, carrying everything he earned anywhere else. Conor McGregor made the welterweight top
+fifteen on a 2-2 record there, off a featherweight run from 2013; Max Holloway made second
+on a single welterweight fight, after twenty-seven at featherweight. The welterweights they
+were above — Edwards at 20 fights in the division, Muhammad at 22, Magny at 38 — are the
+men the board is supposed to be about.
 
 It is not the UFC's ranking and will not agree with it. Nobody votes, holding a belt counts
 for nothing by itself, and a fighter arriving from another promotion starts level with
@@ -910,12 +921,36 @@ defences back to him as four separate reigns.
 On the all-time boards a fighter is listed in the division they fought in **most**, not the
 one they finished in. Otherwise St-Pierre is a middleweight on the strength of one fight
 against Bisping after twenty-one at welterweight, Jones a heavyweight, and Holloway a
-welterweight. 215 fighters are in that position. On the current boards the division is
-still wherever they last fought, which is the right answer to a question about now.
+welterweight. 215 fighters are in that position. The current boards no longer need that
+rule: a fighter is rated separately in each division, so they appear on every board they
+have earned a place on rather than on one chosen for them.
+
+The all-time boards still do need it, and still have the problem the current boards had.
+They rank on the strength fit, which is one number for a whole career, so what a fighter did
+at lightweight counts towards the division they fought in most: McGregor is fourth all time
+at featherweight on seven of his fifteen fights, Pereira third at light heavyweight on
+seven of thirteen. 26 of the 165 names across those boards have fewer than the twelve fights
+the board asks for in the division it lists them under. Fixing it properly means fitting the
+strength of a division from that division's fights, which is a larger piece of work than the
+rating change and would re-open every constant above.
+
+**The champion is always on their own board**, at whatever rank the rating gives them,
+even when that is past the fifteen the board prints. Ratings are divisional, so a champion
+who has just moved up is rated on the two or three fights he has had there rather than on
+the career that got him the shot: Makhachev holds the welterweight belt and his welterweight
+rating puts him thirtieth of sixty-one. A board that said otherwise would be inventing a
+number for him, and a welterweight board with no welterweight champion on it is worse than
+one that shows where two fights actually place him.
+
+**Pound for pound adds up what a fighter proved in each division** — how far each divisional
+rating sits above where it started — and fades the total on how long they have been out
+altogether. Adding the ratings themselves would pay about a thousand a division for turning
+up, and rank a journeyman who had moved twice over a champion who never needed to. Fading
+each division on its own clock instead would drop a fighter for winning a second belt, since
+the division he left starts fading the moment he leaves it.
 
 Records on the board count UFC fights only, which is all the dataset has: a fighter with a
-long road career shows fewer wins here than their MMA record. A rating also travels with a
-fighter across a division change, earned against whoever they have actually faced.
+long road career shows fewer wins here than their MMA record.
 
 Only the last board posted carries the explanation, so the channel says it once rather than
 a dozen times.

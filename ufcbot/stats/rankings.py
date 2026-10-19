@@ -133,20 +133,57 @@ class Ranked:
     last_result: str | None = None
 
 
-def rating_on(ledger: Ledger, on: date) -> int:
+def rating_on(ledger: Ledger, on: date, division: str | None = None) -> int:
     """What the rating is worth today, faded for however long the fighter has been out.
 
     Only the margin over the starting rating fades, so a fighter who never got
     above it has nothing to lose, and nobody is ever dragged below where they
     began by sitting still.
+
+    With a division, it is that division's rating fading from the last fight
+    held there. A man can stand on two boards now, and his welterweight year
+    does not become current because he has been busy at lightweight.
     """
-    if ledger.last_fight is None:
-        return round(ledger.elo)
-    idle = (on - ledger.last_fight) - DECAY_GRACE
+    rating = ledger.elo_in(division)
+    last = ledger.last_fight_in(division)
+    if last is None:
+        return round(rating)
+    idle = (on - last) - DECAY_GRACE
     if idle <= timedelta(0):
-        return round(ledger.elo)
+        return round(rating)
     kept = 0.5 ** (idle / DECAY_HALF_LIFE)
-    return round(ELO_START + (ledger.elo - ELO_START) * kept)
+    return round(ELO_START + (rating - ELO_START) * kept)
+
+
+def pound_for_pound_on(ledger: Ledger, on: date) -> int:
+    """What a fighter is worth across every division, today.
+
+    Each divisional rating counts by how far it sits above where it started,
+    and the total fades on how long the fighter has been out altogether.
+
+    Added rather than averaged, so two divisions genuinely beat one and a
+    division entered but not won in adds nothing rather than subtracting.
+    Adding the ratings themselves would instead pay about ELO_START a division
+    for turning up, and a journeyman who had moved twice would outscore a
+    champion who never needed to.
+
+    Faded on the whole career rather than per division, which matters for the
+    fighters this board exists to rank. Makhachev's lightweight years fade the
+    moment he moves to welterweight if each division fades on its own, so
+    winning a second belt would drop him down a pound-for-pound board for
+    having done more. One clock, on whether he is still fighting at all.
+
+    Printed on the same scale as a rating by sitting the total back on top of
+    ELO_START, so +300 in one division and +100 in another shows 1400 -- a
+    number no single divisional board can reach, which is the point.
+    """
+    gained = ledger.divisional_gain
+    last = ledger.last_fight
+    if last is not None:
+        idle = (on - last) - DECAY_GRACE
+        if idle > timedelta(0):
+            gained *= 0.5 ** (idle / DECAY_HALF_LIFE)
+    return round(ELO_START + gained)
 
 
 def is_fading(ledger: Ledger, on: date) -> bool:
@@ -159,10 +196,20 @@ def is_eligible(ledger: Ledger, on: date) -> bool:
     return _eligible(ledger, on)
 
 
-def _eligible(ledger: Ledger, on: date) -> bool:
-    if ledger.fights < MIN_FIGHTS or ledger.last_fight is None:
+def _eligible(ledger: Ledger, on: date, division: str | None = None) -> bool:
+    """Ranked on this board: enough fights in it, and seen there recently enough.
+
+    A reigning champion is kept whatever the count says. Makhachev holds the
+    welterweight belt on two fights in the division and would otherwise be
+    missing from his own board, which is a worse answer than ranking him where
+    two fights put him.
+    """
+    last = ledger.last_fight_in(division)
+    if last is None:
         return False
-    return on - ledger.last_fight <= ACTIVE_WITHIN
+    if ledger.fights_in(division) < MIN_FIGHTS and not holds_belt(ledger, on, division):
+        return False
+    return on - last <= ACTIVE_WITHIN
 
 
 def _ordered(
@@ -173,12 +220,17 @@ def _ordered(
     include_women: bool,
 ) -> list[Ranked]:
     """Everyone eligible, best first, with ranks shared between fighters too close to separate."""
+    # Pound for pound is not a division, so it is not scored like one.
+    score = (
+        (lambda ledger: rating_on(ledger, on, division))
+        if division is not None
+        else (lambda ledger: pound_for_pound_on(ledger, on))
+    )
     entries = [
-        (rating_on(ledger, on), key, ledger)
+        (score(ledger), key, ledger)
         for key, ledger in ledgers.items()
-        if _eligible(ledger, on)
-        and (division is None or ledger.division == division)
-        and (include_women or not is_womens(ledger.division))
+        if _eligible(ledger, on, division)
+        and (include_women or not is_womens(division or ledger.division))
     ]
     # Equal ratings go to whoever showed it most recently. The first rule here
     # was the opposite -- longest holder first, on the grounds that nobody had
@@ -275,8 +327,22 @@ def rank_division(
     ``division`` of None ranks everyone, which is the pound-for-pound list, and
     is where ``include_women`` matters: a server that leaves the women's
     divisions out should not find them on that board either.
+
+    A reigning champion is always on it, at whatever rank the rating gives
+    them. Ratings are divisional now, so a champion who has just moved up is
+    rated on the two or three fights he has had in the division rather than on
+    the career that got him there: Makhachev holds the welterweight belt and
+    his welterweight rating puts him thirtieth of sixty-one. The board already
+    says a champion can sit below a contender, and it is a better answer than
+    a welterweight board with no welterweight champion on it.
     """
-    return _ordered(ledgers, division, on=on, include_women=include_women)[:depth]
+    board = _ordered(ledgers, division, on=on, include_women=include_women)
+    cut = board[:depth]
+    if division is not None and not any(entry.champion for entry in cut):
+        champion = next((entry for entry in board if entry.champion), None)
+        if champion is not None:
+            cut = [*cut, champion]
+    return cut
 
 
 def career_points(ledger: Ledger) -> float:
@@ -386,7 +452,11 @@ def standing(ledgers: dict[str, Ledger], key: str, *, on: date) -> Ranked | None
     where the boards only print the top of each.
     """
     ledger = ledgers.get(key)
-    if ledger is None or ledger.division is None or not _eligible(ledger, on):
+    if ledger is None or ledger.division is None:
+        return None
+    # Their current division, which is the one they last made weight for.
+    # Not ranked in it -- a visitor with one fight there -- is no standing.
+    if not _eligible(ledger, on, ledger.division):
         return None
     return _find(_ordered(ledgers, ledger.division, on=on, include_women=True), key)
 
@@ -406,8 +476,18 @@ def _find(ranked: list[Ranked], key: str) -> Ranked | None:
 def divisions_with_fighters(
     ledgers: dict[str, Ledger], *, on: date, include_women: bool = True
 ) -> list[str]:
-    """Divisions that have anyone to rank, in the usual order."""
-    present = {ledger.division for ledger in ledgers.values() if _eligible(ledger, on)}
+    """Divisions that have anyone to rank, in the usual order.
+
+    Asked of each division rather than read off each fighter, because a fighter
+    is no longer in exactly one. A man with twelve welterweight fights and five
+    at middleweight stands on both boards, and the middleweight board exists
+    whether or not it is where he fought last.
+    """
+    present = {
+        division
+        for division in DIVISION_ORDER
+        if any(_eligible(ledger, on, division) for ledger in ledgers.values())
+    }
     return [
         division
         for division in DIVISION_ORDER

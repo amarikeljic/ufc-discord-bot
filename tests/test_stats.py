@@ -24,6 +24,7 @@ from ufcbot.stats.names import NameIndex
 from ufcbot.stats.rankings import (
     divisions_with_fighters,
     is_fading,
+    pound_for_pound_on,
     pound_for_pound_rank,
     rank_division,
     rating_on,
@@ -79,6 +80,14 @@ def rated(
     ledger.wins = fights
     ledger.division = division
     ledger.last_fight = TODAY - timedelta(days=ago)
+    if division:
+        # A rating belongs to a division now, and so do the fight count and the
+        # date the board reads for staleness. A fixture that set only the career
+        # rating would be a fighter who has never fought in the division it says
+        # he is in, which the boards correctly refuse to rank.
+        ledger.division_elo[division] = elo
+        ledger.fights_by_division[division] = fights
+        ledger.last_fight_by_division[division] = ledger.last_fight
     if defences:
         # Defences belong to a division now, and a fixture's are of the one
         # it fought in: a count attached to no division would be invisible
@@ -1181,3 +1190,122 @@ def test_the_method_model_hands_its_stages_the_same_one():
     assert fitted.decision_.logistic_c == 0.077
     assert fitted.submission_.logistic_c == 0.077
     assert fitted.split_.logistic_c == 0.077
+
+
+# -- a rating per division ----------------------------------------------------
+
+
+def two_division(name: str, *, here: tuple[str, float, int], there: tuple[str, float, int]):
+    """A fighter with a record in two divisions, rated separately in each."""
+    ledger = Ledger(name=name)
+    ledger.last_fight = TODAY - timedelta(days=30)
+    for division, elo, fights in (here, there):
+        ledger.division_elo[division] = elo
+        ledger.fights_by_division[division] = fights
+        ledger.last_fight_by_division[division] = ledger.last_fight
+        ledger.fights += fights
+    ledger.elo = max(here[1], there[1])
+    ledger.division = here[0]
+    return ledger
+
+
+def test_a_visitor_is_not_ranked_on_a_division_he_barely_fought_in():
+    """Conor McGregor made the welterweight top fifteen on a 2-2 record there,
+    carrying a featherweight run from 2013. Max Holloway made second on one
+    welterweight fight. A divisional board answers who is best in that
+    division, and the answer cannot be a number earned two divisions down."""
+    visitor = two_division(
+        "Visitor", here=("Welterweight", 1002, 1), there=("Featherweight", 1200, 20)
+    )
+    local = rated("Local", 1090, fights=14, division="Welterweight")
+
+    board = rank_division({"v": visitor, "l": local}, "Welterweight", on=TODAY)
+
+    assert [entry.name for entry in board] == ["Local"]
+
+
+def test_the_same_fighter_is_ranked_where_he_did_fight():
+    """The other half of it: his featherweight record is real and still ranks."""
+    visitor = two_division(
+        "Visitor", here=("Welterweight", 1002, 1), there=("Featherweight", 1200, 20)
+    )
+
+    board = rank_division({"v": visitor}, "Featherweight", on=TODAY)
+
+    assert [entry.name for entry in board] == ["Visitor"]
+    assert board[0].rating == 1200, "rated on what he did at featherweight"
+
+
+def test_a_division_fades_from_the_last_fight_held_in_it():
+    """A man can stand on two boards now, so his welterweight year does not
+    read as current because he has been busy at lightweight since."""
+    ledger = Ledger(name="Mover")
+    ledger.elo = 1200
+    ledger.fights = 20
+    ledger.division = "Lightweight"
+    ledger.last_fight = TODAY - timedelta(days=30)
+    for division, elo, fights, ago in (
+        ("Lightweight", 1200, 10, 30),
+        ("Welterweight", 1200, 10, 365 * 3),
+    ):
+        ledger.division_elo[division] = elo
+        ledger.fights_by_division[division] = fights
+        ledger.last_fight_by_division[division] = TODAY - timedelta(days=ago)
+
+    fresh = rating_on(ledger, TODAY, "Lightweight")
+    stale = rating_on(ledger, TODAY, "Welterweight")
+
+    assert fresh == 1200, "he fought there last month"
+    assert stale < fresh, "and not there for three years"
+
+
+def test_pound_for_pound_adds_up_what_was_proved_in_each_division():
+    """Two divisions genuinely beat one, and a division entered but not won in
+    adds nothing rather than subtracting."""
+    both = two_division(
+        "Two Divisions", here=("Lightweight", 1200, 12), there=("Welterweight", 1100, 6)
+    )
+    one = two_division(
+        "One Division", here=("Lightweight", 1250, 12), there=("Welterweight", 1000, 6)
+    )
+
+    assert pound_for_pound_on(both, TODAY) == 1300, "+200 and +100"
+    assert pound_for_pound_on(one, TODAY) == 1250, "+250 and nothing"
+    assert pound_for_pound_on(both, TODAY) > pound_for_pound_on(one, TODAY)
+
+
+def test_turning_up_in_a_third_division_is_worth_nothing_by_itself():
+    """Summing the ratings themselves would pay about a thousand a division for
+    showing up, and rank a journeyman who moved twice over a champion."""
+    stayed = two_division(
+        "Stayed", here=("Lightweight", 1200, 12), there=("Lightweight", 1200, 12)
+    )
+    wandered = two_division(
+        "Wandered", here=("Lightweight", 1100, 6), there=("Welterweight", 1000, 6)
+    )
+    wandered.division_elo["Middleweight"] = 1000
+    wandered.fights_by_division["Middleweight"] = 4
+
+    assert pound_for_pound_on(stayed, TODAY) > pound_for_pound_on(wandered, TODAY)
+
+
+def test_a_champion_is_on_his_own_board_however_the_rating_reads():
+    """Makhachev holds the welterweight belt on two fights in the division, so
+    his welterweight rating puts him thirtieth. A welterweight board with no
+    welterweight champion on it is the worse answer."""
+    champion = two_division(
+        "Champion", here=("Welterweight", 1044, 2), there=("Lightweight", 1220, 16)
+    )
+    champion.champion_of = "Welterweight"
+    champion.belts_held = ("Welterweight",)
+    others = {
+        str(i): rated(f"Contender {i}", 1100 + i, fights=14, division="Welterweight")
+        for i in range(20)
+    }
+
+    board = rank_division({**others, "c": champion}, "Welterweight", on=TODAY, depth=15)
+
+    assert len(board) == 16, "the fifteen, and the champion after them"
+    assert board[-1].name == "Champion"
+    assert board[-1].champion
+    assert board[-1].rank > 15, "at the rank his record gives him, not a courtesy one"
