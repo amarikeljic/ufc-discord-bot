@@ -290,6 +290,16 @@ class Ledger:
     records outside. This is what lets the model discount the rating in
     proportion to how much of it was earned out there."""
 
+    division_strength: dict[str, float] = field(default_factory=dict)
+    """What the boards rank on: a strength fit per division, from its own fights.
+
+    The running rating could not do this job. It accumulates from a standing
+    start, so it pays for how many fights a man has had in a division rather
+    than who he beat there, and two fights cannot catch twelve however the
+    learning rate is set. Makhachev beat the sixth and tenth best welterweights
+    in his first two at the weight and came out thirtieth. The fit credits the
+    opposition and shrinks what it cannot see, which is the same reason the
+    all-time boards have always used it."""
     division_elo: dict[str, float] = field(default_factory=dict)
     """A rating per division, each built only from the fights held in it.
 
@@ -427,10 +437,16 @@ class Ledger:
     # -- who they have faced -------------------------------------------------
 
     def elo_in(self, division: str | None) -> float:
-        """Their rating in one division, or the starting rating if never there."""
+        """Their running rating in one division, or the start if never there."""
         if division is None:
             return self.elo
         return self.division_elo.get(division, ELO_START)
+
+    def strength_in(self, division: str | None) -> float:
+        """Their fitted strength in one division, which is what a board ranks on."""
+        if division is None:
+            return self.strength
+        return self.division_strength.get(division, ELO_START)
 
     def fights_in(self, division: str | None) -> int:
         """How many fights they have had in one division."""
@@ -845,6 +861,9 @@ def build_history(
     # (winner, loser) for every decided fight, which is all the strength fit
     # needs: it has no notion of when a fight happened.
     decided: list[tuple[str, str]] = []
+    # And the same split by division, because a board ranks on what a man did
+    # in the division it is about.
+    decided_by_division: dict[str, list[tuple[str, str]]] = defaultdict(list)
     # Who holds each belt, for the defence counts. Only needed to settle a
     # field, so it does not live on the ledgers the bot then keeps in memory.
     champion: dict[str, str] = {}
@@ -965,7 +984,10 @@ def build_history(
             history.last_title_fight[division] = on
 
         if fight.winner in ("a", "b"):
-            decided.append((key_a, key_b) if fight.winner == "a" else (key_b, key_a))
+            pair = (key_a, key_b) if fight.winner == "a" else (key_b, key_a)
+            decided.append(pair)
+            if division:
+                decided_by_division[division].append(pair)
 
         met = history.meetings.setdefault(pair_key(key_a, key_b), Meeting())
         met.fights += 1
@@ -981,6 +1003,9 @@ def build_history(
         history.ledgers[key].home_division = counts.most_common(1)[0][0]
     for key, value in strength.fit(decided).items():
         history.ledgers[key].strength = value
+    for division, bouts in decided_by_division.items():
+        for key, value in strength.fit(bouts).items():
+            history.ledgers[key].division_strength[division] = value
     history.champions = dict(champion)
     for division, key in champion.items():
         history.ledgers[key].champion_of = division

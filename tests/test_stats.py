@@ -86,6 +86,8 @@ def rated(
         # rating would be a fighter who has never fought in the division it says
         # he is in, which the boards correctly refuse to rank.
         ledger.division_elo[division] = elo
+        # What the boards rank on; the running rating is pound for pound's.
+        ledger.division_strength[division] = elo
         ledger.fights_by_division[division] = fights
         ledger.last_fight_by_division[division] = ledger.last_fight
     if defences:
@@ -922,7 +924,15 @@ def test_an_all_time_board_lists_a_fighter_where_they_fought_most():
 
     led = rated("Georges St-Pierre", 1260, fights=22, division="Middleweight", ago=3000)
     led.home_division = "Welterweight"
-
+    # Twenty-one at welterweight and the last at middleweight, which is the
+    # whole of what this is about. The board scores the division it is about,
+    # so the fights have to be in the division they happened in.
+    led.fights_by_division = {"Welterweight": 21, "Middleweight": 1}
+    led.division_strength = {"Welterweight": 1260, "Middleweight": 1260}
+    led.last_fight_by_division = {
+        "Welterweight": led.last_fight - timedelta(days=400),
+        "Middleweight": led.last_fight,
+    }
 
     assert [e.name for e in all_time({"gsp": led}, "Welterweight")] == ["Georges St-Pierre"]
     assert all_time({"gsp": led}, "Middleweight") == [], "not where he belongs"
@@ -1201,6 +1211,8 @@ def two_division(name: str, *, here: tuple[str, float, int], there: tuple[str, f
     ledger.last_fight = TODAY - timedelta(days=30)
     for division, elo, fights in (here, there):
         ledger.division_elo[division] = elo
+        # What the boards rank on; the running rating is pound for pound's.
+        ledger.division_strength[division] = elo
         ledger.fights_by_division[division] = fights
         ledger.last_fight_by_division[division] = ledger.last_fight
         ledger.fights += fights
@@ -1252,6 +1264,8 @@ def test_a_division_fades_from_the_last_fight_held_in_it():
         ("Welterweight", 1200, 10, 365 * 3),
     ):
         ledger.division_elo[division] = elo
+        # What the boards rank on; the running rating is pound for pound's.
+        ledger.division_strength[division] = elo
         ledger.fights_by_division[division] = fights
         ledger.last_fight_by_division[division] = TODAY - timedelta(days=ago)
 
@@ -1312,3 +1326,50 @@ def test_a_champion_is_on_his_own_board_however_the_rating_reads():
     assert board[-1].name == "Champion"
     assert board[-1].champion
     assert board[-1].rank > 15, "at the rank his record gives him, not a courtesy one"
+
+
+def test_a_board_ranks_on_what_was_done_in_its_own_division():
+    """The running rating accumulates, so it pays for how many fights a man has
+    had at the weight rather than who he beat there. Makhachev took the belt
+    beating the sixth and tenth best welterweights in two fights and his running
+    welterweight rating put him thirtieth. The fit is what the board reads."""
+    from ufcbot.stats.rankings import rating_on
+
+    ledger = Ledger(name="Two Fights")
+    ledger.last_fight = TODAY - timedelta(days=30)
+    ledger.division = "Welterweight"
+    ledger.division_elo["Welterweight"] = 1044
+    ledger.division_strength["Welterweight"] = 1376
+    ledger.fights_by_division["Welterweight"] = 2
+    ledger.last_fight_by_division["Welterweight"] = ledger.last_fight
+
+    assert rating_on(ledger, TODAY, "Welterweight") == 1376, "the fit"
+    assert ledger.elo_in("Welterweight") == 1044, "the running rating is still there"
+
+
+def test_an_all_time_board_counts_the_fights_held_in_it():
+    """McGregor was fourth all time at featherweight on seven of his fifteen
+    fights, because the minimum counted a whole career and the score came from
+    one too."""
+    from ufcbot.stats.rankings import ALL_TIME_MIN_FIGHTS, all_time
+
+    visitor = rated("Visitor", 1400, fights=ALL_TIME_MIN_FIGHTS + 4, division="Featherweight")
+    visitor.home_division = "Featherweight"
+    visitor.fights_by_division = {"Featherweight": ALL_TIME_MIN_FIGHTS - 5, "Lightweight": 9}
+    visitor.division_strength = {"Featherweight": 1400, "Lightweight": 1400}
+
+    assert all_time({"v": visitor}, "Featherweight") == [], "not enough of them were there"
+
+
+def test_a_belt_counts_towards_the_division_it_was_won_in():
+    """A two-division champion's first belt is not the second division's."""
+    from ufcbot.stats.rankings import career_points
+
+    champ = rated("Two Belts", 1300, fights=20, division="Middleweight", titles=2)
+    champ.belts_held = ("Welterweight", "Middleweight")
+    champ.division_strength = {"Welterweight": 1300, "Middleweight": 1300}
+
+    both = career_points(champ, None)
+    one = career_points(champ, "Middleweight")
+
+    assert both > one, "the career counts two belts where the division counts one"

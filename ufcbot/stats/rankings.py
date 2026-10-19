@@ -65,8 +65,21 @@ DECAY_HALF_LIFE = timedelta(days=365)
 # from injury is still on the board and short enough that a retirement is not.
 ACTIVE_WITHIN = timedelta(days=548)
 
-# Below this many UFC fights a rating is mostly where it started.
-MIN_FIGHTS = 3
+# Fights in a division before a board will rank you in it.
+#
+# Three while the boards ranked on the running rating, which needed fights to
+# say anything and so said little about anyone who had few. The divisional
+# strength fit has the opposite habit: it credits the opposition and does not
+# charge for length, so a 3-0 record against anybody decent reads as a top ten
+# one. At three it put Temirov and Estevam in the flyweight top ten on three
+# fights each, Michael Page seventh at middleweight on three, and Josh Hokit
+# fifth at heavyweight on four.
+#
+# Six is where that stops without the board ceasing to be about now: it drops
+# 148 fighters from having a rank at all, but only 20 of the 165 names actually
+# visible across the top fifteens, and what remains on a thin record has earned
+# the look -- Morales 7-0, Pereira a former champion on seven.
+MIN_FIGHTS = 6
 # All-time asks what someone did over a career, so it asks for a career.
 #
 # This is where the longevity preference lives, now that the strength fit's
@@ -140,11 +153,24 @@ def rating_on(ledger: Ledger, on: date, division: str | None = None) -> int:
     above it has nothing to lose, and nobody is ever dragged below where they
     began by sitting still.
 
-    With a division, it is that division's rating fading from the last fight
-    held there. A man can stand on two boards now, and his welterweight year
-    does not become current because he has been busy at lightweight.
+    With a division, it is that division's fitted strength fading from the last
+    fight held there -- what he did at this weight, against whom, going stale
+    while he is away from it.
+
+    Fitted rather than the running rating because a board is a question about a
+    division and the running rating cannot answer it in few fights: it
+    accumulates, so it pays for how many fights a man has had at the weight
+    rather than who he beat. Makhachev took the welterweight belt beating the
+    sixth and tenth best in the division and his running welterweight rating
+    put him thirtieth, because two fights cannot out-accumulate twelve. The fit
+    has him ninth. Both sit on the same scale, centred on ELO_START with a
+    tenfold change in the odds every 400 points, so the fade is the same
+    arithmetic either way.
+
+    Pound for pound still reads the running rating, which is what a career-long
+    number is good at.
     """
-    rating = ledger.elo_in(division)
+    rating = ledger.strength_in(division) if division is not None else ledger.elo
     last = ledger.last_fight_in(division)
     if last is None:
         return round(rating)
@@ -228,7 +254,13 @@ def _eligible(ledger: Ledger, on: date, division: str | None = None) -> bool:
     last = ledger.last_fight_in(division)
     if last is None:
         return False
-    if ledger.fights_in(division) < MIN_FIGHTS and not holds_belt(ledger, on, division):
+    # The champion exemption is for a division's own champion, so it is only
+    # asked about a division: asking it of the pound-for-pound list would send
+    # holds_belt back here for the same fighter, and round again. The order of
+    # the test is what stops that.
+    if ledger.fights_in(division) < MIN_FIGHTS and (
+        division is None or not holds_belt(ledger, on, division)
+    ):
         return False
     return on - last <= ACTIVE_WITHIN
 
@@ -366,7 +398,7 @@ def rank_division(
     return cut
 
 
-def career_points(ledger: Ledger) -> float:
+def career_points(ledger: Ledger, division: str | None = None) -> float:
     """What a fighter did, on the scale the strength fit works in.
 
     The fitted strength rather than the rating they ended on, because a career
@@ -379,12 +411,23 @@ def career_points(ledger: Ledger) -> float:
     Unrounded, and in rating points rather than the score the boards print: a
     score is six points wide, so ordering on it would tie fighters the record
     separates.
+
+    With a division, it is what they did in that division: the fit from its own
+    fights, and the belts and defences that happened in it. One career-wide
+    number on a divisional board credits a man there for work done elsewhere --
+    McGregor was fourth all time at featherweight on seven of his fifteen
+    fights, Pereira third at light heavyweight on seven of thirteen.
     """
     return (
-        ledger.strength
-        + TITLE_DEFENCE_POINTS * ledger.title_defences
-        + TITLE_WIN_POINTS * ledger.title_wins
+        ledger.strength_in(division)
+        + TITLE_DEFENCE_POINTS * ledger.defences_in(division)
+        + TITLE_WIN_POINTS * (ledger.title_wins if division is None else _titles_in(ledger, division))
     )
+
+
+def _titles_in(ledger: Ledger, division: str) -> int:
+    """Belts won in one division, which is what its own board should pay for."""
+    return sum(1 for won in ledger.belts_held if won == division)
 
 
 # How many rating points go into one point of career score. The all-time number
@@ -403,7 +446,7 @@ def career_points(ledger: Ledger) -> float:
 RATING_POINTS_PER_SCORE = 9.0
 
 
-def career_score(ledger: Ledger) -> int:
+def career_score(ledger: Ledger, division: str | None = None) -> int:
     """What a fighter did, as a score on its own scale. Higher is better.
 
     Two figures rather than four so that it is visibly not the rating printed
@@ -415,7 +458,7 @@ def career_score(ledger: Ledger) -> int:
     a losing record reaches the board, a negative reads as a broken number
     rather than as a bad career.
     """
-    return max(0, round((career_points(ledger) - CENTRE) / RATING_POINTS_PER_SCORE))
+    return max(0, round((career_points(ledger, division) - CENTRE) / RATING_POINTS_PER_SCORE))
 
 
 def all_ranked(
@@ -453,16 +496,16 @@ def all_time(
     they finished in, or St-Pierre is a middleweight and Jones a heavyweight.
     """
     entries = [
-        (career_score(ledger), key, ledger)
+        (career_score(ledger, division), key, ledger)
         for key, ledger in ledgers.items()
-        if ledger.fights >= ALL_TIME_MIN_FIGHTS
+        if ledger.fights_in(division) >= ALL_TIME_MIN_FIGHTS
         and (division is None or (ledger.home_division or ledger.division) == division)
         and (include_women or not is_womens(ledger.home_division or ledger.division))
     ]
     # Sorted on the unrounded points and printed as the score: two careers that
     # print the same number are almost never equal underneath, and the points
     # say which way round they go.
-    entries.sort(key=lambda entry: (-career_points(entry[2]), entry[2].name))
+    entries.sort(key=lambda entry: (-career_points(entry[2], division), entry[2].name))
     return _ranked(entries, home=True, on=on, division=division)[:depth]
 
 

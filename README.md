@@ -690,23 +690,40 @@ problem has gone.
 
 Each division gets one message, holding **Current Ratings** and, beneath it, **🐐 All Time
 Ratings**. The current half ranks whoever has fought in the last eighteen months and has at
-least three UFC fights. `/ufc channels set womens_divisions:False` leaves the
+least six fights in the division it is about. `/ufc channels set womens_divisions:False` leaves the
 women's divisions out entirely, boards and pound-for-pound alike. The women's divisions
 are kept separate from the men's.
 
-**A fighter is rated once per division, on the fights they had in it**, and stands on one
-board at a time: where they last made weight, once they have fought there enough to be of
+**A board ranks on a strength fit built from that division's own fights**, and a fighter
+stands on one board at a time: where they last made weight, once they have fought there enough to be of
 it, and otherwise where they came from. Moving up takes you off the board you left rather
 than leaving you on both. A single fight at a new weight does not move you — Holloway took
 one welterweight fight and is still ranked a featherweight — and holding the belt settles it
 immediately, because you do not get to be champion of a division you are not in.
 
-One rating across a whole career put a man on the board of whichever division he fought in
-last, carrying everything he earned anywhere else. Conor McGregor made the welterweight top
-fifteen on a 2-2 record there, off a featherweight run from 2013; Max Holloway made second
-on a single welterweight fight, after twenty-seven at featherweight. The welterweights they
-were above — Edwards at 20 fights in the division, Muhammad at 22, Magny at 38 — are the
-men the board is supposed to be about.
+One running rating across a whole career put a man on the board of whichever division he
+fought in last, carrying everything he earned anywhere else. Conor McGregor made the
+welterweight top fifteen on a 2-2 record there, off a featherweight run from 2013; Max
+Holloway made second on a single welterweight fight, after twenty-seven at featherweight.
+
+A rating per division fixed that and introduced the opposite fault. A running rating
+accumulates, so it pays for how many fights a man has had at the weight rather than who he
+beat there: Makhachev took the welterweight belt beating the sixth and tenth best
+welterweights in his first two fights at the weight, and came out **thirtieth of
+sixty-one**, because two fights cannot out-accumulate twelve. Raising the learning rate for
+a fighter's first fights in a division does not fix it — swept at four settings it moved him
+to twenty-sixth at best while floating short unbeaten runs over Edwards, Muhammad and Magny.
+
+So the boards rank on the same fit the all-time boards use, built from one division's fights
+instead of all of them. It credits the opposition and shrinks what it cannot see, which is
+exactly the property Elo lacks. Makhachev comes out **eighth**. McGregor is 162nd of the 568
+men who have fought at welterweight.
+
+The minimum is six fights rather than three because the fit has the opposite bias to the
+rating it replaced: it does not charge for length, so three good wins read as a top-ten
+career. At three it put two flyweights in the top ten on three fights each and Josh Hokit
+fifth at heavyweight on four. Six drops 148 fighters from having a rank at all, but only 20
+of the 165 names actually visible across the top fifteens.
 
 It is not the UFC's ranking and will not agree with it. Nobody votes, holding a belt counts
 for nothing by itself, and a fighter arriving from another promotion starts level with
@@ -927,14 +944,13 @@ welterweight. 215 fighters are in that position. The current boards no longer ne
 rule: a fighter is rated separately in each division, so they appear on every board they
 have earned a place on rather than on one chosen for them.
 
-The all-time boards still do need it, and still have the problem the current boards had.
-They rank on the strength fit, which is one number for a whole career, so what a fighter did
-at lightweight counts towards the division they fought in most: McGregor is fourth all time
-at featherweight on seven of his fifteen fights, Pereira third at light heavyweight on
-seven of thirteen. 26 of the 165 names across those boards have fewer than the twelve fights
-the board asks for in the division it lists them under. Fixing it properly means fitting the
-strength of a division from that division's fights, which is a larger piece of work than the
-rating change and would re-open every constant above.
+The all-time boards still need that rule, to decide which board a career belongs on. What
+they no longer do is score it from the whole career: they read the same divisional fit, and
+count only the belts and defences won in the division. McGregor was fourth all time at
+featherweight on seven of his fifteen fights and Pereira third at light heavyweight on seven
+of thirteen; 26 of 165 names sat on a board they had not earned twelve fights on. That is
+**0 of 159** now, and the minimum counts fights in the division rather than fights in
+total.
 
 **The champion is always on their own board**, at whatever rank the rating gives them,
 even when that is past the fifteen the board prints. Ratings are divisional, so a champion
