@@ -76,7 +76,7 @@ def _reason(current, previous: RankedState | None, ledger: Ledger | None, on: da
         if ledger is None or not is_eligible(ledger, on):
             return INACTIVE
         return PUSHED
-    if ledger is not None and is_fading(ledger, on):
+    if ledger is not None and is_fading(ledger, on, current.division):
         # Still ranked, but slipping under their own rating rather than anyone
         # else's results.
         return LAYOFF

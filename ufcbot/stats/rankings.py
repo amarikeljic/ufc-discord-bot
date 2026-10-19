@@ -212,9 +212,16 @@ def pound_for_pound_on(ledger: Ledger, on: date) -> int:
     return round(ELO_START + gained)
 
 
-def is_fading(ledger: Ledger, on: date) -> bool:
-    """Whether this fighter's rating is being held down by a layoff."""
-    return ledger.last_fight is not None and (on - ledger.last_fight) > DECAY_GRACE
+def is_fading(ledger: Ledger, on: date, division: str | None = None) -> bool:
+    """Whether this fighter's rating is being held down by a layoff.
+
+    Asked of the division the board is about, because that is the clock the
+    board's number fades on: a man who fought at lightweight last month is not
+    fading there and may well be fading at welterweight, where he has not been
+    for three years.
+    """
+    last = ledger.last_fight_in(division)
+    return last is not None and (on - last) > DECAY_GRACE
 
 
 def is_eligible(ledger: Ledger, on: date) -> bool:

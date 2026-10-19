@@ -390,9 +390,14 @@ wearing a statistical parameter's clothes. Cross-validation on held-out bouts sa
 preference is stated as a number instead. At the honest shrinkage, five fights let Du
 Plessis at 10-1, Evloev at 10-0 and Topuria at 9-1 into the top twelve all time, over
 Anderson Silva. Twelve produces the same ten names the old setting did, in a different
-order, and Khabib at thirteen is the shortest career it admits. It costs the thinnest
-divisions: exactly one woman has had twelve UFC featherweight fights, so that board is one
-name long, which is true.
+order, and Khabib at thirteen is the shortest career it admits.
+
+It costs the thinnest divisions, and costs them more now that the minimum counts fights in
+the division rather than fights in total. **Women's featherweight has no board at all**: the
+most experienced woman ever to fight at the weight is Norma Dumont on seven, and she last
+did it in 2023, so the division fails the all-time minimum and the activity window alike.
+Twenty-six women have fought there and not one has a featherweight career to rank. A board
+that said otherwise would be scoring them for work done a division below.
 
 **The database is backed up at the end of each card if you say where.** `BACKUP_DIR` is
 empty by default and nothing is written. Pointed somewhere, the pass that grades the last
@@ -725,16 +730,17 @@ career. At three it put two flyweights in the top ten on three fights each and J
 fifth at heavyweight on four. Six drops 148 fighters from having a rank at all, but only 20
 of the 165 names actually visible across the top fifteens.
 
-It is not the UFC's ranking and will not agree with it. Nobody votes, holding a belt counts
-for nothing by itself, and a fighter arriving from another promotion starts level with
-everyone else however good they already are. Everyone starts at 1000; the number only ever
+It is not the UFC's ranking and will not agree with it. Nobody votes, holding a belt adds
+nothing to the number itself — it only guarantees a champion a place on their own division's
+board, at whatever rank the number gives them — and a fighter arriving from another
+promotion starts level with everyone else however good they already are. Everyone starts at 1000; the number only ever
 means something next to another fighter's, so where it starts is a matter of taste. Read it
 as who has done the most against the best, not as a title picture: champions often sit
 below contenders here, and that is the method working, not failing.
 
-Two things stop a raw rating from reading as a ranking, and both are handled when the board
-is built rather than in the rating itself. `Ledger.elo` stays exactly as the fights left it,
-so nothing here changes what the model trains or predicts on.
+Two things stop a raw number from reading as a ranking, and both are handled when the board
+is built rather than in the number itself. `Ledger.elo` stays exactly as the fights left it,
+so nothing on these boards changes what the model trains or predicts on.
 
 **A rating fades while nobody is defending it.** A rating is what a fighter has earned, and
 a fighter who is not fighting is not earning. Left alone, someone who retires keeps the
