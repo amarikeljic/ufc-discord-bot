@@ -1205,7 +1205,10 @@ def two_division(name: str, *, here: tuple[str, float, int], there: tuple[str, f
         ledger.last_fight_by_division[division] = ledger.last_fight
         ledger.fights += fights
     ledger.elo = max(here[1], there[1])
+    # Where he last made weight, and where he has fought most, which are the
+    # two the board chooses between.
     ledger.division = here[0]
+    ledger.home_division = max((here, there), key=lambda side: side[2])[0]
     return ledger
 
 

@@ -694,10 +694,12 @@ least three UFC fights. `/ufc channels set womens_divisions:False` leaves the
 women's divisions out entirely, boards and pound-for-pound alike. The women's divisions
 are kept separate from the men's.
 
-**A fighter is rated once per division, on the fights they had in it.** They stand on every
-board where they have three fights and have been seen in the last eighteen months, so a
-genuine two-division career appears twice, and moving up means starting from 1000 again and
-proving it. That is what a divisional board is asking.
+**A fighter is rated once per division, on the fights they had in it**, and stands on one
+board at a time: where they last made weight, once they have fought there enough to be of
+it, and otherwise where they came from. Moving up takes you off the board you left rather
+than leaving you on both. A single fight at a new weight does not move you — Holloway took
+one welterweight fight and is still ranked a featherweight — and holding the belt settles it
+immediately, because you do not get to be champion of a division you are not in.
 
 One rating across a whole career put a man on the board of whichever division he fought in
 last, carrying everything he earned anywhere else. Conor McGregor made the welterweight top

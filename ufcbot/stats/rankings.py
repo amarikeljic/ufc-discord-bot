@@ -196,14 +196,35 @@ def is_eligible(ledger: Ledger, on: date) -> bool:
     return _eligible(ledger, on)
 
 
+def board_division(ledger: Ledger, on: date) -> str | None:
+    """The one division a fighter is ranked in.
+
+    Where they last made weight, once they have fought there enough to be of
+    it, and otherwise where they came from. A fighter belongs on one board at a
+    time: moving up takes you off the board you left rather than leaving you on
+    both, and a single fight at a new weight does not make you of that division
+    yet -- Holloway took one welterweight fight and is a featherweight.
+
+    Holding the belt settles it immediately, whatever the count says. You do
+    not get to be champion of a division you are not in.
+    """
+    current = ledger.division
+    if current and (
+        ledger.fights_in(current) >= MIN_FIGHTS or holds_belt(ledger, on, current)
+    ):
+        return current
+    return ledger.home_division or current
+
+
 def _eligible(ledger: Ledger, on: date, division: str | None = None) -> bool:
-    """Ranked on this board: enough fights in it, and seen there recently enough.
+    """Ranked on this board: it is their division, and they have been seen lately.
 
     A reigning champion is kept whatever the count says. Makhachev holds the
     welterweight belt on two fights in the division and would otherwise be
-    missing from his own board, which is a worse answer than ranking him where
-    two fights put him.
+    missing from his own board.
     """
+    if division is not None and board_division(ledger, on) != division:
+        return False
     last = ledger.last_fight_in(division)
     if last is None:
         return False
