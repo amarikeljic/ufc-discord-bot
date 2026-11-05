@@ -31,8 +31,10 @@ have done.
   graphic. A result redraws the picks and pick'em boards at once, so nothing on screen
   disagrees with the live channel.
 - **Card changes.** A fight coming off the card, a short-notice replacement or a bout
-  added late is announced as soon as it shows up, days before the card if that is when
-  it happens. Replacements are also written down with how much warning the fighter had:
+  added late is announced once upstream has said it twice — about an hour after it shows
+  up, days before the card if that is when it happens. ESPN flips a bout between two
+  readings and back again often enough that reporting the first sighting meant announcing
+  changes that never happened. Replacements are also written down with how much warning the fighter had:
   nothing reads that yet, but no public dataset records it and the bot is already
   watching, so it is a model input next season that cannot be bought today.
 - **Ratings moves.** When a division's board changes, the move is announced with the
@@ -1152,6 +1154,17 @@ Anything that would read as a fight being cancelled is only believed when the ca
 cleanly. A response missing a fight, or missing the fighters within one, is left alone
 until the next pass — the same rule that decides when a pick is dropped or a pick'em pick
 is voided.
+
+**No change is believed until the card reads the same way twice.** ESPN does not only
+change a card, it changes its mind: on the November 7 card it swapped Calderon in for
+Brennan at five, swapped Brennan back at six, took the fight off at ten and put it back
+with Calderon at eleven. Each of those was announced, and between them they described
+nothing that happened. So a reading that differs from the last one is held rather than
+written down, and only a reading that matches the one before it is compared against what
+the channel was last told. A real change is reported an hour later than it used to be,
+which is the price of not reporting the ones that change back. The reading is held in
+memory rather than the database: losing it on a restart costs one pass of silence, which
+is the safe direction to fail in.
 
 The walkout preview pairs ESPN's bio (record, age, height, weight, reach, stance and
 country) with the ufcstats.com career numbers for both fighters. A fighter who is not in

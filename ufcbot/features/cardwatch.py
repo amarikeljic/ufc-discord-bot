@@ -148,6 +148,11 @@ class CardWatch:
         self.data = data
         self.storage = storage
         self.days_ahead = days_ahead
+        # The last reading of each card, to be matched by the next one before
+        # anything is believed. See ``poll``. In memory rather than in the
+        # database because losing it costs one pass of silence, which is the
+        # safe direction, and a restart is rarer than an hourly tick.
+        self._last_reading: dict[str, list[CardBout]] = {}
 
     async def poll(self) -> list[tuple[Event, list[CardChange]]]:
         """Compare every upcoming card with the last reading and record the new one.
@@ -175,14 +180,30 @@ class CardWatch:
             unresolved = {bout.id for bout in event.bouts if bout.awaiting_names}
             # A bout that did not resolve keeps the fighters it was last seen
             # with, so the next reading still has something to compare against.
-            await self.storage.save_card_bouts(
-                event.id, current + [previous[b] for b in unresolved if b in previous]
+            # Sorted so that two readings of an unchanged card compare equal:
+            # ``unresolved`` is a set, and its order is not stable across runs.
+            reading = sorted(
+                current + [previous[b] for b in unresolved if b in previous],
+                key=lambda bout: bout.bout_id,
             )
+
             if not previous:
                 # First time this card has been read; the whole card is not news.
+                await self.storage.save_card_bouts(event.id, reading)
+                self._last_reading[event.id] = reading
                 log.debug("Now watching %s for changes (%d fights)", event.name, len(current))
                 continue
 
+            settled, self._last_reading[event.id] = self._last_reading.get(event.id), reading
+            if settled != reading:
+                # Upstream has not said the same thing twice yet, so nothing is
+                # believed and nothing is written down. A card that genuinely
+                # changed is announced an hour later than it used to be, which
+                # is the price of not announcing the ones that change back.
+                log.debug("%s read differently from last pass; waiting", event.name)
+                continue
+
+            await self.storage.save_card_bouts(event.id, reading)
             changes = diff(previous, current, unresolved)
             if changes:
                 log.info("%s changed: %s", event.name, ", ".join(c.kind for c in changes))

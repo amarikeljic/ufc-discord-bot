@@ -128,3 +128,87 @@ def test_a_card_with_nobody_named_is_not_a_card_yet(soon):
 
     assert not card(unnamed_bout("B1"), unnamed_bout("B2"), start=soon).has_anyone_named
     assert card(bout("B1", fighter("1", "A"), fighter("2", "B")), start=soon).has_anyone_named
+
+
+# -- a card that will not hold still -------------------------------------------
+
+
+class Feed:
+    """ESPN, serving whichever reading of the card it was last handed."""
+
+    def __init__(self, event):
+        self.event = event
+        self.reads = 0
+
+    async def upcoming_events(self, *, days, limit):
+        return [self.event]
+
+    async def get_event(self, event_id, **kwargs):
+        self.reads += 1
+        return self.event
+
+
+BRENNAN = fighter("10", "Lucas Brennan")
+CALDERON = fighter("11", "Carlos Calderon")
+BASHI = fighter("12", "Austin Bashi")
+
+
+def against(opponent, soon):
+    """The one-bout card, with Bashi facing whoever upstream says today."""
+    return card(bout("B9", BASHI, opponent, weight="Featherweight"), start=soon)
+
+
+async def test_a_card_that_changes_back_is_never_announced(storage, soon):
+    """Upstream flips a bout between two readings and back again within the
+    hour: Calderon replaces Brennan at five, Brennan replaces Calderon at six.
+    Both were announced, and neither had happened."""
+    from ufcbot.features.cardwatch import CardWatch
+
+    feed = Feed(against(BRENNAN, soon))
+    watch = CardWatch(feed, storage)
+
+    assert await watch.poll() == [], "first sight of a card is not news"
+    feed.event = against(CALDERON, soon)
+    assert await watch.poll() == [], "not believed on one reading"
+    feed.event = against(BRENNAN, soon)
+    assert await watch.poll() == [], "and it was never true"
+
+    remembered = await storage.card_bouts("EV1")
+    assert remembered["B9"].athletes == {"12", "10"}, "Brennan was never written off"
+
+
+async def test_a_change_that_holds_is_announced(storage, soon):
+    """The cost of the above: a real replacement is reported one pass later
+    than it used to be, once upstream has said it twice."""
+    from ufcbot.features.cardwatch import CardWatch
+
+    feed = Feed(against(BRENNAN, soon))
+    watch = CardWatch(feed, storage)
+    await watch.poll()
+
+    feed.event = against(CALDERON, soon)
+    assert await watch.poll() == [], "held back on the first reading"
+
+    found = await watch.poll()
+
+    assert len(found) == 1
+    [(_event, changes)] = found
+    assert kinds(changes) == [REPLACED]
+    assert changes[0].left == "Lucas Brennan"
+    assert changes[0].arrived == "Carlos Calderon"
+
+
+async def test_a_confirmed_change_is_announced_once(storage, soon):
+    """And not again on every pass after it, which is what writing the reading
+    down only when it settles is for."""
+    from ufcbot.features.cardwatch import CardWatch
+
+    feed = Feed(against(BRENNAN, soon))
+    watch = CardWatch(feed, storage)
+    await watch.poll()
+    feed.event = against(CALDERON, soon)
+    await watch.poll()
+    assert await watch.poll(), "announced here"
+
+    assert await watch.poll() == [], "and not again"
+    assert await watch.poll() == []
