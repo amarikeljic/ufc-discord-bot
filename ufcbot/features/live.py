@@ -21,6 +21,7 @@ import discord
 
 from ..embeds import live_open_embed, live_result_embed, live_round_embed
 from ..embeds.images import IMAGE_NAME, MatchupImages
+from ..embeds.live import with_scorecards
 from ..models import Bout, Event
 from ..sources.espn import UFCData
 from ..stats.service import FighterCareer
@@ -43,6 +44,15 @@ OFFICIAL_FALLBACK = timedelta(minutes=10)
 # How many fights past the one under way to keep watching, so a walkout is never
 # missed if ESPN is slow to mark the fight before it finished.
 LOOKAHEAD = 3
+# A decision's scorecards reach ESPN a few minutes after the result is read. The
+# result goes out without them and the same message is edited once they land;
+# this long after the result they are not coming, and the bot stops asking.
+SCORECARDS_WAIT = timedelta(hours=2)
+SCORECARDS_TTL = 60
+RESULT = "result"
+CARDS_PENDING = "cards:pending"
+CARDS_DONE = "cards"
+DECISIONS = ("dec_u", "dec_s", "draw")
 
 STAT_SOURCES = {
     "sig_l": ("sigStrikesLanded",),
@@ -143,6 +153,14 @@ class LiveCoverage:
                     posted += await self._cover(event, bout, channels, posted_keys[bout.id])
                 except Exception:  # one bout must not stop the card
                     log.exception("Live coverage failed for %s", bout.matchup)
+            # Results already posted whose scorecards had not landed yet. An edit,
+            # not a post: nothing on the boards changes when they arrive.
+            for bout in bouts:
+                if CARDS_PENDING in posted_keys[bout.id] and CARDS_DONE not in posted_keys[bout.id]:
+                    try:
+                        await self._add_scorecards(bout, channels)
+                    except Exception:  # never worth the rest of the card
+                        log.exception("Adding the scorecards failed for %s", bout.matchup)
         return posted
 
     @staticmethod
@@ -282,7 +300,9 @@ class LiveCoverage:
                 return 0
 
         totals = await self._totals(bout) or {}
-        scorecards = await self.data.load_scorecards(bout) if method in ("dec_u", "dec_s", "draw") else {}
+        # Asked for on a finish as well, and shown only if ESPN has them: a card
+        # up to the stoppage is worth seeing, but ESPN has never published one.
+        scorecards = await self.data.load_scorecards(bout) if bout.has_opponents and not no_contest else []
         winner = bout.fighter(str(bout.winner_id)) if bout.winner_id else None
         embed = live_result_embed(
             event_name=event.name,
@@ -301,9 +321,62 @@ class LiveCoverage:
         image = await self._matchup(bout, winner_id=winner.id if winner else None)
         if image:
             embed.set_image(url=f"attachment://{IMAGE_NAME}")
-        await self._send(channels, embed=embed, image=image)
-        await self.storage.mark_live_posted(bout.id, "result")
+        sent = await self._send(channels, embed=embed, image=image)
+        await self.storage.mark_live_posted(bout.id, RESULT)
+        if method in DECISIONS and not scorecards and sent:
+            # Posted now rather than held for them; the same message is edited
+            # once they land. Remembered in the database, so a restart in
+            # between still makes the edit.
+            for message in sent:
+                await self.storage.save_live_message(
+                    bout.id, RESULT, message.channel.id, message.id, embed.to_dict(), posted_at=self.clock()
+                )
+            await self.storage.mark_live_posted(bout.id, CARDS_PENDING)
         return 1
+
+    async def _add_scorecards(self, bout: Bout, channels: list[discord.abc.Messageable]) -> None:
+        """Edit a decision's result post once its scorecards are published.
+
+        The embed is the one that was posted, with the cards put in above the
+        fight totals; nothing else on it is rebuilt. A failed edit is logged
+        and tried again on the next tick, until SCORECARDS_WAIT is up.
+        """
+        waiting = await self.storage.live_messages(bout.id, RESULT)
+        if not waiting:
+            await self.storage.mark_live_posted(bout.id, CARDS_DONE)
+            return
+        if self.clock() - min(posted_at for *_rest, posted_at in waiting) > SCORECARDS_WAIT:
+            log.info("No scorecards for %s after %s; the result stays as posted", bout.matchup, SCORECARDS_WAIT)
+            for channel_id, *_rest in waiting:
+                await self.storage.forget_live_message(bout.id, RESULT, channel_id)
+            await self.storage.mark_live_posted(bout.id, CARDS_DONE)
+            return
+
+        cards = await self.data.load_scorecards(bout, ttl=SCORECARDS_TTL)
+        if not cards:
+            return
+        winner = bout.fighter(str(bout.winner_id)) if bout.winner_id else None
+        by_id = {getattr(channel, "id", None): channel for channel in channels}
+        for channel_id, message_id, posted, _posted_at in waiting:
+            channel = by_id.get(channel_id)
+            if channel is None:
+                # That server stopped taking live posts; there is nothing to edit there.
+                await self.storage.forget_live_message(bout.id, RESULT, channel_id)
+                continue
+            embed = with_scorecards(discord.Embed.from_dict(posted), bout, winner, cards)
+            try:
+                await channel.get_partial_message(message_id).edit(embed=embed)
+            except discord.NotFound:
+                pass  # deleted; there is nothing left to add them to
+            except discord.HTTPException as exc:
+                log.warning(
+                    "Could not add the scorecards to the %s result in %s: %r; trying again next tick",
+                    bout.matchup, getattr(channel, "name", channel_id), exc,
+                )
+                continue
+            await self.storage.forget_live_message(bout.id, RESULT, channel_id)
+        if not await self.storage.live_messages(bout.id, RESULT):
+            await self.storage.mark_live_posted(bout.id, CARDS_DONE)
 
     async def _ended_in_round(self, bout: Bout, round_number: int, final_round: int, over: dict | None) -> bool:
         """Whether the fight was finished inside this round rather than going the distance.
@@ -367,7 +440,9 @@ class LiveCoverage:
         content: str | None = None,
         embed: discord.Embed | None = None,
         image: bytes | None = None,
-    ) -> None:
+    ) -> list[discord.Message]:
+        """Post to every live channel. Returns the messages that went out."""
+        sent: list[discord.Message] = []
         for channel in channels:
             kwargs: dict = {}
             if content:
@@ -378,6 +453,7 @@ class LiveCoverage:
                 # A File is consumed by sending, so each channel gets its own.
                 kwargs["file"] = discord.File(io.BytesIO(image), filename=IMAGE_NAME)
             try:
-                await channel.send(**kwargs)
+                sent.append(await channel.send(**kwargs))
             except discord.HTTPException as exc:
                 log.warning("Live post failed in %s: %r", getattr(channel, "name", channel), exc)
+        return sent

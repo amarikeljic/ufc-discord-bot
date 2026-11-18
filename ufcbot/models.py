@@ -62,6 +62,20 @@ class FightHistoryEntry:
     title_fight: bool = False
 
 
+@dataclass(slots=True, frozen=True)
+class JudgeCard:
+    """One judge's scorecard for a fight: the total each fighter got from them.
+
+    Totals only. ESPN, the one source the bot reads them from, publishes a
+    judge's score for the whole fight and never round by round, so there is
+    nothing finer to hold.
+    """
+
+    judge: str
+    scores: dict[str, int]
+    """Athlete id -> this judge's total for that fighter."""
+
+
 @dataclass(slots=True)
 class Bout:
     """One fight on a card."""

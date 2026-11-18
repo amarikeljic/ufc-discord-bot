@@ -21,7 +21,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from urllib.parse import quote
 
-from ..models import Bout, Event, Fighter, FightHistoryEntry, segment_rank
+from ..models import Bout, Event, Fighter, FightHistoryEntry, JudgeCard, segment_rank
 from ..util import https, normalise, parse_api_datetime
 from .http import HttpClient, HttpError
 from .polymarket import PROVIDER as POLYMARKET
@@ -478,25 +478,73 @@ class UFCData:
         )
         return {aid: vals for aid, vals in (r for r in results if isinstance(r, tuple)) if vals}
 
-    async def load_scorecards(self, bout: Bout, *, ttl: int = 60) -> dict[str, list[int]]:
-        """Judges' totals for each fighter, in judge order. Empty until a decision is read."""
-        async def one(athlete_id: str, ref: str) -> tuple[str, list[int]]:
+    async def load_scorecards(self, bout: Bout, *, ttl: int = 60) -> list[JudgeCard]:
+        """Each judge's scorecard, in judge order. Empty until ESPN publishes them.
+
+        Whole-fight totals only, because that is all ESPN has: across 35 fights
+        on five cards from 2024 to 2026, every scorecard it held was one row a
+        judge with period 0 -- the fight -- and none had a round. The cards
+        usually land a few minutes after the result, and for a finish they do
+        not land at all.
+
+        Each fighter's document scores the same three judges, so they are
+        matched by the judge rather than by position. A judge only one corner
+        has a score from is left out: a card with one side on it is not a card.
+        """
+
+        async def one(athlete_id: str, ref: str) -> tuple[str, dict[str, tuple[int, int, str | None]]]:
             try:
                 payload = await self.http.get_json(ref, ttl=ttl)
             except HttpError:
-                return athlete_id, []
+                return athlete_id, {}
+            judges: dict[str, tuple[int, int, str | None]] = {}
             for item in payload.get("items") or []:
-                judges = sorted(item.get("linescores") or [], key=lambda j: j.get("order") or 0)
-                scores = [int(j["value"]) for j in judges if isinstance(j.get("value"), (int, float))]
-                if scores:
-                    return athlete_id, scores
-            return athlete_id, []
+                if item.get("period") not in (0, None):
+                    continue  # a round; ESPN has never sent one, and a total is what is shown
+                for judge in item.get("linescores") or []:
+                    value = judge.get("value")
+                    if not isinstance(value, (int, float)):
+                        continue
+                    official = https((judge.get("official") or {}).get("$ref"))
+                    order = judge.get("order") if isinstance(judge.get("order"), int) else 99
+                    key = official.split("?")[0] if official else f"order:{order}"
+                    judges[key] = (order, int(value), official)
+            return athlete_id, judges
 
         results = await asyncio.gather(
             *(one(athlete_id, ref) for athlete_id, ref in bout.linescore_refs.items()),
             return_exceptions=True,
         )
-        return {aid: s for aid, s in (r for r in results if isinstance(r, tuple)) if s}
+        sides = {aid: judges for aid, judges in (r for r in results if isinstance(r, tuple)) if judges}
+        if len(sides) < 2:
+            return []
+        shared = set.intersection(*(set(judges) for judges in sides.values()))
+        ordered = sorted(shared, key=lambda key: min(judges[key][0] for judges in sides.values()))
+        names = await asyncio.gather(
+            *(self._judge_name(next(judges[key][2] for judges in sides.values())) for key in ordered),
+            return_exceptions=True,
+        )
+        return [
+            JudgeCard(
+                judge=name if isinstance(name, str) and name else f"Judge {position}",
+                scores={athlete: judges[key][1] for athlete, judges in sides.items()},
+            )
+            for position, (key, name) in enumerate(zip(ordered, names), start=1)
+        ]
+
+    async def _judge_name(self, ref: str | None) -> str | None:
+        """The judge's name, or None where ESPN has a placeholder ("Judge 1") or nothing."""
+        if not ref:
+            return None
+        try:
+            payload = await self.http.get_json(ref, ttl=STATIC_TTL)
+        except HttpError:
+            return None
+        first = str(payload.get("firstName") or "").strip()
+        last = str(payload.get("lastName") or "").strip()
+        if first.lower() == "judge" and last.isdigit():
+            return None
+        return f"{first} {last}".strip() or None
 
     # -- fighters -----------------------------------------------------------
 

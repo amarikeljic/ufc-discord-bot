@@ -127,6 +127,20 @@ CREATE TABLE IF NOT EXISTS live_posts (
     PRIMARY KEY (bout_id, key)
 );
 
+-- Where a live post went, so it can be edited when something it was waiting
+-- for arrives: a decision's scorecards land minutes after the result does. The
+-- embed is kept as it was posted, so the edit adds to it rather than rebuilding
+-- it from a card that may have moved on. A row goes once its edit is made.
+CREATE TABLE IF NOT EXISTS live_messages (
+    bout_id    TEXT    NOT NULL,
+    key        TEXT    NOT NULL,
+    channel_id INTEGER NOT NULL,
+    message_id INTEGER NOT NULL,
+    embed_json TEXT    NOT NULL,
+    posted_at  TEXT    NOT NULL,
+    PRIMARY KEY (bout_id, key, channel_id)
+);
+
 -- Cumulative fight stats captured at the end of each round, for per-round deltas.
 CREATE TABLE IF NOT EXISTS live_snapshots (
     bout_id    TEXT    NOT NULL,

@@ -565,6 +565,51 @@ class Storage:
         )
         await self.db.commit()
 
+    async def save_live_message(
+        self,
+        bout_id: str,
+        key: str,
+        channel_id: int,
+        message_id: int,
+        embed: dict,
+        *,
+        posted_at: datetime | None = None,
+    ) -> None:
+        """Remember where a live post went, and what it said, so it can be edited later."""
+        posted_at = posted_at or datetime.now(UTC)
+        await self.db.execute(
+            """
+            INSERT INTO live_messages (bout_id, key, channel_id, message_id, embed_json, posted_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(bout_id, key, channel_id) DO UPDATE SET
+                message_id = excluded.message_id,
+                embed_json = excluded.embed_json,
+                posted_at  = excluded.posted_at
+            """,
+            (bout_id, key, channel_id, message_id, json.dumps(embed), posted_at.isoformat()),
+        )
+        await self.db.commit()
+
+    async def live_messages(self, bout_id: str, key: str) -> list[tuple[int, int, dict, datetime]]:
+        """(channel id, message id, embed as posted, when) for each post still waiting on an edit."""
+        async with self.db.execute(
+            "SELECT channel_id, message_id, embed_json, posted_at FROM live_messages "
+            "WHERE bout_id = ? AND key = ? ORDER BY channel_id",
+            (bout_id, key),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return [
+            (row["channel_id"], row["message_id"], json.loads(row["embed_json"]), datetime.fromisoformat(row["posted_at"]))
+            for row in rows
+        ]
+
+    async def forget_live_message(self, bout_id: str, key: str, channel_id: int) -> None:
+        await self.db.execute(
+            "DELETE FROM live_messages WHERE bout_id = ? AND key = ? AND channel_id = ?",
+            (bout_id, key, channel_id),
+        )
+        await self.db.commit()
+
     async def save_live_snapshot(self, bout_id: str, round_number: int, stats: dict) -> None:
         await self.db.execute(
             """
@@ -1020,6 +1065,7 @@ class Storage:
             """,
             (cutoff,),
         )
+        await self.db.execute("DELETE FROM live_messages WHERE posted_at < ?", (cutoff,))
         cursor = await self.db.execute("DELETE FROM live_posts WHERE posted_at < ?", (cutoff,))
         await self.db.commit()
         return cursor.rowcount

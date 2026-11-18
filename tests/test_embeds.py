@@ -188,7 +188,7 @@ def test_every_live_post_names_the_card():
         live_open_embed(event_name=name, bout=fight, record=None, odds={}, careers={}),
         live_round_embed(event_name=name, bout=fight, round_number=2, stats=stats, edge=1),
         live_result_embed(event_name=name, bout=fight, winner=ALLEN, method="ko", technique="punches",
-                          round_number=2, clock="3:41", totals=stats, scorecards={}, record=None, odds={}),
+                          round_number=2, clock="3:41", totals=stats, scorecards=[], record=None, odds={}),
     ):
         assert embed.author.name == name, "the card is named in the post, not in the footer"
         assert embed.footer.text is None

@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import discord
 
-from ..models import Bout, Fighter
+from ..models import Bout, Fighter, JudgeCard
 from ..stats.techniques import METHOD_LABELS, STOPPAGES, describe
 from ..util import truncate
 from .common import (
@@ -191,6 +191,63 @@ def live_round_embed(
     return stamp(embed)
 
 
+SCORECARDS = "Judges' scorecards"
+# Said every time rather than left to be noticed: a reader expecting the rounds
+# should be told they do not exist, not left wondering whether they were cut.
+TOTALS_ONLY = "*Totals only: round-by-round scores weren't available.*"
+
+
+def scorecards_field(
+    bout: Bout, winner: Fighter | None, cards: list[JudgeCard], *, stoppage: bool = False
+) -> tuple[str, str] | None:
+    """(name, value) for the judges' cards, one row a judge, or None with nothing to show.
+
+    The winner's column comes first, so a split decision reads as two rows for
+    the winner and one against. ``stoppage`` is a finish that was being scored
+    when it ended; ESPN has never carried those, but if it does they are shown
+    as what they are.
+    """
+    if not cards or not bout.has_opponents:
+        return None
+    first = winner or bout.fighters[0]
+    second = bout.opponent(first.id)
+    if second is None:
+        return None
+    rows = [
+        (
+            card.judge if card.judge.startswith("Judge ") else surname(card.judge),
+            str(card.scores[first.id]),
+            str(card.scores[second.id]),
+        )
+        for card in cards
+        if first.id in card.scores and second.id in card.scores
+    ]
+    if not rows:
+        return None
+    name = f"{SCORECARDS} at the stoppage" if stoppage else SCORECARDS
+    return name, code_table(first.display_name, second.display_name, rows) + "\n" + TOTALS_ONLY
+
+
+def with_scorecards(
+    embed: discord.Embed, bout: Bout, winner: Fighter | None, cards: list[JudgeCard], *, stoppage: bool = False
+) -> discord.Embed:
+    """A posted result with the judges' cards added, above the fight totals.
+
+    For the cards that land after the result has gone out: the message is
+    edited rather than followed by a second one. A cards field already there is
+    replaced, so editing twice cannot show them twice.
+    """
+    field = scorecards_field(bout, winner, cards, stoppage=stoppage)
+    if field is None:
+        return embed
+    kept = [f for f in embed.fields if not (f.name or "").startswith(SCORECARDS)]
+    embed.clear_fields()
+    embed.add_field(name=field[0], value=field[1], inline=False)
+    for f in kept:
+        embed.add_field(name=f.name, value=f.value, inline=f.inline)
+    return embed
+
+
 def live_result_embed(
     *,
     event_name: str,
@@ -201,7 +258,7 @@ def live_result_embed(
     round_number: int | None,
     clock: str | None,
     totals: dict[str, dict[str, float]],
-    scorecards: dict[str, list[int]],
+    scorecards: list[JudgeCard],
     record: PredictionRecord | None,
     odds: dict[str, int],
     odds_source: str | None = None,
@@ -222,12 +279,6 @@ def live_result_embed(
             text += " · " + keep(f"R{round_number} {clock or ''}".strip())
         lines.append(text)
 
-    if scorecards and bout.has_opponents:
-        first = winner or bout.fighters[0]
-        second = bout.opponent(first.id)
-        if second and first.id in scorecards and second.id in scorecards:
-            lines.append("Judges: " + " · ".join(f"{x}-{y}" for x, y in zip(scorecards[first.id], scorecards[second.id])))
-
     if record is not None and winner is not None:
         right = winner.id == record.favourite_athlete
         lines.append(f"Pick: **{keep(record.favourite)}** {record.confidence:.0%} {'✅' if right else '❌'}")
@@ -243,6 +294,9 @@ def live_result_embed(
             lines.append(odds_line)
 
     embed.description = "\n".join(lines) or None
+    cards = scorecards_field(bout, winner, scorecards, stoppage=method in STOPPAGES)
+    if cards:
+        embed.add_field(name=cards[0], value=cards[1], inline=False)
     table = _stats_table(bout, totals)
     if table:
         embed.add_field(name="Fight totals", value=table, inline=False)
