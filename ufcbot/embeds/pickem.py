@@ -15,7 +15,7 @@ from ..features.pickem import (
     points_for,
     segment_locks,
 )
-from ..models import Bout, Event
+from ..models import ODDS_LAST_KNOWN, Bout, Event
 from ..util import truncate
 from .common import (
     EMBED_BUDGET,
@@ -36,6 +36,11 @@ if TYPE_CHECKING:
 
 PICKEM_TEAL = discord.Colour.from_str("#1ABC9C")
 RESULT_ICON = {"win": "✅", "loss": "❌", "void": "➖", None: "⏳"}
+
+# The three states of a fight's price, as the board says them. A known price
+# needs no label; the other two do, so neither can be mistaken for the first.
+NOT_POSTED = "Odds not posted yet"
+LAST_KNOWN = "⏸️ Last known odds · the market isn't answering right now"
 
 
 def _lock_lines(event: Event, now: datetime) -> list[str]:
@@ -127,7 +132,9 @@ def _board_bout_value(event: Event, bout: Bout, counts: dict[str, int], now: dat
             continue
         lines.append(join([f"{surname(fighter.display_name)} {fmt_odds(odds)}", f"+{points_for(odds)} pts"]))
     if not any(f.id in bout.odds for f in (a, b)):
-        lines.append("Odds not posted yet")
+        lines.append(NOT_POSTED)
+    elif bout.odds_state == ODDS_LAST_KNOWN:
+        lines.append(LAST_KNOWN)
 
     total = sum(counts.values())
     if total:

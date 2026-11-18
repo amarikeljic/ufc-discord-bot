@@ -19,9 +19,20 @@ import time
 from collections import OrderedDict
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from typing import Protocol
 from urllib.parse import quote
 
-from ..models import Bout, Event, Fighter, FightHistoryEntry, JudgeCard, segment_rank
+from ..models import (
+    ODDS_KNOWN,
+    ODDS_LAST_KNOWN,
+    ODDS_NOT_POSTED,
+    Bout,
+    Event,
+    Fighter,
+    FightHistoryEntry,
+    JudgeCard,
+    segment_rank,
+)
 from ..util import https, normalise, parse_api_datetime
 from .http import HttpClient, HttpError
 from .polymarket import PROVIDER as POLYMARKET
@@ -51,13 +62,26 @@ STATIC_TTL = 24 * 60 * 60
 ATHLETE_CACHE = 800
 
 
+class OddsMemory(Protocol):
+    """Somewhere to keep each fight's last price. The bot's database is one."""
+
+    async def bout_odds(self, bout_id: str) -> tuple[dict[str, int], str | None] | None: ...
+
+    async def save_bout_odds(self, bout_id: str, odds: dict[str, int], provider: str | None) -> None: ...
+
+
 class UFCData:
     """Reads UFC schedules, fight cards and fighter profiles."""
 
-    def __init__(self, http: HttpClient, *, odds: PolymarketOdds | None = None) -> None:
+    def __init__(
+        self, http: HttpClient, *, odds: PolymarketOdds | None = None, odds_memory: OddsMemory | None = None
+    ) -> None:
         self.http = http
         # ESPN has no lines for some cards, Contender Series among them.
         self.odds = odds
+        # Where each fight's last price is kept, so a fetch that comes back empty
+        # does not take it away. The database, in the bot.
+        self.odds_memory = odds_memory
         self._athletes: OrderedDict[str, tuple[float, Fighter]] = OrderedDict()
 
     # -- schedules ----------------------------------------------------------
@@ -388,19 +412,70 @@ class UFCData:
         )
 
     async def load_bout_odds(self, bout: Bout, *, ttl: int = 600, around: datetime | None = None) -> None:
-        """Attach current prices to one bout.
+        """Attach a price to one bout, and say which kind of price it is.
 
         ESPN carries a sportsbook line for some fights, but only DraftKings and
         only patchily -- one of thirteen on a numbered card, none at all on
         Contender Series. The market prices every fight on every card, so it is
         the source rather than the fallback it used to be.
+
+        A price fetched is remembered, and nothing that comes back empty can take
+        it away. That used to happen to every fight on a card at once: the market
+        is asked afresh on every redraw, a fight's market closes the moment the
+        fight is settled and its price goes to 1 and 0, and a search that fails
+        or times out under the load of a card night comes back with nothing --
+        and each of those read as "odds not posted", with nothing kept to fall
+        back on. Now:
+
+        * Before the fight locks, a fresh price replaces the remembered one, and
+          an empty answer shows the remembered one as the last known.
+        * From the moment it locks -- when its part of the card starts, as for
+          pick'em -- the remembered price is the closing line, kept for the rest
+          of the event and never replaced by a price from inside the fight.
         """
         if self.odds is None:
             return
-        prices = await self.odds.odds_for(bout, around=around or bout.start or datetime.now(UTC), ttl=ttl)
+        now = datetime.now(UTC)
+        locks = bout.start or around
+        locked = locks is not None and now >= locks
+        remembered = await self._remembered_odds(bout)
+
+        if remembered is not None and locked:
+            bout.odds, bout.odds_provider = remembered
+            bout.odds_state = ODDS_KNOWN
+            return
+
+        prices = None
+        if not bout.completed:  # a settled market has nothing to say about the fight before it
+            try:
+                prices = await self.odds.odds_for(bout, around=around or bout.start or now, ttl=ttl)
+            except Exception:  # a failed fetch is an empty one, never a reason to lose the price
+                log.exception("The market lookup for %s failed", bout.matchup)
         if prices:
-            bout.odds = prices
-            bout.odds_provider = POLYMARKET
+            bout.odds, bout.odds_provider, bout.odds_state = prices, POLYMARKET, ODDS_KNOWN
+            if self.odds_memory is not None and (remembered is None or remembered[0] != prices):
+                await self.odds_memory.save_bout_odds(bout.id, prices, POLYMARKET)
+        elif remembered is not None:
+            bout.odds, bout.odds_provider = remembered
+            bout.odds_state = ODDS_LAST_KNOWN
+            log.info("No price for %s from the market just now; showing the last known one", bout.matchup)
+        else:
+            bout.odds_state = ODDS_NOT_POSTED
+
+    async def _remembered_odds(self, bout: Bout) -> tuple[dict[str, int], str | None] | None:
+        """The price kept for this bout, if it was for the two fighters in it now.
+
+        A replacement changes the fight, and the price for the old one says
+        nothing about the new one."""
+        if self.odds_memory is None or not bout.has_opponents:
+            return None
+        stored = await self.odds_memory.bout_odds(bout.id)
+        if stored is None:
+            return None
+        odds, provider = stored
+        if set(odds) != {fighter.id for fighter in bout.fighters[:2]}:
+            return None
+        return odds, provider
 
     async def load_status(self, bout: Bout, *, ttl: int = 30) -> None:
         """Fill the bout's live state and, once over, how it ended."""

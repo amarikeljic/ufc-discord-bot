@@ -542,6 +542,35 @@ class Storage:
             rows = await cursor.fetchall()
         return {r["key"]: Post(r["channel_id"], r["message_id"], r["signature"]) for r in rows}
 
+    async def bout_odds(self, bout_id: str) -> tuple[dict[str, int], str | None] | None:
+        """The last price stored for a fight, as (athlete id -> line, provider), if any."""
+        async with self.db.execute(
+            "SELECT athlete_a, odds_a, athlete_b, odds_b, provider FROM bout_odds WHERE bout_id = ?", (bout_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        return {row["athlete_a"]: row["odds_a"], row["athlete_b"]: row["odds_b"]}, row["provider"]
+
+    async def save_bout_odds(self, bout_id: str, odds: dict[str, int], provider: str | None) -> None:
+        """Remember a fight's price. Only ever called with a real one."""
+        (athlete_a, odds_a), (athlete_b, odds_b) = sorted(odds.items())[:2]
+        await self.db.execute(
+            """
+            INSERT INTO bout_odds (bout_id, athlete_a, odds_a, athlete_b, odds_b, provider, fetched_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(bout_id) DO UPDATE SET
+                athlete_a  = excluded.athlete_a,
+                odds_a     = excluded.odds_a,
+                athlete_b  = excluded.athlete_b,
+                odds_b     = excluded.odds_b,
+                provider   = excluded.provider,
+                fetched_at = excluded.fetched_at
+            """,
+            (bout_id, athlete_a, odds_a, athlete_b, odds_b, provider, datetime.now(UTC).isoformat()),
+        )
+        await self.db.commit()
+
     async def board_slots(self, guild_id: int, channel_id: int) -> list[BoardSlot]:
         """The messages kept in order in this channel, top of the channel first.
 
@@ -1127,6 +1156,9 @@ class Storage:
             (cutoff,),
         )
         await self.db.execute("DELETE FROM live_messages WHERE posted_at < ?", (cutoff,))
+        # A price is only wanted until its card is over, and these are written
+        # until the fight locks, so a fortnight on there is nothing left to show.
+        await self.db.execute("DELETE FROM bout_odds WHERE fetched_at < ?", (cutoff,))
         cursor = await self.db.execute("DELETE FROM live_posts WHERE posted_at < ?", (cutoff,))
         await self.db.commit()
         return cursor.rowcount

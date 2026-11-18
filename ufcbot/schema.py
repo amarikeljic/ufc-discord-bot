@@ -168,6 +168,20 @@ CREATE TABLE IF NOT EXISTS live_snapshots (
     PRIMARY KEY (bout_id, round)
 );
 
+-- The last price the market gave for each fight. Before a fight locks this is
+-- whatever was last fetched; once it locks it is the closing line, and stays.
+-- A failed or empty fetch never writes here, so a market closing when its fight
+-- ends, or a search that times out mid-card, cannot take a price away.
+CREATE TABLE IF NOT EXISTS bout_odds (
+    bout_id    TEXT    PRIMARY KEY,
+    athlete_a  TEXT    NOT NULL,
+    odds_a     INTEGER NOT NULL,
+    athlete_b  TEXT    NOT NULL,
+    odds_b     INTEGER NOT NULL,
+    provider   TEXT,
+    fetched_at TEXT    NOT NULL
+);
+
 -- Pick'em: one pick per member per bout. Winning points are fixed from the odds when the pick was made.
 CREATE TABLE IF NOT EXISTS pickem_picks (
     guild_id        INTEGER NOT NULL,

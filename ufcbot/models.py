@@ -22,6 +22,15 @@ def segment_rank(name: str | None) -> int:
     return SEGMENT_ORDER.get(name.strip().lower(), 3)
 
 
+# What is known about a fight's price, which the board says in so many words.
+# Not posted: no market has priced it yet. Known: the price shown is current,
+# or is the closing line of a fight that has locked. Last known: the market is
+# not answering right now, so the price shown is the last one it gave.
+ODDS_NOT_POSTED = "not_posted"
+ODDS_KNOWN = "known"
+ODDS_LAST_KNOWN = "last_known"
+
+
 @dataclass(slots=True)
 class Fighter:
     """A single athlete. Populated lazily; every field except ``id`` may be missing."""
@@ -108,6 +117,8 @@ class Bout:
     odds: dict[str, int] = field(default_factory=dict)
     """Athlete id -> American moneyline, when a sportsbook has posted one."""
     odds_provider: str | None = None
+    odds_state: str = ODDS_NOT_POSTED
+    """Which of the three ``ODDS_`` states ``odds`` is in."""
 
     # Filled by UFCData.load_status.
     state: str | None = None

@@ -60,7 +60,9 @@ class UFCBot(commands.Bot):
         self.started_at = discord.utils.utcnow()
         self.http_client = HttpClient(cache_ttl=config.cache_ttl_seconds)
         self.storage = Storage(config.database_path)
-        self.data = UFCData(self.http_client, odds=PolymarketOdds(self.http_client))
+        # The database keeps each fight's last price, so a market that closes
+        # or a search that fails mid-card cannot blank the pick'em board.
+        self.data = UFCData(self.http_client, odds=PolymarketOdds(self.http_client), odds_memory=self.storage)
         self.posters = PosterLookup(self.http_client)
         self.stats = StatsService(
             Path(config.data_dir),
