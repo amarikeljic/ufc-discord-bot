@@ -26,9 +26,16 @@ COPY ufcbot ./ufcbot
 # the next `docker rm` takes with it, along with every pick anybody has made.
 # Setting it here means the trap cannot be fallen into by forgetting a line in
 # .env, which is the only thing that was standing between it and happening.
+#
+# The dashboard summary listens on every interface the container has, which
+# are only the Docker networks it is on: in a container 127.0.0.1 would be the
+# container itself and nothing could read it. The deploy publishes the port to
+# the machine's loopback and nowhere else.
 ENV DATABASE_PATH=/app/data/ufcbot.sqlite3 \
     PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    STATUS_HOST=0.0.0.0 \
+    STATUS_PORT=8788
 
 # No USER: the container writes the database, the lock, the dataset and the
 # model into the bind-mounted /app/data, and running as a uid that does not

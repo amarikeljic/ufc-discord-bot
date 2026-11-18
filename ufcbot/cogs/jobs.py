@@ -250,6 +250,7 @@ class JobsCog(commands.Cog):
 
     async def _announce_and_publish(self) -> None:
         """Say what has changed since the last look, then redraw every board."""
+        self.bot.heartbeats["boards"] = discord.utils.utcnow()
         stale = await self._stale_notice()
         health = await self._api_health_notice()
 
@@ -457,6 +458,7 @@ class JobsCog(commands.Cog):
     @tasks.loop(seconds=15)
     async def live_loop(self) -> None:
         """Post live fight updates while a card is on. Cheap when nothing is happening."""
+        self.bot.heartbeats["live"] = discord.utils.utcnow()
         await self._keep_pickem_times()
         channels: list[discord.TextChannel] = []
         for settings in await self.bot.storage.guilds_with_live():

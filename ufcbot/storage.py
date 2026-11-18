@@ -321,6 +321,18 @@ class Storage:
             row = await cursor.fetchone()
         return _prediction_from_row(row) if row else None
 
+    async def picked_events(self, limit: int = 12) -> list[tuple[str, str, datetime]]:
+        """(event id, name, start) for the cards the model has picks on, latest first."""
+        async with self.db.execute(
+            """
+            SELECT espn_event_id, MAX(event_name) AS event_name, MIN(event_start) AS event_start
+            FROM predictions GROUP BY espn_event_id ORDER BY event_start DESC LIMIT ?
+            """,
+            (limit,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return [(r["espn_event_id"], r["event_name"], _parse_dt(r["event_start"])) for r in rows]
+
     async def events_awaiting_grading(self, before: datetime) -> list[tuple[str, str, datetime]]:
         """(event id, name, start) for cards that started before ``before`` and have ungraded picks."""
         async with self.db.execute(

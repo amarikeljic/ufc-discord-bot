@@ -57,6 +57,11 @@ class Config:
     data_dir: str = "data"
     model_dir: str = "models"
     stats_refresh_hours: int = 24
+    status_host: str = "127.0.0.1"
+    """Where the dashboard summary listens. Loopback unless told otherwise; the
+    image tells it otherwise, because in a container loopback is the container."""
+    status_port: int = 8788
+    """0 turns the dashboard summary off."""
 
     @classmethod
     def load(cls) -> Config:
@@ -86,4 +91,6 @@ class Config:
             data_dir=os.getenv("DATA_DIR", "data").strip() or "data",
             model_dir=os.getenv("MODEL_DIR", "models").strip() or "models",
             stats_refresh_hours=max(1, _int("STATS_REFRESH_HOURS", 24)),
+            status_host=os.getenv("STATUS_HOST", "127.0.0.1").strip() or "127.0.0.1",
+            status_port=max(0, min(65535, _int("STATUS_PORT", 8788))),
         )

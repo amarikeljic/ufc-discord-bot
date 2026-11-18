@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime
 from pathlib import Path
 
 import discord
@@ -26,6 +27,7 @@ from .sources.polymarket import PolymarketOdds
 from .sources.posters import PosterLookup
 from .stats.prediction import Evaluation, Prediction
 from .stats.service import StatsService
+from .status import StatusServer
 from .storage import Storage
 from .ui.pickem import PICKEM_BUTTONS
 
@@ -94,6 +96,12 @@ class UFCBot(commands.Bot):
         self.live = LiveCoverage(
             self.data, self.storage, images=self.images, career_provider=self.stats.career
         )
+        # For the dashboard tile: whether Discord is connected and since when,
+        # and when each background loop last ran, so a stuck one shows.
+        self.connected_since: datetime | None = None
+        self.disconnected_since: datetime | None = None
+        self.heartbeats: dict[str, datetime] = {}
+        self.status = StatusServer(self, host=config.status_host, port=config.status_port) if config.status_port else None
 
     def touch_pickem(self, guild_id: int) -> None:
         """Redraw this guild's pick'em board once the picking has settled.
@@ -150,6 +158,12 @@ class UFCBot(commands.Bot):
     async def setup_hook(self) -> None:
         await self.http_client.start()
         await self.storage.connect()
+        if self.status is not None:
+            try:
+                await self.status.start()
+            except OSError as exc:  # a port already taken costs the tile, never the bot
+                log.warning("Could not start the dashboard summary on port %s: %s", self.config.status_port, exc)
+                self.status = None
         # Stored picks follow the current scoring rules, even if they changed since.
         await self.pickem.apply_scoring()
         if self.config.enable_predictions:
@@ -179,7 +193,20 @@ class UFCBot(commands.Bot):
             synced = await self.tree.sync()
             log.info("Registered %d global commands (may take up to an hour to appear)", len(synced))
 
+    def _connected(self) -> None:
+        if self.connected_since is None or self.disconnected_since is not None:
+            self.connected_since = discord.utils.utcnow()
+        self.disconnected_since = None
+
+    async def on_resumed(self) -> None:
+        self._connected()
+
+    async def on_disconnect(self) -> None:
+        if self.disconnected_since is None:
+            self.disconnected_since = discord.utils.utcnow()
+
     async def on_ready(self) -> None:
+        self._connected()
         log.info("Signed in as %s (%s), in %d servers", self.user, self.user.id, len(self.guilds))
         await self.change_presence(
             activity=discord.Activity(type=discord.ActivityType.watching, name="the octagon")
@@ -191,6 +218,8 @@ class UFCBot(commands.Bot):
         log.info("Removed stored data for guild %s", guild.id)
 
     async def close(self) -> None:
+        if self.status is not None:
+            await self.status.stop()
         await super().close()
         await self.storage.close()
         await self.http_client.close()

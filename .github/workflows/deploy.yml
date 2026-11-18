@@ -52,11 +52,19 @@ jobs:
           docker stop ufc-discord-bot || true
           docker rm ufc-discord-bot || true
 
+      # On a Docker network of its own name, the way the Whale Watcher is on
+      # `whale-watcher`, so Homepage's container can join it and read the
+      # dashboard summary at http://ufc-discord-bot:8788/api/summary. Joining a
+      # network publishes nothing; the port is published to this machine's
+      # loopback only, for `curl` from the server, and never to the LAN.
       - name: Start the new container
         run: |
+          docker network create ufc-discord-bot >/dev/null 2>&1 || true
           docker run -d \
             --name ufc-discord-bot \
             --restart=always \
+            --network ufc-discord-bot \
+            -p 127.0.0.1:8788:8788 \
             --env-file /home/amar/ufc-discord-bot/.env \
             -v /home/amar/ufc-discord-bot/data:/app/data \
             ufc-discord-bot
