@@ -19,7 +19,7 @@ from __future__ import annotations
 import math
 import re
 from collections import Counter, defaultdict
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, replace
 from datetime import date
 from typing import TYPE_CHECKING
 
@@ -349,11 +349,20 @@ class Ledger:
 
     def snapshot(self) -> Ledger:
         copy = replace(self)
-        # replace() is shallow; the counters must not be shared with the live ledger.
-        copy.win_methods = dict(self.win_methods)
-        copy.loss_methods = dict(self.loss_methods)
-        copy.win_techniques = dict(self.win_techniques)
-        copy.loss_techniques = dict(self.loss_techniques)
+        # replace() is shallow, so every container must be copied or the
+        # snapshot shares it with the live ledger -- and the live ledger goes on
+        # to fill it with fights that had not happened when the snapshot was
+        # taken. This used to name the four containers it knew about, and the
+        # four per-division ones added later were shared: division_elo on a
+        # 2019 snapshot read the fighter's 2026 rating. Nothing the model reads
+        # came from them, so nothing shipped leaked, but any feature built on
+        # one would have. Every container, then, by type rather than by name.
+        for spec in fields(self):
+            value = getattr(self, spec.name)
+            if isinstance(value, dict):
+                setattr(copy, spec.name, dict(value))
+            elif isinstance(value, list):
+                setattr(copy, spec.name, list(value))
         return copy
 
     # -- ufcstats.com fighter page numbers ----------------------------------
