@@ -181,12 +181,26 @@ class PredictionTracker:
 
     # -- grading -------------------------------------------------------------
 
-    async def grade_due(self) -> list[GradedEvent]:
-        """Score every pick whose card has finished. Returns cards that became fully graded."""
+    async def grade_due(self, *, live: bool = False) -> list[GradedEvent]:
+        """Score every pick whose fight has finished. Returns cards that became fully graded.
+
+        ``live`` is the pass that runs the moment live coverage posts a result,
+        and it is what keeps the picks board in step with the card: every card
+        that has started is looked at, so a pick is marked right or wrong as
+        soon as its fight is decided. Without it the board only ever moved on
+        the hourly pass, and only for cards two hours old, so a fight's result
+        reached the picks channel up to three hours after the live channel.
+
+        ESPN names a winner before it says how, and a pick graded in that gap
+        would keep a blank method for good. So the live pass leaves such a
+        fight for the next one, and the hourly pass -- which still waits two
+        hours into a card -- takes whatever ESPN has by then, as it always did.
+        """
         now = datetime.now(UTC)
         completed: list[GradedEvent] = []
+        before = now if live else now - GRADE_AFTER
 
-        for event_id, name, start in await self.storage.events_awaiting_grading(now - GRADE_AFTER):
+        for event_id, name, start in await self.storage.events_awaiting_grading(before):
             event = await self.data.get_event(event_id, ttl=120)
             if event is None:
                 log.debug("Could not load %s for grading; will retry", name)
@@ -199,7 +213,9 @@ class PredictionTracker:
             for record in await self.storage.predictions_for_event(event_id):
                 if record.graded_at is not None:
                     continue
-                if await self._grade_one(event_id, record, bouts.get(record.bout_id), expired):
+                if await self._grade_one(
+                    event_id, record, bouts.get(record.bout_id), expired, need_method=live
+                ):
                     graded_any = True
 
             if graded_any and event_id not in await self.storage.events_with_ungraded_predictions():
@@ -214,7 +230,9 @@ class PredictionTracker:
 
         return completed
 
-    async def _grade_one(self, event_id: str, record: PredictionRecord, bout, expired: bool) -> bool:
+    async def _grade_one(
+        self, event_id: str, record: PredictionRecord, bout, expired: bool, *, need_method: bool = False
+    ) -> bool:
         if bout is None:
             if expired:
                 await self.storage.grade_prediction(event_id, record.bout_id, None, None)
@@ -234,6 +252,8 @@ class PredictionTracker:
         }
 
         if finished and bout.winner_id:
+            if need_method and result_method is None:
+                return False  # the winner is in and how is not; the next pass grades it
             winner = str(bout.winner_id)
             if winner not in (record.athlete_a, record.athlete_b):
                 # A late replacement fought instead; the pick was for someone else.

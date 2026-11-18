@@ -66,6 +66,12 @@ ODDS_HOST = "gamma-api.polymarket.com"
 # long after the post that caused it.
 LIVE_REFRESH_COOLDOWN = timedelta(seconds=45)
 
+# A board edit Discord refused during a card is tried again on the following
+# refreshes rather than left for the hourly pass. Bounded, because a refusal
+# that does not go away -- a lost permission -- would otherwise be retried
+# every forty-five seconds for as long as the bot runs.
+BOARD_RETRIES = 5
+
 
 class JobsCog(commands.Cog):
     """Everything the bot does on a clock rather than on a command."""
@@ -76,6 +82,8 @@ class JobsCog(commands.Cog):
         # Set when live coverage posts something, cleared once the boards have
         # caught up with it.
         self._boards_stale = False
+        # Refreshes in a row that left a board un-edited.
+        self._board_failures = 0
         # The outage this cog has already warned about, so it says it once.
         self._reported_outage: str | None = None
         self._outage_hours = 0.0
@@ -342,15 +350,20 @@ class JobsCog(commands.Cog):
         log.warning("ESPN has not answered for %.1f hours (%d attempts)", outage.hours, outage.failures)
         return api_outage_embed(outage, odds_working=http.answering(ODDS_HOST))
 
-    async def _publish_boards(self) -> None:
-        """Bring every guild's boards in line with what the bot knows now."""
+    async def _publish_boards(self) -> bool:
+        """Bring every guild's boards in line with what the bot knows now.
+
+        Returns whether every board took its update."""
+        clean = True
         for settings in await self.bot.storage.guilds_with_channels():
             guild = self.bot.get_guild(settings.guild_id)
             if guild is None:
                 continue
             result = await self.bot.publisher.publish(guild, settings)
             if result.errors:
+                clean = False
                 log.warning("Boards in guild %s: %s", guild.id, "; ".join(result.errors))
+        return clean
 
     async def _refresh_after_live(self) -> None:
         """Redraw the boards once live coverage has posted something.
@@ -369,6 +382,12 @@ class JobsCog(commands.Cog):
             return  # too soon; the next tick will pick this up
         self._last_live_refresh = now
         self._boards_stale = False
+        # The model's picks first: the picks board is drawn from what is graded,
+        # and without this a result reached it only on the hourly pass.
+        try:
+            await self.bot.tracker.grade_due(live=True)
+        except Exception:  # the boards can still refresh
+            log.exception("Grading the model's picks after a live update failed")
         try:
             await self._grade_pickem()
         except Exception:  # the boards can still refresh
@@ -378,9 +397,21 @@ class JobsCog(commands.Cog):
         # the event ending with the card and ending at midnight.
         await self._close_finished_events()
         try:
-            await self._publish_boards()
+            clean = await self._publish_boards()
         except Exception:  # never worth killing the live loop over
             log.exception("Refreshing the boards after a live update failed")
+            clean = False
+        if clean:
+            self._board_failures = 0
+        elif self._board_failures < BOARD_RETRIES:
+            # Try again after the cooldown rather than leave the board behind
+            # the live channel until the hour.
+            self._board_failures += 1
+            self._boards_stale = True
+            log.info("A board did not take its update; retrying (%d of %d)", self._board_failures, BOARD_RETRIES)
+        else:
+            log.warning("A board still refuses its update after %d tries; leaving it for the hourly pass", BOARD_RETRIES)
+            self._board_failures = 0
 
     @channels_loop.before_loop
     async def before_channels_loop(self) -> None:

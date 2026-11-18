@@ -669,14 +669,14 @@ class ChannelPublisher:
                 pass  # deleted by someone; send a fresh one below
             except discord.HTTPException as exc:
                 # Sending a replacement when the old message is still there would
-                # leave two of the same board behind; the next pass tries again.
+                # leave two of the same board behind. Said and counted as an error
+                # instead, so the caller can try again rather than wait an hour.
+                action = "move" if resend else "update"
                 log.warning(
-                    "Could not %s the %s board in #%s: %r",
-                    "move" if resend else "update",
-                    kind,
-                    channel.name,
-                    exc,
+                    "Could not %s the %s board in #%s: HTTP %s, Discord code %s: %s",
+                    action, kind, channel.name, exc.status, exc.code, exc.text,
                 )
+                result.errors.append(f"{action} {kind} in #{channel.name}: HTTP {exc.status} {exc.text}")
                 return False
 
         message = await channel.send(embed=embed, **components)
