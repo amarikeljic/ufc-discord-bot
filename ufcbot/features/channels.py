@@ -28,7 +28,7 @@ from ..embeds import (
     scorecard_embed,
 )
 from ..models import Event
-from ..records import GuildSettings
+from ..records import BoardSlot, GuildSettings
 from ..sources.espn import UFCData
 from ..stats.prediction import Evaluation, Prediction
 from ..stats.rankings import (
@@ -46,7 +46,7 @@ from .pickem import (
     benchmarks,
     bout_status,
 )
-from .tracking import GradedEvent, PredictionTracker, build_scorecard
+from .tracking import PredictionTracker, build_scorecard
 
 log = logging.getLogger(__name__)
 
@@ -104,6 +104,26 @@ def _signature(embed: discord.Embed, extra: str = "") -> str:
     content.pop("timestamp", None)
     payload = json.dumps(content, sort_keys=True, default=str) + extra
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()
+
+
+@dataclass(slots=True)
+class _Board:
+    """One board the picks channel should show, for putting in its place."""
+
+    kind: str
+    key: str
+    starts_at: datetime | None
+    embed: discord.Embed
+    signature: str
+    expired: bool = False
+    """Past its lifetime: shown once more where it belongs, then let go."""
+
+
+def _board(
+    kind: str, key: str, starts_at: datetime | None, embed: discord.Embed, *, expired: bool = False
+) -> _Board:
+    embed.set_footer(text="Last updated")
+    return _Board(kind, key, starts_at, embed, _signature(embed), expired)
 
 
 @dataclass(slots=True)
@@ -220,9 +240,33 @@ class ChannelPublisher:
         result: PublishResult,
         force: bool,
     ) -> None:
+        """Every card's picks in date order, earliest at the top, and the model's
+        scorecard at the foot.
+
+        The scorecard belongs under the picks rather than in a channel of its
+        own: it is the answer to "should I believe any of this", and that
+        question is asked while reading the picks. It is the only thing the bot
+        says about its own record; a recap under every graded card used to say
+        the same thing a third time.
+
+        The channel is kept in order by editing, never by deleting. Each message
+        the bot keeps here is a slot that shows one board, and the board a slot
+        shows can move: a card that belongs above the last one is one new message
+        at the bottom and every board from its place down shifting one message
+        lower. The scorecard is the last board, so it stays at the foot without
+        being deleted and posted again each time a card arrives, which is what it
+        used to do.
+
+        Nothing here has buttons, so nothing is bound to a message rather than
+        to its card. Reactions and threads are another matter: Discord keeps
+        those on the message, so one left on a board would end up under a
+        different card after a reorder.
+        """
         now = datetime.now(UTC)
+        await self.storage.forget_board_slots_outside(guild.id, channel.id)
+        slots = await self._picks_slots(guild, channel)
         upcoming = await self._upcoming(settings)
-        created = False
+        boards: dict[str, _Board] = {}
 
         for summary in upcoming:
             # Without the full card there is nothing to re-record against, so the
@@ -257,75 +301,169 @@ class ChannelPublisher:
                     if bout.has_opponents and bout.id not in picked
                 ],
             )
-            created = (
-                await self._upsert(guild, channel, KIND_PICKS, event.id, embed, result, force=force)
-                or created
-            )
+            boards[event.id] = _board(KIND_PICKS, event.id, event.start, embed)
             result.picks_boards += 1
 
-        # Cards that recently happened are no longer "upcoming" but their boards
-        # should still pick up results.
-        upcoming_ids = {e.id for e in upcoming}
-        for event_id in await self.storage.posts_of_kind(guild.id, KIND_PICKS):
-            if event_id in upcoming_ids:
-                continue
-            records = await self.tracker.records_for(event_id)
-            if not records or now - records[0].event_start > PICKS_BOARD_LIFETIME:
-                # Leave the message as its final state; just stop tracking it.
-                await self.storage.delete_post(guild.id, KIND_PICKS, event_id)
-                continue
-            # Usually a card that has already happened, but a card can also drop
-            # out of the upcoming list for a tick when ESPN is slow, and that one
-            # has not locked.
-            embed = picks_board_embed(
-                records[0].event_name,
-                records[0].event_start,
-                records,
-                locked=records[0].event_start <= now,
-            )
-            await self._upsert(guild, channel, KIND_PICKS, event_id, embed, result, force=force)
-            result.picks_boards += 1
+        # Cards in the channel that are not upcoming any more: usually ones that
+        # have happened and are still picking up results, though a card can also
+        # drop out of the upcoming list for a tick when ESPN is slow.
+        kept = []
+        for slot in slots:
+            if slot.kind == KIND_PICKS and slot.key not in boards:
+                records = await self.tracker.records_for(slot.key)
+                if not records:
+                    # Nothing left to draw it from. It keeps what it last showed
+                    # and is no longer kept in order.
+                    await self._release(guild, slot)
+                    continue
+                start = records[0].event_start
+                embed = picks_board_embed(records[0].event_name, start, records, locked=start <= now)
+                boards[slot.key] = _board(
+                    KIND_PICKS, slot.key, start, embed, expired=now - start > PICKS_BOARD_LIFETIME
+                )
+                result.picks_boards += 1
+            kept.append(slot)
 
-        # Read once and handed down: both boards below are about the same set of
-        # graded cards, and working it out means reading every graded pick the
-        # bot has ever made.
-        graded = await self.tracker.graded_events(settings.tracking_since)
-        await self._publish_scorecard(guild, channel, settings, graded, result, force or created)
+        scorecard = _board(
+            KIND_SCORECARD,
+            BOARD_KEY,
+            None,
+            scorecard_embed(
+                build_scorecard(settings.tracking_since, await self.tracker.graded_events(settings.tracking_since)),
+                evaluation=self.evaluation_provider(),
+            ),
+        )
+        order = sorted(boards.values(), key=lambda board: (board.starts_at, board.key)) + [scorecard]
+        await self._arrange(guild, channel, order, kept, result, force)
 
-    async def _publish_scorecard(
+    async def _picks_slots(self, guild: discord.Guild, channel: discord.TextChannel) -> list[BoardSlot]:
+        """The messages kept in order here, taking in any board posted without a slot.
+
+        That is every board on the first pass after this was deployed, which
+        tracked one message per card; they are taken over as they are, and the
+        arrangement that follows puts them in order by editing them. It is also
+        whatever an older version of the bot posted if one ran in between -- a
+        test deploy rolled back -- because every version writes down which
+        message shows each board, and that record is read on every pass.
+        """
+        slots = await self.storage.board_slots(guild.id, channel.id)
+        held = {slot.message_id for slot in slots}
+        adopted = False
+        for kind in (KIND_PICKS, KIND_SCORECARD):
+            for key, post in (await self.storage.posts_of_kind(guild.id, kind)).items():
+                if post.channel_id != channel.id or post.message_id in held:
+                    continue
+                starts_at = None
+                if kind == KIND_PICKS:
+                    records = await self.tracker.records_for(key)
+                    starts_at = records[0].event_start if records else None
+                await self.storage.save_board_slot(
+                    guild.id, channel.id, post.message_id, kind, key, starts_at, post.signature
+                )
+                adopted = True
+        return await self.storage.board_slots(guild.id, channel.id) if adopted else slots
+
+    async def _arrange(
         self,
         guild: discord.Guild,
         channel: discord.TextChannel,
-        settings: GuildSettings,
-        graded: list[GradedEvent],
+        order: list[_Board],
+        slots: list[BoardSlot],
         result: PublishResult,
-        moved: bool,
+        force: bool,
+        *,
+        attempts: int = 2,
     ) -> None:
-        """The model's running record, kept at the foot of the picks channel.
+        """Show ``order`` top to bottom in this channel's slots, by editing them.
 
-        It belongs under the picks rather than in a channel of its own: it is the
-        answer to "should I believe any of this", and that question is asked
-        while reading the picks. ``moved`` re-sends it so a newly posted card's
-        board never leaves it stranded halfway up the channel.
-
-        It is the only thing the bot says about its own record now. There used
-        to be a recap under every graded card as well, saying how that night
-        went and what the running record was after it -- which is the picks
-        above it and this board below it, told a third time.
+        One board more than there are messages is one new message, posted at the
+        bottom, which is the only place Discord can put one. Then the messages
+        already here are edited from the bottom up, so that while the boards
+        shift down each of them is on screen somewhere throughout: a pass cut
+        short leaves a board shown twice for a moment, never one missing, and
+        the next pass finishes the job. A slot already showing its board is not
+        touched, so a pass where nothing moved costs nothing. Writes are spaced
+        to stay under Discord's per-channel edit limit.
         """
-        await self._upsert(
-            guild,
-            channel,
-            KIND_SCORECARD,
-            BOARD_KEY,
-            scorecard_embed(
-                build_scorecard(settings.tracking_since, graded),
-                evaluation=self.evaluation_provider(),
-            ),
-            result,
-            force=moved,
-            resend=moved,
+        if len(slots) > len(order):
+            # More messages than boards, which this version never produces on
+            # its own. One an older version replaced goes first -- it posts the
+            # scorecard again under every new card -- recognisable because the
+            # record of which message shows that board points somewhere else.
+            # Anything still over is let go from the top, as it is.
+            extra = len(slots) - len(order)
+            shown_by = {}
+            for kind in {slot.kind for slot in slots}:
+                for key, post in (await self.storage.posts_of_kind(guild.id, kind)).items():
+                    shown_by[(kind, key)] = post.message_id
+            replaced = [
+                slot for slot in slots
+                if shown_by.get((slot.kind, slot.key), slot.message_id) != slot.message_id
+            ][:extra]
+            for slot in replaced:
+                await self._release(guild, slot)
+            slots = [slot for slot in slots if slot not in replaced]
+            for slot in slots[: len(slots) - len(order)]:
+                await self._release(guild, slot)
+            slots = slots[len(slots) - len(order) :]
+
+        for board in order[len(slots) :]:
+            message = await channel.send(embed=board.embed)
+            await self._hold(guild, channel, message.id, board)
+            result.updated += 1
+            await asyncio.sleep(WRITE_SPACING)
+
+        for slot, board in reversed(list(zip(slots, order))):
+            if not force and (slot.kind, slot.key, slot.signature) == (board.kind, board.key, board.signature):
+                result.unchanged += 1
+                continue
+            try:
+                await channel.get_partial_message(slot.message_id).edit(embed=board.embed)
+            except discord.NotFound:
+                # Somebody deleted it. Forgotten, and arranged again: the board it
+                # held comes back at the bottom and the rest shift to make room.
+                await self.storage.delete_board_slot(guild.id, slot.message_id)
+                if attempts > 1:
+                    fresh = await self.storage.board_slots(guild.id, channel.id)
+                    await self._arrange(guild, channel, order, fresh, result, False, attempts=attempts - 1)
+                return
+            except discord.HTTPException as exc:
+                log.warning(
+                    "Could not update the %s board in #%s: HTTP %s, Discord code %s: %s",
+                    board.kind, channel.name, exc.status, exc.code, exc.text,
+                )
+                result.errors.append(f"update {board.kind} in #{channel.name}: HTTP {exc.status} {exc.text}")
+                continue
+            await self._hold(guild, channel, slot.message_id, board)
+            result.updated += 1
+            await asyncio.sleep(WRITE_SPACING)
+
+        # A card past its lifetime has been shown at the top, where its date puts
+        # it, with its final results. It is let go there, the message left as it
+        # is, so the channel stops redrawing it.
+        expired = {board.key for board in order if board.expired}
+        for slot in await self.storage.board_slots(guild.id, channel.id):
+            if slot.kind != KIND_PICKS or slot.key not in expired:
+                break
+            await self._release(guild, slot)
+
+    async def _hold(self, guild: discord.Guild, channel: discord.TextChannel, message_id: int, board: _Board) -> None:
+        """Write down that this message now shows this board.
+
+        The per-card record follows the board to its new message too, because
+        other things look a card's message up by the card: pick'em's title
+        links to it."""
+        await self.storage.save_board_slot(
+            guild.id, channel.id, message_id, board.kind, board.key, board.starts_at, board.signature
         )
+        await self.storage.save_post(guild.id, board.kind, board.key, channel.id, message_id, board.signature)
+
+    async def _release(self, guild: discord.Guild, slot: BoardSlot) -> None:
+        """Stop keeping a message in order, and leave it showing what it shows."""
+        await self.storage.delete_board_slot(guild.id, slot.message_id)
+        post = await self.storage.get_post(guild.id, slot.kind, slot.key)
+        if post is not None and post.message_id == slot.message_id:
+            await self.storage.delete_post(guild.id, slot.kind, slot.key)
 
     async def _publish_rankings(
         self,
@@ -635,7 +773,6 @@ class ChannelPublisher:
         result: PublishResult,
         *,
         force: bool = False,
-        resend: bool = False,
         view: discord.ui.View | None = None,
         extra: str = "",
     ) -> bool:
@@ -651,32 +788,28 @@ class ChannelPublisher:
         components = {"view": view} if view is not None else {}
 
         if post and post.channel_id == channel.id:
-            if not force and not resend and post.signature == signature:
+            if not force and post.signature == signature:
                 result.unchanged += 1
                 return False
             # A partial message edits without first fetching it, saving a request.
             message = channel.get_partial_message(post.message_id)
             try:
-                if resend:
-                    await message.delete()
-                else:
-                    await message.edit(embed=embed, **components)
-                    await self.storage.save_post(guild.id, kind, key, channel.id, post.message_id, signature)
-                    result.updated += 1
-                    await asyncio.sleep(WRITE_SPACING)
-                    return False
+                await message.edit(embed=embed, **components)
+                await self.storage.save_post(guild.id, kind, key, channel.id, post.message_id, signature)
+                result.updated += 1
+                await asyncio.sleep(WRITE_SPACING)
+                return False
             except discord.NotFound:
                 pass  # deleted by someone; send a fresh one below
             except discord.HTTPException as exc:
                 # Sending a replacement when the old message is still there would
                 # leave two of the same board behind. Said and counted as an error
                 # instead, so the caller can try again rather than wait an hour.
-                action = "move" if resend else "update"
                 log.warning(
-                    "Could not %s the %s board in #%s: HTTP %s, Discord code %s: %s",
-                    action, kind, channel.name, exc.status, exc.code, exc.text,
+                    "Could not update the %s board in #%s: HTTP %s, Discord code %s: %s",
+                    kind, channel.name, exc.status, exc.code, exc.text,
                 )
-                result.errors.append(f"{action} {kind} in #{channel.name}: HTTP {exc.status} {exc.text}")
+                result.errors.append(f"update {kind} in #{channel.name}: HTTP {exc.status} {exc.text}")
                 return False
 
         message = await channel.send(embed=embed, **components)

@@ -119,6 +119,25 @@ CREATE TABLE IF NOT EXISTS channel_posts (
     PRIMARY KEY (guild_id, kind, key)
 );
 
+-- The picks channel as a column of messages, and which board each shows right
+-- now. Cards are kept in date order by editing these in place: a new card
+-- earlier than the last one is one new message at the bottom and the contents
+-- shifting down, never a message deleted and posted again. Keyed by message, not
+-- by card, because what a message shows is the thing that changes.
+CREATE TABLE IF NOT EXISTS board_slots (
+    guild_id   INTEGER NOT NULL,
+    channel_id INTEGER NOT NULL,
+    message_id INTEGER NOT NULL,
+    kind       TEXT    NOT NULL,
+    key        TEXT    NOT NULL,
+    starts_at  TEXT,
+    signature  TEXT,
+    updated_at TEXT    NOT NULL,
+    PRIMARY KEY (guild_id, message_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_board_slots_channel ON board_slots (guild_id, channel_id);
+
 -- Live coverage: which updates have gone out for a bout, so restarts never repeat them.
 CREATE TABLE IF NOT EXISTS live_posts (
     bout_id   TEXT NOT NULL,

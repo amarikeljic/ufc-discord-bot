@@ -52,6 +52,21 @@ class Post(NamedTuple):
     signature: str | None = None
 
 
+class BoardSlot(NamedTuple):
+    """One message in a channel the bot keeps in order, and what it shows now.
+
+    The message stays where it is and its content moves: reordering a channel
+    is a matter of editing these, never of deleting one and posting again.
+    """
+
+    message_id: int
+    kind: str
+    key: str
+    starts_at: datetime | None
+    """The card's date, for a card; what orders the channel."""
+    signature: str | None
+
+
 class RankedState(NamedTuple):
     """Where a fighter stood on a board, and what they had done by then."""
 

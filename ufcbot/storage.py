@@ -11,6 +11,7 @@ from pathlib import Path
 import aiosqlite
 
 from .records import (
+    BoardSlot,
     CardBout,
     GuildSettings,
     PickemCard,
@@ -540,6 +541,66 @@ class Storage:
         ) as cursor:
             rows = await cursor.fetchall()
         return {r["key"]: Post(r["channel_id"], r["message_id"], r["signature"]) for r in rows}
+
+    async def board_slots(self, guild_id: int, channel_id: int) -> list[BoardSlot]:
+        """The messages kept in order in this channel, top of the channel first.
+
+        Message ids are snowflakes, so ordering by them is ordering by when each
+        was posted, which is where Discord shows it."""
+        async with self.db.execute(
+            "SELECT message_id, kind, key, starts_at, signature FROM board_slots "
+            "WHERE guild_id = ? AND channel_id = ? ORDER BY message_id",
+            (guild_id, channel_id),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return [
+            BoardSlot(r["message_id"], r["kind"], r["key"], _parse_dt(r["starts_at"]), r["signature"]) for r in rows
+        ]
+
+    async def save_board_slot(
+        self,
+        guild_id: int,
+        channel_id: int,
+        message_id: int,
+        kind: str,
+        key: str,
+        starts_at: datetime | None,
+        signature: str | None,
+    ) -> None:
+        """Write down what a message shows now."""
+        await self.db.execute(
+            """
+            INSERT INTO board_slots (guild_id, channel_id, message_id, kind, key, starts_at, signature, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, message_id) DO UPDATE SET
+                channel_id = excluded.channel_id,
+                kind       = excluded.kind,
+                key        = excluded.key,
+                starts_at  = excluded.starts_at,
+                signature  = excluded.signature,
+                updated_at = excluded.updated_at
+            """,
+            (
+                guild_id, channel_id, message_id, kind, key,
+                starts_at.isoformat() if starts_at else None, signature, datetime.now(UTC).isoformat(),
+            ),
+        )
+        await self.db.commit()
+
+    async def delete_board_slot(self, guild_id: int, message_id: int) -> None:
+        """Stop keeping a message in order. The message itself is left alone."""
+        await self.db.execute(
+            "DELETE FROM board_slots WHERE guild_id = ? AND message_id = ?", (guild_id, message_id)
+        )
+        await self.db.commit()
+
+    async def forget_board_slots_outside(self, guild_id: int, channel_id: int) -> int:
+        """Drop the slots this guild kept in any other channel, after it moved its board."""
+        cursor = await self.db.execute(
+            "DELETE FROM board_slots WHERE guild_id = ? AND channel_id != ?", (guild_id, channel_id)
+        )
+        await self.db.commit()
+        return cursor.rowcount
 
     async def live_posted_many(self, bout_ids: list[str]) -> dict[str, set[str]]:
         """Which updates have gone out for each of these bouts, in one query."""
@@ -1074,6 +1135,7 @@ class Storage:
         for table in (
             "synced_events",
             "channel_posts",
+            "board_slots",
             "pickem_picks",
             "guild_config",
         ):
