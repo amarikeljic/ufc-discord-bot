@@ -32,6 +32,10 @@ is missing is information rather than tuning. The band figure was taken when the
 professional graph was half its present size; the headline numbers above are on
 the current one.
 
+Re-run on 18 November 2026 with the archive grown to 981 fights on 91 cards:
+model 0.6251, opening line 0.6012, closing line 0.5945, and the model minus the
+closing line +0.0307 nats, 95% [+0.0119, +0.0484]. The same answer.
+
 Two numbers are worth re-running for. Backing the model's pick at the opening
 price returned +2.46% over those fights where backing the favourite returned
 -1.82%, the only positive figure here and still not distinguishable from zero:
@@ -60,7 +64,12 @@ from dotenv import load_dotenv
 
 from odds import ODDS_FILE, PRE_FIGHT
 
-K_VALUES = (32.0, 64.0, 128.0)
+# One Elo K, the one the model ships with. This used to build a matrix at each of
+# 32, 64 and 128 by setting ELO_K -- the boards' learning rate, not the model's
+# -- so the three came out identical, every walk was the K=128 model whatever it
+# reported choosing, and the build took three times as long. The figures above
+# are that model's. Which K to ship is evaluate.py's question; this one asks
+# what the model that ships is worth against the price.
 C_VALUES = (0.005, 0.02, 0.08)
 STAKE = 100.0
 """What pick'em risks on a pick, so the units below are its points."""
@@ -141,8 +150,9 @@ def market(archive: dict, which: str) -> dict:
 # -- the model ----------------------------------------------------------------
 
 
-def designs_by_k(data_dir: Path, ks=K_VALUES):
-    """One design matrix per candidate K, plus the bout behind each row pair."""
+def designs_by_k(data_dir: Path):
+    """The model's design matrix at the Elo K it ships with, keyed by that K as
+    the walk reads it, plus the bout behind each row pair."""
     from ufcbot.stats import career as career_mod
     from ufcbot.stats import dataset as ds
     from ufcbot.stats import graph as graph_mod
@@ -152,27 +162,19 @@ def designs_by_k(data_dir: Path, ks=K_VALUES):
     from ufcbot.util import normalise
 
     dataset = ds.load(data_dir)
-    out, keys = {}, None
-    for k in ks:
-        started = time.time()
-        career_mod.ELO_K = k
-        # A graph per pass, never shared. Its cursor only moves forward, so a
-        # second pass over a used one applies nothing and hands every fight the
-        # rating from the end of the data -- its own result included.
-        history = build_history(
-            dataset, keep_snapshots=True, graph=graph_mod.load(data_dir, normalise=normalise)
-        )
-        x, y, dates, _ = _design_matrix(history, dataset.fighters)
-        out[k] = Design(x=x, y=y, dates=dates)
-        if keys is None:
-            keys = [
-                (snap.on, normalise(snap.fighter_a), normalise(snap.fighter_b))
-                for snap in history.snapshots
-            ]
-        print(f"  K={k:<6g} {x.shape[0]:>6} rows x {x.shape[1]} features   "
-              f"{time.time() - started:.0f}s")
-    career_mod.ELO_K = 32.0
-    return out, keys
+    started = time.time()
+    k = career_mod.MODEL_ELO_K
+    history = build_history(
+        dataset, keep_snapshots=True, graph=graph_mod.load(data_dir, normalise=normalise)
+    )
+    x, y, dates, _ = _design_matrix(history, dataset.fighters)
+    keys = [
+        (snap.on, normalise(snap.fighter_a), normalise(snap.fighter_b))
+        for snap in history.snapshots
+    ]
+    print(f"  K={k:<6g} {x.shape[0]:>6} rows x {x.shape[1]} features   "
+          f"{time.time() - started:.0f}s")
+    return {k: Design(x=x, y=y, dates=dates)}, keys
 
 
 def walk(designs, keys, *, start: date, block_events: int):
@@ -192,7 +194,7 @@ def walk(designs, keys, *, start: date, block_events: int):
     def fit(x, y, c):
         return _linear(c).fit(x, y)
 
-    candidates = [Candidate(k, c) for k in K_VALUES for c in C_VALUES]
+    candidates = [Candidate(k, c) for k in designs for c in C_VALUES]
     dates = designs[candidates[0].k].dates
     events = np.unique(dates[dates >= start])
     out, chose = {}, []
@@ -343,7 +345,7 @@ def main(start_year: int, block: int) -> int:
     archive = json.loads(path.read_text(encoding="utf-8"))
     print(f"{len(archive)} priced bouts in {path}")
 
-    print("\nBuilding a design matrix per candidate K:")
+    print("\nBuilding the design matrix:")
     designs, keys = designs_by_k(data_dir)
     start = date(start_year, 1, 1)
 
