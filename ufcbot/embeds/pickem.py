@@ -41,6 +41,7 @@ RESULT_ICON = {"win": "✅", "loss": "❌", "void": "➖", None: "⏳"}
 # needs no label; the other two do, so neither can be mistaken for the first.
 NOT_POSTED = "Odds not posted yet"
 LAST_KNOWN = "⏸️ Last known odds · the market isn't answering right now"
+FIGHT_TIMES = "🕒 Fight times are estimates, to five minutes, and move as the card runs"
 
 
 def _lock_lines(event: Event, now: datetime) -> list[str]:
@@ -114,9 +115,15 @@ def by_win_rate(standings: list[PickemStanding]) -> list[PickemStanding]:
 # -- the card board in the pick'em channel -------------------------------------------
 
 
-def _board_bout_value(event: Event, bout: Bout, counts: dict[str, int], now: datetime) -> str:
+def _board_bout_value(
+    event: Event, bout: Bout, counts: dict[str, int], now: datetime, start: datetime | None = None
+) -> str:
     a, b = bout.fighters[0], bout.fighters[1]
     lines = []
+
+    if start is not None:
+        # A Discord timestamp, so everyone reads it in their own time zone.
+        lines.append(f"🕒 ≈ {discord.utils.format_dt(start, 't')}")
 
     if bout.completed and bout.winner_id:
         winner = bout.fighter(bout.winner_id)
@@ -153,14 +160,21 @@ def pickem_board_embed(
     *,
     now: datetime,
     picks_link: str | None = None,
+    starts: dict[str, datetime] | None = None,
 ) -> discord.Embed:
-    """The card's board: every fight, its price, and who the room is behind.
+    """The card's board: every fight, its price, who the room is behind, and
+    roughly when it starts.
 
     The title links to this card's picks board when there is one, so tapping it
     jumps to what the model said about the same fights rather than leaving
     Discord for a page the reader did not ask for. It falls back to ESPN where
     the picks channel is not set up.
+
+    ``starts`` are estimated first bells (see ``features.timing``) for the
+    fights that have not begun. Nobody publishes a time for each fight, so the
+    board says they are estimates once, at the top.
     """
+    starts = starts or {}
     embed = discord.Embed(
         title=truncate(f"🎯 Pick'em: {event.name}", 256),
         url=picks_link or event.espn_url,
@@ -168,13 +182,15 @@ def pickem_board_embed(
     )
     lines = [f"🗓️ {discord.utils.format_dt(event.start, 'F')}", *_lock_lines(event, now)]
     lines.append(f"👥 {players} playing" if players else "👥 Be the first to pick")
+    if starts:
+        lines.append(FIGHT_TIMES)
     lines += ["", "Right pick: points from the odds", "Underdogs pay more · wrong pick: -100"]
     embed.description = "\n".join(lines)
 
     for bout in event.fights[:25]:
         embed.add_field(
             name=truncate(bout.matchup, 256),
-            value=_board_bout_value(event, bout, counts.get(bout.id, {}), now),
+            value=_board_bout_value(event, bout, counts.get(bout.id, {}), now, starts.get(bout.id)),
             inline=False,
         )
     return stamp(embed)

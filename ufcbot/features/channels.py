@@ -46,6 +46,7 @@ from .pickem import (
     benchmarks,
     bout_status,
 )
+from .timing import estimate_first_bells, fight_clocks
 from .tracking import PredictionTracker, build_scorecard
 
 log = logging.getLogger(__name__)
@@ -698,12 +699,29 @@ class ChannelPublisher:
             channel,
             KIND_PICKEM,
             BOARD_KEY,
-            pickem_board_embed(event, counts, players, now=now, picks_link=link),
+            pickem_board_embed(
+                event, counts, players, now=now, picks_link=link, starts=await self._fight_times(event, now)
+            ),
             result,
             force=force,
             view=board_view(event.id, accepting=accepting),
             extra=f"{event.id}:accepting={accepting}:{link}",
         )
+
+    async def _fight_times(self, event: Event, now: datetime) -> dict[str, datetime]:
+        """Estimated first bells for the card's fights still to come.
+
+        From the schedule before the card, and from the play-by-play once it is
+        under way, so the times move with a card that runs early or late. Worth
+        a board without them rather than no board, so a failure is logged and
+        the board goes up as it is."""
+        clocks = {}
+        if self.data is not None and event.start <= now:
+            try:
+                clocks = await fight_clocks(self.data, event, now=now)
+            except Exception:  # an estimate is never worth the board
+                log.exception("Reading the fight times for %s failed", event.name)
+        return estimate_first_bells(event, now=now, clocks=clocks)
 
     async def _picks_link(self, guild: discord.Guild, event: Event) -> str | None:
         """A jump link to this card's message on the picks board, if there is one.

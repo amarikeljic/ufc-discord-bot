@@ -66,6 +66,13 @@ ODDS_HOST = "gamma-api.polymarket.com"
 # long after the post that caused it.
 LIVE_REFRESH_COOLDOWN = timedelta(seconds=45)
 
+# While a card is on, the pick'em board's fight times are redrawn this often even
+# when nothing has been posted: a fight running late moves every time after it,
+# and a delay is the one thing live coverage never posts about. Five minutes,
+# because the times are shown to five minutes, so a board this fresh is as
+# current as a board can say.
+PICKEM_TIMES_REDRAW = timedelta(minutes=5)
+
 # A board edit Discord refused during a card is tried again on the following
 # refreshes rather than left for the hourly pass. Bounded, because a refusal
 # that does not go away -- a lost permission -- would otherwise be retried
@@ -84,6 +91,8 @@ class JobsCog(commands.Cog):
         self._boards_stale = False
         # Refreshes in a row that left a board un-edited.
         self._board_failures = 0
+        # When the pick'em board was last drawn, for keeping its times current.
+        self._last_pickem_redraw: datetime | None = None
         # The outage this cog has already warned about, so it says it once.
         self._reported_outage: str | None = None
         self._outage_hours = 0.0
@@ -398,6 +407,7 @@ class JobsCog(commands.Cog):
         await self._close_finished_events()
         try:
             clean = await self._publish_boards()
+            self._last_pickem_redraw = now
         except Exception:  # never worth killing the live loop over
             log.exception("Refreshing the boards after a live update failed")
             clean = False
@@ -423,9 +433,31 @@ class JobsCog(commands.Cog):
         except Exception:
             log.exception("The first board refresh after start-up failed")
 
+    async def _keep_pickem_times(self) -> None:
+        """Redraw the pick'em boards every five minutes while a card is on.
+
+        Their fight times are re-estimated from the play-by-play on every draw,
+        so this is what moves them when a card runs late and nothing else has
+        happened to trigger a redraw. An unchanged board costs nothing: it is
+        compared before it is edited."""
+        now = discord.utils.utcnow()
+        if self._last_pickem_redraw is not None and now - self._last_pickem_redraw < PICKEM_TIMES_REDRAW:
+            return
+        self._last_pickem_redraw = now
+        try:
+            if not await self.bot.live.active_events():
+                return
+            for settings in await self.bot.storage.guilds_with_channels():
+                guild = self.bot.get_guild(settings.guild_id)
+                if guild is not None and settings.pickem_channel_id:
+                    await self.bot.publisher.publish_pickem(guild, settings)
+        except Exception:  # never worth the live loop
+            log.exception("Keeping the pick'em fight times current failed")
+
     @tasks.loop(seconds=15)
     async def live_loop(self) -> None:
         """Post live fight updates while a card is on. Cheap when nothing is happening."""
+        await self._keep_pickem_times()
         channels: list[discord.TextChannel] = []
         for settings in await self.bot.storage.guilds_with_live():
             guild = self.bot.get_guild(settings.guild_id)
