@@ -101,7 +101,7 @@ class UFCBot(commands.Bot):
         self.connected_since: datetime | None = None
         self.disconnected_since: datetime | None = None
         self.heartbeats: dict[str, datetime] = {}
-        self.status = StatusServer(self, host=config.status_host, port=config.status_port) if config.status_port else None
+        self.status_server = StatusServer(self, host=config.status_host, port=config.status_port) if config.status_port else None
 
     def touch_pickem(self, guild_id: int) -> None:
         """Redraw this guild's pick'em board once the picking has settled.
@@ -158,12 +158,12 @@ class UFCBot(commands.Bot):
     async def setup_hook(self) -> None:
         await self.http_client.start()
         await self.storage.connect()
-        if self.status is not None:
+        if self.status_server is not None:
             try:
-                await self.status.start()
+                await self.status_server.start()
             except OSError as exc:  # a port already taken costs the tile, never the bot
                 log.warning("Could not start the dashboard summary on port %s: %s", self.config.status_port, exc)
-                self.status = None
+                self.status_server = None
         # Stored picks follow the current scoring rules, even if they changed since.
         await self.pickem.apply_scoring()
         if self.config.enable_predictions:
@@ -218,8 +218,8 @@ class UFCBot(commands.Bot):
         log.info("Removed stored data for guild %s", guild.id)
 
     async def close(self) -> None:
-        if self.status is not None:
-            await self.status.stop()
+        if self.status_server is not None:
+            await self.status_server.stop()
         await super().close()
         await self.storage.close()
         await self.http_client.close()
