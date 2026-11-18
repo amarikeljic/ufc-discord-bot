@@ -121,10 +121,6 @@ def _board_bout_value(
     a, b = bout.fighters[0], bout.fighters[1]
     lines = []
 
-    if start is not None:
-        # A Discord timestamp, so everyone reads it in their own time zone.
-        lines.append(f"🕒 ≈ {discord.utils.format_dt(start, 't')}")
-
     if bout.completed and bout.winner_id:
         winner = bout.fighter(bout.winner_id)
         if winner:
@@ -150,6 +146,10 @@ def _board_bout_value(
 
     if bout_status(event, bout, now) == LOCKED and not (bout.completed and bout.winner_id):
         lines.append("🔒 Locked")
+    if start is not None:
+        # Last, under the shares. A Discord timestamp, so everyone reads it in
+        # their own time zone.
+        lines.append(f"🕒 ≈ {discord.utils.format_dt(start, 't')}")
     return truncate("\n".join(lines), FIELD_LIMIT)
 
 

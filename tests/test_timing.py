@@ -138,7 +138,7 @@ def test_the_board_shows_each_fight_its_time_and_says_they_are_estimates():
     by_name = {field.name: field.value for field in embed.fields}
 
     assert FIGHT_TIMES in embed.description
-    assert by_name["Al 12 vs. Bo 12"].startswith(f"🕒 ≈ {discord.utils.format_dt(starts['M12'], 't')}")
+    assert by_name["Al 12 vs. Bo 12"].endswith(f"🕒 ≈ {discord.utils.format_dt(starts['M12'], 't')}"), "at the bottom"
     assert "🕒" not in by_name["Al 13 vs. Bo 13"], "a fight that has happened shows its result instead"
 
 
