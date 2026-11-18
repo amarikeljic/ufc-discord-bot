@@ -36,6 +36,32 @@ WRITE_DELAY = 1.0
 # for the boards a quarter of an hour ago.
 LIVE_CARD_TTL = 60
 
+# How long a main card can be expected to run. Over the 25 cards before this was
+# written it ran a median of 2h40m, and the longest -- UFC 334, a five-round
+# title fight and a fight that went four -- was over in 3h49m. The event is
+# ended the moment the last result is in anyway, so this only has to be long
+# enough, never exact.
+MAIN_CARD_RUNS = timedelta(hours=4)
+
+
+def scheduled_times(event: Event, settings: GuildSettings) -> tuple[datetime, datetime]:
+    """(start, end) for a card's Discord event.
+
+    It starts with the first fight: the early prelims, the prelims where there
+    are none, the main card where there is nothing else. It ends where it always
+    has -- the server's duration after the part of the card it counts from --
+    unless that would end it before the main card is likely to be over, which
+    counting from the prelims with a short duration can.
+
+    Every time here is a UTC instant and all the arithmetic is in durations, so
+    a card either side of a daylight-saving change comes out right in Central
+    time, or in anyone's: Discord shows each member the event in their own zone.
+    """
+    start = event.first_fight_start
+    end = event.start_for(settings.start_anchor) + timedelta(minutes=settings.duration_minutes)
+    main_card = event.main_card_start or event.start
+    return start, max(end, main_card + MAIN_CARD_RUNS, start + timedelta(minutes=30))
+
 
 @dataclass(slots=True)
 class SyncResult:
@@ -134,8 +160,7 @@ class EventSyncer:
 
         for event in events:
             seen.add(event.id)
-            start = event.start_for(settings.start_anchor)
-            end = start + timedelta(minutes=settings.duration_minutes)
+            start, end = scheduled_times(event, settings)
 
             if start <= now + START_MARGIN:
                 # Already under way or over; Discord will not accept it.

@@ -251,19 +251,10 @@ class UFCData:
             )
             event.bouts, event.partial = loaded
 
-        # The event date is when the broadcast opens, so the main card time has to
-        # come from the fights on that segment.
-        main_card_starts = [
-            dt
-            for dt in (
-                parse_api_datetime(c.get("date"))
-                for c in competitions
-                if segment_rank((c.get("cardSegment") or {}).get("description")) == 0
-            )
-            if dt is not None
-        ]
-        if main_card_starts:
-            event.main_card_start = min(main_card_starts)
+        # The event date is when the broadcast opens, so when each part of the
+        # card starts has to come from the fights on it.
+        event.segment_starts = segment_starts(competitions)
+        event.main_card_start = event.segment_starts.get(0)
 
         return event
 
@@ -713,6 +704,21 @@ class UFCData:
 
 
 # -- module helpers ---------------------------------------------------------
+
+
+def segment_starts(competitions: list[dict]) -> dict[int, datetime]:
+    """Segment rank -> the earliest fight on that part of the card.
+
+    ESPN dates every fight on a segment with the segment's start, so the
+    earliest is the segment's. A fight on no known segment says nothing."""
+    starts: dict[int, datetime] = {}
+    for competition in competitions:
+        rank = segment_rank((competition.get("cardSegment") or {}).get("description"))
+        when = parse_api_datetime(competition.get("date"))
+        if rank > 2 or when is None:
+            continue
+        starts[rank] = min(starts.get(rank, when), when)
+    return starts
 
 
 def _athlete_id_from_uid(uid: str | None) -> str | None:

@@ -604,10 +604,12 @@ class UFCCog(commands.Cog):
         embed = discord.Embed(title="UFC sync settings", colour=UFC_RED)
         embed.add_field(name="Automatic sync", value="On" if settings.sync_enabled else "Off", inline=True)
         embed.add_field(name="Window", value=f"{settings.days_ahead} days", inline=True)
-        embed.add_field(name="Duration", value=f"{settings.duration_minutes} min", inline=True)
+        embed.add_field(name="Opens", value="With the first fight", inline=True)
         embed.add_field(
-            name="Starts at",
-            value="Main card" if settings.start_anchor == "main_card" else "Prelims",
+            name="Ends",
+            value=f"{settings.duration_minutes} min after the "
+            f"{'main card' if settings.start_anchor == 'main_card' else 'prelims'} starts, "
+            "and not before the main card is likely over",
             inline=True,
         )
         embed.add_field(
@@ -628,13 +630,13 @@ class UFCCog(commands.Cog):
     @sync.command(name="settings", description="Change how cards are mirrored into this server")
     @app_commands.describe(
         days_ahead="How far ahead to create events (1-365)",
-        duration_minutes="How long each event lasts (30-1440)",
-        starts_at="Whether the event starts at the main card or the prelims",
+        duration_minutes="How long after the main card (or prelims) starts each event ends (30-1440)",
+        counted_from="What the event's length counts from; the event itself always opens with the first fight",
         include_contender_series="Include Dana White's Contender Series cards",
         announce_channel="Channel for card changes and bot notices; omit to leave unchanged",
     )
     @app_commands.choices(
-        starts_at=[
+        counted_from=[
             app_commands.Choice(name="Main card", value="main_card"),
             app_commands.Choice(name="Prelims", value="prelims"),
         ]
@@ -644,7 +646,7 @@ class UFCCog(commands.Cog):
         interaction: discord.Interaction,
         days_ahead: int | None = None,
         duration_minutes: int | None = None,
-        starts_at: app_commands.Choice[str] | None = None,
+        counted_from: app_commands.Choice[str] | None = None,
         include_contender_series: bool | None = None,
         announce_channel: discord.TextChannel | None = None,
     ) -> None:
@@ -654,8 +656,8 @@ class UFCCog(commands.Cog):
             settings.days_ahead = max(1, min(365, days_ahead))
         if duration_minutes is not None:
             settings.duration_minutes = max(30, min(1440, duration_minutes))
-        if starts_at is not None and starts_at.value in VALID_ANCHORS:
-            settings.start_anchor = starts_at.value
+        if counted_from is not None and counted_from.value in VALID_ANCHORS:
+            settings.start_anchor = counted_from.value
         if include_contender_series is not None:
             settings.include_contender_series = include_contender_series
         if announce_channel is not None:

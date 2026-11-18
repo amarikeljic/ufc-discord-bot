@@ -185,6 +185,24 @@ class Event:
     first, or a bad response reads as a card losing fights.
     """
     main_card_start: datetime | None = None
+    segment_starts: dict[int, datetime] = field(default_factory=dict)
+    """When each part of the card starts, by ``segment_rank``: 0 the main card,
+    1 the prelims, 2 the early prelims. Only parts with a fight on them."""
+
+    @property
+    def first_fight_start(self) -> datetime:
+        """When the first fight is due: the early prelims, else the prelims, else
+        the main card.
+
+        Read from the fights on each part of the card rather than from the card's
+        own date, which is when ESPN expects the broadcast to open and can run
+        ahead of the card as listed: UFC 335 is dated two hours before its first
+        listed fight, for early prelims nobody has been booked on yet.
+        """
+        for rank in (2, 1, 0):
+            if rank in self.segment_starts:
+                return self.segment_starts[rank]
+        return self.start
 
     @property
     def location(self) -> str:
