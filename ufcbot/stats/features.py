@@ -1,8 +1,33 @@
 """Turn two fighters' histories into the numeric row the model consumes.
 
 Every feature is computed from what was known before the fight, so training rows
-never see the outcome they are predicting. Missing values stay NaN; the model
-handles them natively.
+never see the outcome they are predicting; ``tests/test_no_hindsight.py`` deletes
+every later fight, and rewrites the fight itself, and checks that no row moves.
+Missing values stay NaN; the model handles them natively.
+
+One exception the test cannot see, because it deletes fights rather than
+profiles: the tale of the tape is today's. Height, reach and date of birth do
+not change, but listed weight does, and for a past fight it can record a
+division the fighter only reached afterwards. Measured in November 2026 on
+fights from 2016: of 727 fighter-nights listed heavier than the division they
+fought in, 62% reached that weight only later, and those fighters won 57.9% of
+the fights in question. The column is worth about 0.0005 nats on rolling origin
+to May 2026 and nothing over the six months after, where there is little later
+for it to see. A weight read off the fighter's own earlier fights would fix it;
+that has not been tried.
+
+Tried and not kept, November 2026: a numbers-first analyst's arguments as
+feature groups -- wins over good opponents, recency-weighted and
+opponent-weighted stats, strikes landed against strikes absorbed, cardio and
+depth, body strikes, leg kicks against wrestlers, durability, main-event
+experience, takedowns allowed. None improved log loss by more than noise on
+rolling origin from 2016, and all of them together were worse over the six
+months held out after it. Most were here already: regressed on these columns
+they come back at R^2 0.82 to 1.00, and body share is exactly one minus the
+head and leg shares. What was genuinely new -- getting dropped, comebacks, a
+first main event -- carried no signal. Wins over good opponents came closest
+(-0.0008 nats, better on 84% of draws) and is the one worth asking again with
+more fights behind it.
 """
 
 from __future__ import annotations
