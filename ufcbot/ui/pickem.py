@@ -16,7 +16,6 @@ import discord
 
 from ..embeds.pickem import pickem_card_embed, pickem_picker_embed
 from ..features.pickem import NO_ODDS, OPEN, bout_status, points_for
-from ..models import ODDS_LAST_KNOWN
 from ..util import format_odds, truncate
 
 if TYPE_CHECKING:
@@ -127,11 +126,10 @@ class BoutSelect(discord.ui.Select):
         status = bout_status(picker.event, bout, now)
 
         options = []
-        stale = " · last known" if bout.odds_state == ODDS_LAST_KNOWN else ""
         for fighter in bout.fighters[:2]:
             odds = bout.odds.get(fighter.id)
             description = (
-                f"{format_odds(odds)} · +{points_for(odds)} pts if right{stale}" if odds is not None else "No odds yet"
+                f"{format_odds(odds)} · +{points_for(odds)} pts if right" if odds is not None else "No odds yet"
             )
             options.append(
                 discord.SelectOption(

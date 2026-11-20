@@ -215,3 +215,51 @@ async def test_no_card_on_means_no_redraw(storage):
     await JobsCog(bot)._keep_pickem_times()
 
     assert bot.redrawn == []
+
+
+# Before the card the times hold still until the line-up is confirmed.
+
+
+def a_publisher():
+    from ufcbot.features.channels import ChannelPublisher
+
+    return ChannelPublisher(None, None, None, None, pick_provider=lambda e: {}, evaluation_provider=lambda: None)
+
+
+def with_extra_prelim(event: Event) -> Event:
+    extra = Bout(id="M14", segment="Early Prelims", match_number=14, start=EARLY, competitors=2, rounds=3,
+                 fighters=[Fighter("14a", "Al 14"), Fighter("14b", "Bo 14")])
+    changed = ufc_334()
+    changed.bouts = [extra, *event.bouts]
+    return changed
+
+
+async def test_a_fight_added_once_does_not_move_the_times_until_it_reads_again():
+    publisher = a_publisher()
+    first = await publisher._fight_times(ufc_334(), DAY_BEFORE)
+
+    once = await publisher._fight_times(with_extra_prelim(ufc_334()), DAY_BEFORE)
+    assert once == first, "one read with a fight more is not believed"
+
+    twice = await publisher._fight_times(with_extra_prelim(ufc_334()), DAY_BEFORE)
+    assert twice != first and "M14" in twice, "the same line-up twice is"
+
+
+async def test_a_fight_that_drops_off_for_one_read_moves_nothing():
+    publisher = a_publisher()
+    first = await publisher._fight_times(ufc_334(), DAY_BEFORE)
+    short = ufc_334()
+    short.bouts = short.bouts[1:]
+
+    assert await publisher._fight_times(short, DAY_BEFORE) == first
+    assert await publisher._fight_times(ufc_334(), DAY_BEFORE) == first
+
+
+async def test_a_card_that_read_short_moves_nothing():
+    publisher = a_publisher()
+    first = await publisher._fight_times(ufc_334(), DAY_BEFORE)
+    partial = ufc_334()
+    partial.bouts, partial.partial = partial.bouts[2:], True
+
+    for _ in range(3):
+        assert await publisher._fight_times(partial, DAY_BEFORE) == first

@@ -15,7 +15,7 @@ from ..features.pickem import (
     points_for,
     segment_locks,
 )
-from ..models import ODDS_LAST_KNOWN, Bout, Event
+from ..models import Bout, Event
 from ..util import truncate
 from .common import (
     EMBED_BUDGET,
@@ -40,7 +40,6 @@ RESULT_ICON = {"win": "✅", "loss": "❌", "void": "➖", None: "⏳"}
 # The three states of a fight's price, as the board says them. A known price
 # needs no label; the other two do, so neither can be mistaken for the first.
 NOT_POSTED = "Odds not posted yet"
-LAST_KNOWN = "⏸️ Last known odds · the market isn't answering right now"
 FIGHT_TIMES = "🕒 Fight times are estimates, to five minutes, and move as the card runs"
 
 
@@ -135,9 +134,9 @@ def _board_bout_value(
             continue
         lines.append(join([f"{surname(fighter.display_name)} {fmt_odds(odds)}", f"+{points_for(odds)} pts"]))
     if not any(f.id in bout.odds for f in (a, b)):
+        # A price the market has stopped answering for is shown as it was, without
+        # a notice: the last price is the price, and saying so was noise.
         lines.append(NOT_POSTED)
-    elif bout.odds_state == ODDS_LAST_KNOWN:
-        lines.append(LAST_KNOWN)
 
     total = sum(counts.values())
     if total:

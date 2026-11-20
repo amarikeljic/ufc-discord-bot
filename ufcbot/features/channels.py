@@ -175,6 +175,10 @@ class ChannelPublisher:
         self.evaluation_provider = evaluation_provider
         # Optional: the career ledgers the ratings boards rank.
         self.ledger_provider = ledger_provider
+        # Fight times shown before a card, per card: (line-up they were worked
+        # out from, the times), and the line-up the last read gave.
+        self._held_times: dict[str, tuple[tuple[str, ...], dict[str, datetime]]] = {}
+        self._last_lineup: dict[str, tuple[str, ...]] = {}
 
     async def publish(self, guild: discord.Guild, settings: GuildSettings, *, force: bool = False) -> PublishResult:
         """Bring every configured board in this guild up to date.
@@ -714,9 +718,29 @@ class ChannelPublisher:
         From the schedule before the card, and from the play-by-play once it is
         under way, so the times move with a card that runs early or late. Worth
         a board without them rather than no board, so a failure is logged and
-        the board goes up as it is."""
+        the board goes up as it is.
+
+        Before the card the times are held. They hang on the line-up -- a part
+        of the card's fights are spread across its window, so one fight more or
+        less moves every time on it -- and ESPN's card is not steady: a read can
+        come back short, and fights drop off and come back from one hour to the
+        next. So a time moves before the card only when the line-up behind it
+        has read the same twice running from cards that read cleanly, the same
+        test a card change has to pass before it is announced."""
+        if event.start > now:
+            lineup = tuple(sorted(bout.id for bout in event.bouts))
+            held = self._held_times.get(event.id)
+            seen_before = self._last_lineup.get(event.id) == lineup
+            if not event.partial:
+                self._last_lineup[event.id] = lineup
+            if held is not None and (event.partial or (held[0] != lineup and not seen_before)):
+                return held[1]
+            starts = estimate_first_bells(event, now=now)
+            if not event.partial:
+                self._held_times[event.id] = (lineup, starts)
+            return starts
         clocks = {}
-        if self.data is not None and event.start <= now:
+        if self.data is not None:
             try:
                 clocks = await fight_clocks(self.data, event, now=now)
             except Exception:  # an estimate is never worth the board

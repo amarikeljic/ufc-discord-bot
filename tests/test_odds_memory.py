@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 from conftest import bout, card, fighter
 
 from ufcbot.embeds import pickem_board_embed
-from ufcbot.embeds.pickem import LAST_KNOWN, NOT_POSTED
+from ufcbot.embeds.pickem import NOT_POSTED
 from ufcbot.models import ODDS_KNOWN, ODDS_LAST_KNOWN, ODDS_NOT_POSTED
 from ufcbot.sources.espn import UFCData
 
@@ -124,7 +124,7 @@ async def test_a_replacement_does_not_inherit_the_old_fights_price(storage):
     assert (replaced.odds, replaced.odds_state) == ({}, ODDS_NOT_POSTED)
 
 
-async def test_the_board_tells_the_three_states_apart():
+async def test_the_board_shows_a_last_known_price_like_any_other():
     soon = datetime.now(UTC) + timedelta(days=2)
     pairs = [(fighter(f"{i}1", f"Al {i}"), fighter(f"{i}2", f"Bo {i}")) for i in (1, 2, 3)]
     known, stale, unpriced = (bout(f"B{i}", a, b, match=i) for i, (a, b) in enumerate(pairs, 1))
@@ -134,6 +134,6 @@ async def test_the_board_tells_the_three_states_apart():
     embed = pickem_board_embed(card(known, stale, unpriced, start=soon), {}, 0, now=datetime.now(UTC))
     shown = {field.name: field.value for field in embed.fields}
 
-    assert "-150" in shown[known.matchup] and LAST_KNOWN not in shown[known.matchup]
-    assert "-150" in shown[stale.matchup] and LAST_KNOWN in shown[stale.matchup]
+    assert "-150" in shown[stale.matchup], "the last known price is still shown"
+    assert len(shown[stale.matchup].splitlines()) == len(shown[known.matchup].splitlines()), "with no notice"
     assert NOT_POSTED in shown[unpriced.matchup] and "-150" not in shown[unpriced.matchup]
